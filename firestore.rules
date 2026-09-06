@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isFounder() {
+      return request.auth != null && (request.auth.token.role == 'FOUNDER' || request.auth.token.admin == true);
+    }
+
+    // Public catalog (Movies, Series, Episodes, Live Channels)
+    // Anyone (guests and device-authorized users) can read the catalog
+    // But ONLY Founders can write
+    match /catalog/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /media/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /episodes/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /live_channels/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /channels/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /events/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /featured/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /notifications/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /notificationEvents/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /catalog_metadata/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /media_requests/{requestId} {
+      allow read: if true;
+      allow create: if true;
+      allow update, delete: if isFounder();
+    }
+
+    match /devices/{deviceId} {
+      allow read: if true;
+      allow write: if true; // Devices register themselves
+    }
+
+    match /import_jobs/{jobId} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /import_items/{itemId} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    // App Settings & Live Configuration
+    match /config/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    match /settings/{document=**} {
+      allow read: if true;
+      allow write: if isFounder();
+    }
+
+    // User profiles
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if isFounder(); // Founder can see all profiles
+      allow update: if isFounder(); // Founder can update any profile (e.g. roles)
+    }
+
+    // Audit logs
+    match /audit_logs/{logId} {
+      allow read: if isFounder();
+      allow create: if request.auth != null; // Any logged user can create logs if needed, but usually it's admin
+      allow update, delete: if isFounder();
+    }
+
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

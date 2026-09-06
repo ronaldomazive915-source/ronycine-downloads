@@ -1,0 +1,6 @@
+{
+  "name": "RONYCINE",
+  "description": "RONYCINE - Sistema de streaming de filmes, séries e TV ao vivo com catálogo inteligente e painel administrativo direto.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

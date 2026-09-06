@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">playmoz.xyz</domain>
+        <domain includeSubdomains="true">embed.playmoz.xyz</domain>
+        <domain includeSubdomains="true">mgeb.top</domain>
+        <domain includeSubdomains="true">megaembed.top</domain>
+        <domain includeSubdomains="true">tmdb.org</domain>
+        <domain includeSubdomains="true">themoviedb.org</domain>
+        <domain includeSubdomains="true">youtube.com</domain>
+        <domain includeSubdomains="true">www.youtube.com</domain>
+        <domain includeSubdomains="true">googlevideo.com</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>
