@@ -20,7 +20,7 @@ import androidx.room.RoomDatabase
         TmdbAutoSyncHistoryEntity::class,
         DownloadEntity::class
     ],
-    version = 11,
+    version = 14,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

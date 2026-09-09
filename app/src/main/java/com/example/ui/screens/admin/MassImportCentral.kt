@@ -248,7 +248,8 @@ fun JobsList(
 
 @Composable
 fun JobItem(job: ImportJob, onClick: () -> Unit) {
-    val progress = if (job.total > 0) job.processed.toFloat() / job.total else 0f
+    val isDiscovering = job.status == "discovering"
+    val progress = if (isDiscovering) 0f else (if (job.total > 0) job.processed.toFloat() / job.total else 0f)
     val date = SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(job.createdAt))
     
     Card(
@@ -269,7 +270,7 @@ fun JobItem(job: ImportJob, onClick: () -> Unit) {
                     StatusBadge(job.status)
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        text = if (job.source == "tmdb_ids") "IDs TMDB" else "Importação",
+                        text = if (job.source == "mgeb_all") "Varrer Catálogo Completo" else if (job.source == "tmdb_ids") "IDs TMDB" else "Importação",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
@@ -286,12 +287,12 @@ fun JobItem(job: ImportJob, onClick: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "${job.processed} de ${job.total} processados",
+                    text = if (isDiscovering) "Buscando conteúdos disponíveis..." else "${job.processed} de ${job.total} processados",
                     color = Color.LightGray,
                     fontSize = 12.sp
                 )
                 Text(
-                    "${(progress * 100).toInt()}%",
+                    text = if (isDiscovering) "..." else "${(progress * 100).toInt()}%",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp
@@ -300,22 +301,33 @@ fun JobItem(job: ImportJob, onClick: () -> Unit) {
             
             Spacer(Modifier.height(8.dp))
             
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(CircleShape),
-                color = when (job.status) {
-                    "completed" -> Color(0xFF10B981)
-                    "failed" -> BrandRed
-                    "processing" -> BrandRed
-                    else -> Color.Gray
-                },
-                trackColor = Color.White.copy(alpha = 0.05f)
-            )
+            if (isDiscovering) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(CircleShape),
+                    color = BrandRed,
+                    trackColor = Color.White.copy(alpha = 0.05f)
+                )
+            } else {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(CircleShape),
+                    color = when (job.status) {
+                        "completed" -> Color(0xFF10B981)
+                        "failed" -> BrandRed
+                        "processing" -> BrandRed
+                        else -> Color.Gray
+                    },
+                    trackColor = Color.White.copy(alpha = 0.05f)
+                )
+            }
             
-            if (job.status == "processing" || job.status == "queued") {
+            if (job.status == "processing" || job.status == "queued" || isDiscovering) {
                 Spacer(Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -342,6 +354,7 @@ fun JobMiniStat(label: String, count: Int, color: Color) {
 @Composable
 fun StatusBadge(status: String) {
     val (label, color) = when (status) {
+        "discovering" -> "DESCOBRINDO" to Color(0xFFFF9800)
         "queued" -> "AGUARDANDO" to Color.Gray
         "processing" -> "PROCESSANDO" to Color(0xFF3B82F6)
         "paused" -> "PAUSADO" to Color(0xFFF59E0B)
@@ -446,7 +459,8 @@ fun JobStatusCard(
     onCancel: (String) -> Unit,
     onReprocessFailed: (String) -> Unit
 ) {
-    val progress = if (job.total > 0) job.processed.toFloat() / job.total else 0f
+    val isDiscovering = job.status == "discovering"
+    val progress = if (isDiscovering) 0f else (if (job.total > 0) job.processed.toFloat() / job.total else 0f)
     
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -461,7 +475,7 @@ fun JobStatusCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 StatusBadge(job.status)
-                if (job.status == "processing") {
+                if (job.status == "processing" || isDiscovering) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
@@ -480,26 +494,42 @@ fun JobStatusCard(
                 Column {
                     Text("Progresso Geral", color = Color.Gray, fontSize = 12.sp)
                     Text(
-                        "${job.processed} de ${job.total} itens",
+                        text = if (isDiscovering) "Varrendo Catálogo..." else "${job.processed} de ${job.total} itens",
                         color = Color.White,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Black
                     )
                 }
-                Text("${(progress * 100).toInt()}%", color = BrandRed, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                Text(
+                    text = if (isDiscovering) "..." else "${(progress * 100).toInt()}%",
+                    color = BrandRed,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Black
+                )
             }
             
             Spacer(Modifier.height(12.dp))
             
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(10.dp)
-                    .clip(CircleShape),
-                color = BrandRed,
-                trackColor = Color.White.copy(alpha = 0.05f)
-            )
+            if (isDiscovering) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(10.dp)
+                        .clip(CircleShape),
+                    color = BrandRed,
+                    trackColor = Color.White.copy(alpha = 0.05f)
+                )
+            } else {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(10.dp)
+                        .clip(CircleShape),
+                    color = BrandRed,
+                    trackColor = Color.White.copy(alpha = 0.05f)
+                )
+            }
             
             Spacer(Modifier.height(20.dp))
             
@@ -535,7 +565,7 @@ fun JobStatusCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 when (job.status) {
-                    "processing" -> {
+                    "processing", "discovering" -> {
                         Button(
                             onClick = { onPause(job.id) },
                             modifier = Modifier.weight(1f),
@@ -714,7 +744,7 @@ fun NewImportJobDialog(
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             SourceChip("Lista de IDs", source == "tmdb_ids", { source = "tmdb_ids" }, Modifier.weight(1f))
-                            SourceChip("Busca TMDB", source == "tmdb_search", { source = "tmdb_search" }, Modifier.weight(1f))
+                            SourceChip("Importar Tudo (Mgeb)", source == "mgeb_all", { source = "mgeb_all"; type = "both" }, Modifier.weight(1.5f))
                         }
                     }
                     
@@ -739,6 +769,37 @@ fun NewImportJobDialog(
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 SourceChip("Filmes", type == "movie", { type = "movie" }, Modifier.weight(1f))
                                 SourceChip("Séries", type == "tv", { type = "tv" }, Modifier.weight(1f))
+                            }
+                        }
+                    } else if (source == "mgeb_all") {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.White.copy(alpha = 0.03f), RoundedCornerShape(12.dp))
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                "IMPORTAÇÃO AUTOMÁTICA EM MASSA (MGEB)",
+                                color = BrandRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "Esta opção busca AUTOMATICAMENTE todo o catálogo disponível nas APIs configuradas. Não é necessário digitar IDs manualmente. O sistema fará a varredura, enfileiramento e classificação em segundo plano, mesmo com o app fechado.",
+                                color = Color.LightGray,
+                                fontSize = 11.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                        
+                        Column {
+                            Text("FILTRAR POR TIPO DE CONTEÚDO", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SourceChip("Filmes", type == "movie", { type = "movie" }, Modifier.weight(1f))
+                                SourceChip("Séries", type == "tv", { type = "tv" }, Modifier.weight(1f))
+                                SourceChip("Ambos", type == "both", { type = "both" }, Modifier.weight(1.2f))
                             }
                         }
                     } else {
@@ -779,9 +840,13 @@ fun NewImportJobDialog(
                 
                 Button(
                     onClick = {
-                        val ids = pastedIds.split(",")
-                            .mapNotNull { it.trim().toIntOrNull() }
-                            .map { it to type }
+                        val ids = if (source == "mgeb_all") {
+                            emptyList()
+                        } else {
+                            pastedIds.split(",")
+                                .mapNotNull { it.trim().toIntOrNull() }
+                                .map { it to type }
+                        }
                         
                         onStart(
                             type,
@@ -796,7 +861,7 @@ fun NewImportJobDialog(
                     modifier = Modifier.fillMaxWidth().height(54.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
                     shape = RoundedCornerShape(16.dp),
-                    enabled = source == "tmdb_ids" && pastedIds.isNotBlank()
+                    enabled = source == "mgeb_all" || (source == "tmdb_ids" && pastedIds.isNotBlank())
                 ) {
                     Text("INICIAR FILA DE IMPORTAÇÃO", fontWeight = FontWeight.Black)
                 }

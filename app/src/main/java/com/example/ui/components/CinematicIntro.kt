@@ -26,99 +26,48 @@ fun CinematicIntro(
     modifier: Modifier = Modifier
 ) {
     var stage by remember { mutableIntStateOf(0) }
-    val totalDuration = if (isFirstTime) 1900L else 750L
+    val totalDuration = if (isFirstTime) 800L else 400L
 
-    // Safety timeout fallback (strictly maximum 2.8 seconds)
+    // Safety timeout fallback
     LaunchedEffect(Unit) {
-        // Stage 1: Initial black canvas with expanding center red point of light
-        stage = 1
-        delay(if (isFirstTime) 350L else 150L)
-
-        // Stage 2: Logo and title emergence + glow bloom
+        // Stage 1: Quick fade in
         stage = 2
-        delay(if (isFirstTime) 650L else 250L)
+        delay(if (isFirstTime) 600L else 300L)
 
-        // Stage 3: Light flare sweep through the logo
-        stage = 3
-        delay(if (isFirstTime) 550L else 200L)
-
-        // Stage 4: Smooth fade-out to Home
+        // Stage 2: Quick fade out
         stage = 4
-        delay(if (isFirstTime) 350L else 150L)
+        delay(if (isFirstTime) 200L else 100L)
 
         onIntroFinished()
     }
 
     // Light Glow Animation
     val glowScale by animateFloatAsState(
-        targetValue = when (stage) {
-            0 -> 0.1f
-            1 -> 0.7f
-            2 -> 1.0f
-            3 -> 1.15f
-            else -> 0.8f
-        },
-        animationSpec = tween(
-            durationMillis = if (isFirstTime) 600 else 250,
-            easing = FastOutSlowInEasing
-        ),
+        targetValue = if (stage >= 2) 1.0f else 0.5f,
+        animationSpec = tween(durationMillis = 300),
         label = "glowScale"
     )
 
     val glowAlpha by animateFloatAsState(
-        targetValue = when (stage) {
-            0 -> 0f
-            1 -> 0.45f
-            2 -> 0.65f
-            3 -> 0.8f
-            else -> 0f
-        },
-        animationSpec = tween(
-            durationMillis = if (isFirstTime) 500 else 200,
-            easing = LinearEasing
-        ),
+        targetValue = if (stage >= 2) 0.65f else 0f,
+        animationSpec = tween(durationMillis = 300),
         label = "glowAlpha"
     )
 
     // Logo scale and opacity
     val logoScale by animateFloatAsState(
-        targetValue = when (stage) {
-            0 -> 0.75f
-            1 -> 0.85f
-            2, 3 -> 1.0f
-            else -> 0.95f
-        },
-        animationSpec = tween(
-            durationMillis = if (isFirstTime) 700 else 250,
-            easing = FastOutSlowInEasing
-        ),
+        targetValue = if (stage >= 2) 1.0f else 0.8f,
+        animationSpec = tween(durationMillis = 300),
         label = "logoScale"
     )
 
     val logoAlpha by animateFloatAsState(
-        targetValue = when (stage) {
-            0, 1 -> 0f
-            2, 3 -> 1f
-            else -> 0f
-        },
-        animationSpec = tween(
-            durationMillis = if (isFirstTime) 500 else 200,
-            easing = FastOutSlowInEasing
-        ),
+        targetValue = if (stage >= 2) 1f else 0f,
+        animationSpec = tween(durationMillis = 300),
         label = "logoAlpha"
     )
 
-    // Shimmer flare transition
-    val infiniteTransition = rememberInfiniteTransition(label = "shimmer")
-    val shimmerTranslate by infiniteTransition.animateFloat(
-        initialValue = -150f,
-        targetValue = 250f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1100, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "shimmerSweep"
-    )
+
 
     Box(
         modifier = modifier
@@ -166,25 +115,22 @@ fun CinematicIntro(
                     fontWeight = FontWeight.Black
                 )
 
-                // Light streak highlight on the badge
-                if (stage >= 2) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        Color.White.copy(alpha = 0.3f),
-                                        Color.Transparent
-                                    ),
-                                    start = androidx.compose.ui.geometry.Offset(shimmerTranslate, 0f),
-                                    end = androidx.compose.ui.geometry.Offset(shimmerTranslate + 60f, 100f)
-                                ),
-                                shape = RoundedCornerShape(18.dp)
-                            )
-                    )
-                }
+
+                // Light streak highlight on the badge (static)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            brush = Brush.linearGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    Color.White.copy(alpha = 0.2f),
+                                    Color.Transparent
+                                )
+                            ),
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                )
             }
 
             Spacer(modifier = Modifier.height(18.dp))

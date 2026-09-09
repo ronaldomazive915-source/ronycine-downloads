@@ -161,10 +161,8 @@ fun LivePlayerScreen(
     LaunchedEffect(isFullscreen) {
         if (activity != null) {
             try {
-                activity.requestedOrientation = if (isFullscreen) {
-                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-                } else {
-                    ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                if (isFullscreen) {
+                    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                 }
             } catch (_: Exception) {}
             try {

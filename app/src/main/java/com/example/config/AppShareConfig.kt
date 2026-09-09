@@ -25,28 +25,31 @@ import java.util.EnumMap
 object AppShareConfig {
     const val APP_NAME = "RONYCINE"
     
-    // Default URLs - Admin can dynamically override these in AdminScreen / Firebase
-    var defaultInstallUrl: String = "https://ronycine.app/download"
-    var defaultApkUrl: String = "https://ronycine.app/ronycine.apk"
+    // Configuração Centralizada da URL de Atualização (Requisito 7)
+    const val UPDATE_APK_URL = "https://github.com/ronaldomazive915-source/ronycine-downloads/releases/download/v1.1.0/RONYCINE.apk"
+    
+    // Default URLs - Official APK release URL
+    var defaultInstallUrl: String = UPDATE_APK_URL
+    var defaultApkUrl: String = UPDATE_APK_URL
     var defaultPlayStoreUrl: String = "https://play.google.com/store/apps/details?id=com.aistudio.playfilmeplus.app"
 
-    const val CURRENT_VERSION_NAME = "1.0.0"
-    const val CURRENT_VERSION_CODE = 100
-    const val MIN_SUPPORTED_VERSION_CODE = 100
+    const val CURRENT_VERSION_NAME = "1.1.1"
+    const val CURRENT_VERSION_CODE = 12
+    const val MIN_SUPPORTED_VERSION_CODE = 11
 
     /**
-     * Formats the official share text message as specified in Requirement 2.
+     * Formats the official share text message as specified in the exact user requirements.
      */
     fun getShareTextMessage(installUrl: String = defaultInstallUrl): String {
         return """
             🎬 RONYCINE
 
-            Assista filmes e séries no RONYCINE.
+            Assista seus filmes e séries favoritos em um só lugar.
 
-            Instale o aplicativo pelo link:
+            📲 Baixe o aplicativo RONYCINE:
             $installUrl
 
-            Baixe e aproveite o RONYCINE.
+            🚀 Instale e aproveite!
         """.trimIndent()
     }
 

@@ -104,6 +104,24 @@ object AdminRegistry {
             icon = Icons.Default.LiveTv,
             testTag = "admin_menu_tv"
         ),
+        AdminModule(
+            id = "gerenciador_players",
+            section = AdminSection.PLAYERS,
+            title = "Players",
+            subtitle = "Configurar fontes, URLs e fallbacks de vídeo",
+            category = AdminCategory.CONTEUDO,
+            icon = Icons.Default.PlayCircleOutline,
+            testTag = "admin_menu_players"
+        ),
+        AdminModule(
+            id = "sincronizacao_automatica",
+            section = AdminSection.SINCRONIZACAO_AUTOMATICA,
+            title = "Sincronização Automática",
+            subtitle = "Automação, monitoramento e fila de importação de conteúdos",
+            category = AdminCategory.CONTEUDO,
+            icon = Icons.Default.AutoMode,
+            testTag = "admin_menu_sincronizacao_automatica"
+        ),
 
         // 3. USUÁRIOS E DISPOSITIVOS
         AdminModule(
@@ -162,6 +180,15 @@ object AdminRegistry {
             icon = Icons.Default.PlaylistAddCheck,
             testTag = "admin_menu_pedidos"
         ),
+        AdminModule(
+            id = "cine_config",
+            section = AdminSection.CINE_CONFIG,
+            title = "Configurações do Cine",
+            subtitle = "Personalize o assistente de IA, avatar, personalidade e status",
+            category = AdminCategory.COMUNICACAO,
+            icon = Icons.Default.SmartToy,
+            testTag = "admin_menu_cine_config"
+        ),
 
         // 5. ATUALIZAÇÕES
         AdminModule(
@@ -190,6 +217,15 @@ object AdminRegistry {
             category = AdminCategory.ATUALIZACOES,
             icon = Icons.Default.SettingsRemote,
             testTag = "admin_menu_controle_dispositivo"
+        ),
+        AdminModule(
+            id = "alteracoes_pendentes",
+            section = AdminSection.ALTERACOES_PENDENTES,
+            title = "Alterações Pendentes",
+            subtitle = "Revisar e publicar alterações de catálogo e sistema",
+            category = AdminCategory.ATUALIZACOES,
+            icon = Icons.Default.PendingActions,
+            testTag = "admin_menu_alteracoes_pendentes"
         ),
 
         // 6. SISTEMA

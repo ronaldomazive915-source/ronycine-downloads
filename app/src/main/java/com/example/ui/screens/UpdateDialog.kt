@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.os.Build
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -76,10 +78,11 @@ fun UpdateDialog(
         Column(
             modifier = Modifier
                 .background(Color(0xFF1E1E1E), RoundedCornerShape(16.dp))
-                .padding(24.dp)
+                .padding(20.dp)
                 .fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Ícone do Estado Atual (Requisito 11, 12, 14)
             Box(
                 modifier = Modifier
                     .size(56.dp)
@@ -101,6 +104,7 @@ fun UpdateDialog(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // Título do Estado de Download (Mapeamento de Estados Reais - Requisito 12)
             Text(
                 text = when (downloadState) {
                     is UpdateDownloadState.Downloading -> "BAIXANDO ATUALIZAÇÃO"
@@ -115,8 +119,32 @@ fun UpdateDialog(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
+            // 1. INFORMAÇÕES DA ATUALIZAÇÃO (Requisito 11)
+            val pInfo = try {
+                context.packageManager.getPackageInfo(context.packageName, 0)
+            } catch (e: Exception) { null }
+            val currentVerName = pInfo?.versionName ?: "1.1.0"
+            val currentVerCode = if (pInfo != null) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    pInfo.longVersionCode.toInt()
+                } else {
+                    @Suppress("DEPRECATION") pInfo.versionCode
+                }
+            } else 11
+
+            Text(
+                text = "Versão atual: v$currentVerName ($currentVerCode) ➔ Nova versão: v$effectiveVersionName ($effectiveVersionCode)",
+                color = Color.LightGray,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Exibição e controle de progresso ou notas de lançamento dependendo do estado
             when (val state = downloadState) {
                 is UpdateDownloadState.Downloading -> {
                     Text(
@@ -138,7 +166,7 @@ fun UpdateDialog(
                     val downloadedStr = UpdateManager.formatFileSize(state.downloadedBytes)
                     val totalStr = if (state.totalBytes > 0) UpdateManager.formatFileSize(state.totalBytes) else "..."
                     Text(
-                        text = "$downloadedStr / $totalStr",
+                        text = "Baixando atualização: $downloadedStr / $totalStr",
                         color = Color.Gray,
                         fontSize = 12.sp
                     )
@@ -157,14 +185,15 @@ fun UpdateDialog(
                 }
 
                 is UpdateDownloadState.ReadyToInstall -> {
-                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Arquivo verificado com sucesso. O instalador do Android será aberto para confirmar a atualização.",
+                        text = "O download foi concluído com sucesso. O instalador do Android será aberto para concluir a atualização.",
                         color = Color.LightGray,
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // 2. BOTÃO PRINCIPAL "INSTALAR" (Requisito 11)
                     Button(
                         onClick = { UpdateManager.installApk(context, state.file) },
                         colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
@@ -175,14 +204,15 @@ fun UpdateDialog(
                 }
 
                 is UpdateDownloadState.Error -> {
-                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = state.message,
+                        text = "Não foi possível concluir a atualização:\n${state.message}",
                         color = Color(0xFFFF6B6B),
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center
                     )
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // 2. BOTÃO PRINCIPAL "TENTAR NOVAMENTE" (Requisito 11, 12)
                     Button(
                         onClick = {
                             if (isApkConfigured) {
@@ -204,26 +234,29 @@ fun UpdateDialog(
                     ) {
                         Text("TENTAR NOVAMENTE", fontWeight = FontWeight.Bold)
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Spacer(modifier = Modifier.height(10.dp))
+                    
+                    // 3. BOTÃO SECUNDÁRIO "FECHAR" (Requisito 11)
                     TextButton(onClick = onDismiss) {
                         Text("FECHAR", color = Color.Gray)
                     }
                 }
 
                 UpdateDownloadState.Idle -> {
-                    Text(
-                        text = "Uma nova versão do RONYCINE está disponível.",
-                        color = Color.LightGray,
-                        fontSize = 14.sp,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Versão v$effectiveVersionName (Build $effectiveVersionCode)",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
+                    val notes = remoteConfig.latestReleaseNotes.ifBlank { "Melhorias de desempenho, correções e novos recursos." }
+                    Surface(
+                        color = Color(0xFF141414),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = notes,
+                            color = Color(0xFFAAAAAA),
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
 
                     if (!isApkConfigured) {
                         Spacer(modifier = Modifier.height(10.dp))
@@ -242,22 +275,9 @@ fun UpdateDialog(
                         }
                     }
 
-                    val notes = remoteConfig.latestReleaseNotes.ifBlank { "Melhorias de desempenho, correções e novos recursos." }
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Surface(
-                        color = Color(0xFF141414),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            text = notes,
-                            color = Color(0xFFAAAAAA),
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(12.dp)
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    // 2. BOTÃO PRINCIPAL "ATUALIZAR" (Requisito 11)
                     Button(
                         onClick = {
                             if (isApkConfigured) {
@@ -283,9 +303,72 @@ fun UpdateDialog(
                             fontWeight = FontWeight.Bold
                         )
                     }
+
                     Spacer(modifier = Modifier.height(10.dp))
+
+                    // 3. BOTÃO SECUNDÁRIO "AGORA NÃO" / "MAIS TARDE" (Requisito 11)
                     TextButton(onClick = onDismiss) {
                         Text("MAIS TARDE", color = Color.Gray)
+                    }
+                }
+            }
+
+            // 4. ÁREA "PRECISA DE AJUDA?" (Requisitos 11, 14, 17)
+            val isError = downloadState is UpdateDownloadState.Error
+            Spacer(modifier = Modifier.height(16.dp))
+            Surface(
+                color = if (isError) Color(0xFF3B1E1E) else Color(0xFF161616),
+                border = androidx.compose.foundation.BorderStroke(
+                    width = 1.dp,
+                    color = if (isError) BrandRed else Color(0xFF2E2E2E)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "PRECISA DE AJUDA?",
+                        color = if (isError) BrandRed else Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Se ocorrer algum problema durante o download ou a instalação da atualização, entre em contacto com o nosso suporte.",
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 15.sp
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    
+                    // 5. BOTÃO "FALAR COM O SUPORTE" (WhatsApp) (Requisitos 11, 14)
+                    Button(
+                        onClick = {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://wa.me/qr/EWME3ZBA552PM1")).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(context, "Não foi possível abrir o WhatsApp.", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366)), // WhatsApp Green
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "FALAR COM O SUPORTE",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }

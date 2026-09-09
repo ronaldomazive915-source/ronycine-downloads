@@ -48,6 +48,9 @@ fun AdminControleRemotoScreen(viewModel: AdminViewModel) {
     // Form state for remote config
     var maintenanceMode by remember { mutableStateOf(remoteConfig.maintenanceMode) }
     var maintenanceMsg by remember { mutableStateOf(remoteConfig.maintenanceMessage) }
+    var selectedDurationMinutes by remember { mutableStateOf(120) } // default 2 hours
+    var showMaintenanceDialog by remember { mutableStateOf(false) }
+    var pendingMaintenanceState by remember { mutableStateOf(false) }
     var enableDownloads by remember { mutableStateOf(remoteConfig.enableDownloads) }
     var enableRequests by remember { mutableStateOf(remoteConfig.enableRequests) }
     var enableLiveTV by remember { mutableStateOf(remoteConfig.enableLiveTV) }

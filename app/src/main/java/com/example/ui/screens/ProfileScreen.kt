@@ -1,11 +1,14 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,12 +28,18 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.config.AppShareConfig
+import com.example.data.remote.UserProfile
+import com.example.ui.components.ProfileAvatar
+import com.example.ui.components.ProfilePhotoActionSheet
+import com.example.ui.components.AvatarSelectionSheet
 import com.example.ui.components.ShareAppModal
+import com.example.ui.components.VerifiedBadge
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
@@ -40,6 +49,7 @@ import com.example.ui.theme.TextSecondary
 import com.example.ui.viewmodel.AuthState
 import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.MainViewModel
+import com.example.ui.viewmodel.ProfileOpState
 import com.example.ui.viewmodel.UsernameCheckState
 
 @Composable
@@ -52,28 +62,196 @@ fun ProfileScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToAdmin: () -> Unit,
     onNavigateToLogin: () -> Unit,
+    onNavigateToProfileSelection: () -> Unit = {},
+    onNavigateToCreateProfile: () -> Unit = {},
+    onNavigateToInfo: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var showShareModal by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
     var showLogoutConfirmDialog by remember { mutableStateOf(false) }
+    var showPhotoActionSheet by remember { mutableStateOf(false) }
+    var showAvatarPickerSheet by remember { mutableStateOf(false) }
+    var showEditProfileDialog by remember { mutableStateOf(false) }
     var newUsernameInput by remember { mutableStateOf("") }
 
     val authState by authViewModel.authState.collectAsState()
     val usernameCheckState by authViewModel.usernameCheckState.collectAsState()
     val currentUser by authViewModel.currentUser.collectAsState()
     val activeProfile by authViewModel.activeProfile.collectAsState()
+    val userProfiles by authViewModel.userProfiles.collectAsState()
+    val profileOpState by authViewModel.profileOpState.collectAsState()
 
     // Activity stats
     val myList by viewModel.myList.collectAsState()
     val continueWatching by viewModel.continueWatching.collectAsState()
     val watchHistory by viewModel.watchHistory.collectAsState()
 
+    // Feedback on profile operations
+    LaunchedEffect(profileOpState) {
+        when (val state = profileOpState) {
+            is ProfileOpState.Success -> {
+                Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
+                authViewModel.clearProfileOpState()
+            }
+            is ProfileOpState.Error -> {
+                Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
+                authViewModel.clearProfileOpState()
+            }
+            else -> {}
+        }
+    }
+
     if (showShareModal) {
         ShareAppModal(
             installUrl = AppShareConfig.defaultInstallUrl,
             onDismissRequest = { showShareModal = false }
+        )
+    }
+
+    // Main Profile Photo Action Sheet (Camera, Gallery, Catalog, Download, Remove)
+    if (showPhotoActionSheet && activeProfile != null) {
+        ProfilePhotoActionSheet(
+            profile = activeProfile,
+            onDismissRequest = { showPhotoActionSheet = false },
+            onPhotoSelected = { bytes ->
+                authViewModel.updateActiveProfileAvatar(presetUrl = null, imageBytes = bytes)
+            },
+            onOpenPresetCatalog = {
+                showAvatarPickerSheet = true
+            },
+            onRemovePhoto = {
+                authViewModel.removeActiveProfilePhoto()
+            },
+            onDownloadPhoto = {
+                authViewModel.downloadProfilePhoto(context, activeProfile!!) { msg ->
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    // Avatar Picker Sheet for Active Profile
+    if (showAvatarPickerSheet) {
+        AvatarSelectionSheet(
+            currentAvatarUrl = activeProfile?.avatarUrl,
+            onDismissRequest = { showAvatarPickerSheet = false },
+            onAvatarSelected = { presetUrl, imageBytes ->
+                authViewModel.updateActiveProfileAvatar(presetUrl, imageBytes)
+            }
+        )
+    }
+
+    // Edit Active Profile Name Dialog
+    if (showEditProfileDialog && activeProfile != null) {
+        var editNameInput by remember { mutableStateOf(activeProfile?.name ?: "") }
+        var editNameError by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { showEditProfileDialog = false },
+            containerColor = DarkSurface,
+            shape = RoundedCornerShape(16.dp),
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = null,
+                        tint = BrandRed,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "EDITAR PERFIL",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = "Altere o nome e preferências do perfil ativo.",
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+
+                    OutlinedTextField(
+                        value = editNameInput,
+                        onValueChange = {
+                            if (it.length <= 30) {
+                                editNameInput = it
+                                editNameError = null
+                            }
+                        },
+                        label = { Text("Nome do Perfil", color = Color.Gray) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = DarkBackground,
+                            unfocusedContainerColor = DarkBackground,
+                            focusedBorderColor = BrandRed,
+                            unfocusedBorderColor = CardBorder,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = BrandRed
+                        )
+                    )
+
+                    if (editNameError != null) {
+                        Text(
+                            text = editNameError!!,
+                            color = Color(0xFFEF4444),
+                            fontSize = 11.5.sp
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            showEditProfileDialog = false
+                            showAvatarPickerSheet = true
+                        },
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, CardBorder)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = null,
+                            tint = BrandRed,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Alterar Foto / Avatar", color = Color.White, fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = editNameInput.trim()
+                        if (trimmed.length < 2) {
+                            editNameError = "Digite um nome com pelo menos 2 caracteres."
+                            return@Button
+                        }
+                        showEditProfileDialog = false
+                        activeProfile?.let { prof ->
+                            authViewModel.updateProfile(prof, trimmed)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("SALVAR", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEditProfileDialog = false }) {
+                    Text("CANCELAR", color = Color.Gray, fontSize = 12.sp)
+                }
+            }
         )
     }
 
@@ -415,7 +593,7 @@ fun ProfileScreen(
         }
 
         // ---------------------------------------------------------
-        // 1. Unified Profile Header / Visitor Card
+        // 1. Unified Profile Header / Card
         // ---------------------------------------------------------
         if (currentUser != null) {
             Card(
@@ -434,31 +612,16 @@ fun ProfileScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Profile Avatar with subtle glow
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(CircleShape)
-                                .background(DarkSurfaceVariant)
-                                .border(2.dp, BrandRed, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (activeProfile?.avatarUrl != null && activeProfile?.avatarUrl != "DEFAULT") {
-                                AsyncImage(
-                                    model = activeProfile?.avatarUrl,
-                                    contentDescription = null,
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = Icons.Default.Person,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                            }
-                        }
+                        // Profile Avatar with Camera Click Overlay
+                        ProfileAvatar(
+                            profile = activeProfile,
+                            size = 68.dp,
+                            borderWidth = 2.dp,
+                            borderColor = BrandRed,
+                            showCameraBadge = true,
+                            testTag = "profile_avatar_box",
+                            onClick = { showPhotoActionSheet = true }
+                        )
 
                         Spacer(modifier = Modifier.width(14.dp))
 
@@ -468,22 +631,47 @@ fun ProfileScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Text(
-                                    text = activeProfile?.name ?: currentUser?.displayName ?: "Usuário",
+                                    text = activeProfile?.name ?: currentUser?.displayName ?: "Perfil Principal",
                                     color = Color.White,
                                     fontSize = 18.sp,
                                     fontWeight = FontWeight.Black,
                                     maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
                                 )
+
+                                if (activeProfile?.isVerified == true || currentUser?.isVerified == true) {
+                                    VerifiedBadge(size = 18.dp)
+                                }
+
+                                IconButton(
+                                    onClick = { showEditProfileDialog = true },
+                                    modifier = Modifier.size(22.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Edit,
+                                        contentDescription = "Editar Perfil",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
                             }
 
                             if (!currentUser?.username.isNullOrBlank()) {
-                                Text(
-                                    text = currentUser!!.username!!,
-                                    color = BrandRed,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = currentUser!!.username!!,
+                                        color = BrandRed,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    if (activeProfile?.isVerified == true || currentUser?.isVerified == true) {
+                                        VerifiedBadge(size = 14.dp)
+                                    }
+                                }
                             }
 
                             Text(
@@ -522,6 +710,126 @@ fun ProfileScreen(
                         }
                     }
 
+                    // ---------------------------------------------------------
+                    // Quick Profile Selector Row (Perfis da Conta)
+                    // ---------------------------------------------------------
+                    HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
+
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "PERFIS DA CONTA (${userProfiles.size}/5)",
+                                color = TextSecondary,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp
+                            )
+
+                            Text(
+                                text = "Toque para alternar",
+                                color = Color.Gray,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(userProfiles, key = { it.id }) { prof ->
+                                val isActive = activeProfile?.id == prof.id
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .width(62.dp)
+                                        .clickable {
+                                            if (!isActive) {
+                                                authViewModel.selectProfile(prof)
+                                                Toast.makeText(context, "Perfil alterado para ${prof.name}", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        .testTag("profile_item_${prof.id}")
+                                ) {
+                                    ProfileAvatar(
+                                        profile = prof,
+                                        size = 50.dp,
+                                        borderWidth = if (isActive) 2.5.dp else 1.dp,
+                                        borderColor = if (isActive) BrandRed else CardBorder,
+                                        showActiveCheck = isActive,
+                                        testTag = "profile_avatar_${prof.id}"
+                                    )
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            text = prof.name,
+                                            color = if (isActive) Color.White else TextSecondary,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        if (prof.isVerified) {
+                                            VerifiedBadge(size = 11.dp, showToastOnClick = false)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Add profile button if under max (5)
+                            if (userProfiles.size < 5) {
+                                item {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier
+                                            .width(62.dp)
+                                            .clickable { onNavigateToCreateProfile() }
+                                            .testTag("add_profile_quick_button")
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(50.dp)
+                                                .clip(CircleShape)
+                                                .background(DarkBackground)
+                                                .border(1.dp, CardBorder, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = "Adicionar Perfil",
+                                                tint = Color.LightGray,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.height(4.dp))
+
+                                        Text(
+                                            text = "+ Novo",
+                                            color = TextSecondary,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Action buttons below profile info
                     HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
 
@@ -530,7 +838,13 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
-                            onClick = { authViewModel.selectProfile(null) },
+                            onClick = {
+                                if (onNavigateToProfileSelection != {}) {
+                                    onNavigateToProfileSelection()
+                                } else {
+                                    authViewModel.selectProfile(null)
+                                }
+                            },
                             modifier = Modifier.weight(1f).height(36.dp),
                             shape = RoundedCornerShape(8.dp),
                             border = BorderStroke(1.dp, CardBorder),
@@ -742,7 +1056,9 @@ fun ProfileScreen(
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1B0D18)),
             shape = RoundedCornerShape(12.dp),
             border = BorderStroke(1.dp, BrandRed.copy(alpha = 0.4f)),
-            onClick = { showShareModal = true }
+            onClick = {
+                AppShareConfig.shareAppViaAndroidSharesheet(context)
+            }
         ) {
             Row(
                 modifier = Modifier

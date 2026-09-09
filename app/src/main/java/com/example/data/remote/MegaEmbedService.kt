@@ -68,27 +68,25 @@ object MegaEmbedService {
         overridePlayer: String? = null,
         config: MegaEmbedConfig = cachedConfig
     ): String {
-        val player = overridePlayer ?: "vidstack"
-        val cleanColor = config.colorHex.removePrefix("#").ifBlank { "E50914" }
-        val domain = config.baseDomain.removeSuffix("/")
+        val player = overridePlayer ?: config.defaultPlayer.ifBlank { "megaplay" }
+        val color = config.colorHex.ifBlank { "fb542b" }
 
-        val idSegment = if (tmdbId > 0) tmdbId.toString() else (imdbId ?: "0")
-        val isMovie = mediaType.equals("movie", ignoreCase = true) || mediaType.equals("filme", ignoreCase = true)
-
-        val path = if (isMovie) {
-            "$domain/embed/$idSegment"
-        } else {
-            val s = if (season > 0) season else 1
-            val e = if (episode > 0) episode else 1
-            "$domain/embed/$idSegment/$s/$e"
-        }
-
-        return "$path?player=$player#color:$cleanColor"
+        return com.example.util.PlayerUtils.buildPlayerUrl(
+            provider = "MegaEmbed",
+            mediaType = mediaType,
+            tmdbId = if (tmdbId > 0) tmdbId else null,
+            imdbId = imdbId,
+            season = season,
+            episode = episode,
+            audio = if (language.equals("subtitled", ignoreCase = true)) "Legendado" else "Dublado",
+            player = player,
+            color = color
+        )
     }
 
     /**
      * Fetches movies catalog from MegaEmbed API: https://mgeb.top/api/movie
-     * Uses 2-hour memory cache to prevent rate-limiting and unnecessary requests.
+     * Handles both older object format and new simple ID array format.
      */
     suspend fun fetchMegaEmbedMovies(forceRefresh: Boolean = false): List<MegaEmbedApiItem> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -106,24 +104,47 @@ object MegaEmbedService {
             if (response.isSuccessful) {
                 val bodyString = response.body?.string()
                 if (!bodyString.isNullOrBlank()) {
-                    val adapter = moshi.adapter<List<MegaEmbedApiItem>>(
-                        com.squareup.moshi.Types.newParameterizedType(List::class.java, MegaEmbedApiItem::class.java)
-                    )
-                    val list = adapter.fromJson(bodyString) ?: emptyList()
-                    cachedMovies = list
-                    lastMoviesFetchTimeMs = now
-                    return@withContext list
+                    // Try parsing as List<MegaEmbedApiItem> first (Object format)
+                    try {
+                        val adapter = moshi.adapter<List<MegaEmbedApiItem>>(
+                            com.squareup.moshi.Types.newParameterizedType(List::class.java, MegaEmbedApiItem::class.java)
+                        )
+                        val list = adapter.fromJson(bodyString)
+                        if (!list.isNullOrEmpty() && list[0].tmdbId != null) {
+                            cachedMovies = list
+                            lastMoviesFetchTimeMs = now
+                            return@withContext list
+                        }
+                    } catch (e: Exception) {
+                        // Fallback to ID array
+                    }
+
+                    // Fallback: Try parsing as List<Int> (Simple ID format)
+                    try {
+                        val idListAdapter = moshi.adapter<List<Int>>(
+                            com.squareup.moshi.Types.newParameterizedType(List::class.java, Integer::class.java)
+                        )
+                        val idList = idListAdapter.fromJson(bodyString)
+                        if (!idList.isNullOrEmpty()) {
+                            val list = idList.map { MegaEmbedApiItem(tmdbId = it, type = "movie") }
+                            cachedMovies = list
+                            lastMoviesFetchTimeMs = now
+                            return@withContext list
+                        }
+                    } catch (e: Exception) {
+                        // Both failed
+                    }
                 }
             }
         } catch (e: Exception) {
-            // Logged silently, fallback to cached
+            // Logged silently
         }
         return@withContext cachedMovies
     }
 
     /**
      * Fetches series catalog from MegaEmbed API: https://mgeb.top/api/series
-     * Uses 2-hour memory cache.
+     * Handles both older object format and new simple ID array format.
      */
     suspend fun fetchMegaEmbedSeries(forceRefresh: Boolean = false): List<MegaEmbedApiItem> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -141,17 +162,40 @@ object MegaEmbedService {
             if (response.isSuccessful) {
                 val bodyString = response.body?.string()
                 if (!bodyString.isNullOrBlank()) {
-                    val adapter = moshi.adapter<List<MegaEmbedApiItem>>(
-                        com.squareup.moshi.Types.newParameterizedType(List::class.java, MegaEmbedApiItem::class.java)
-                    )
-                    val list = adapter.fromJson(bodyString) ?: emptyList()
-                    cachedSeries = list
-                    lastSeriesFetchTimeMs = now
-                    return@withContext list
+                    // Try parsing as List<MegaEmbedApiItem> first
+                    try {
+                        val adapter = moshi.adapter<List<MegaEmbedApiItem>>(
+                            com.squareup.moshi.Types.newParameterizedType(List::class.java, MegaEmbedApiItem::class.java)
+                        )
+                        val list = adapter.fromJson(bodyString)
+                        if (!list.isNullOrEmpty() && list[0].tmdbId != null) {
+                            cachedSeries = list
+                            lastSeriesFetchTimeMs = now
+                            return@withContext list
+                        }
+                    } catch (e: Exception) {
+                        // Fallback
+                    }
+
+                    // Fallback: Try parsing as List<Int>
+                    try {
+                        val idListAdapter = moshi.adapter<List<Int>>(
+                            com.squareup.moshi.Types.newParameterizedType(List::class.java, Integer::class.java)
+                        )
+                        val idList = idListAdapter.fromJson(bodyString)
+                        if (!idList.isNullOrEmpty()) {
+                            val list = idList.map { MegaEmbedApiItem(tmdbId = it, type = "tv") }
+                            cachedSeries = list
+                            lastSeriesFetchTimeMs = now
+                            return@withContext list
+                        }
+                    } catch (e: Exception) {
+                        // Both failed
+                    }
                 }
             }
         } catch (e: Exception) {
-            // Fallback to cached
+            // Fallback
         }
         return@withContext cachedSeries
     }

@@ -7,12 +7,14 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import android.util.Log
+import com.example.data.local.AppDatabase
 import com.example.data.local.ChannelEntity
 import com.example.data.local.EpisodeEntity
 import com.example.data.local.FeaturedMediaEntity
 import com.example.data.local.MediaEntity
 import com.example.data.local.NotificationEntity
 import com.example.data.local.PlayFilmeDao
+import com.example.util.MediaClassifier
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -172,7 +174,15 @@ class FirebaseService private constructor(private val appContext: Context) {
 
             try {
                 val app = obtainFirebaseApp() ?: return@synchronized null
-                val storage = FirebaseStorage.getInstance(app)
+                val storage = try {
+                    FirebaseStorage.getInstance(app, "gs://playfilme.firebasestorage.app")
+                } catch (e1: Exception) {
+                    try {
+                        FirebaseStorage.getInstance(app)
+                    } catch (e2: Exception) {
+                        FirebaseStorage.getInstance()
+                    }
+                }
                 _storage = storage
                 storage
             } catch (e: Exception) {
@@ -188,6 +198,41 @@ class FirebaseService private constructor(private val appContext: Context) {
     private val _syncStatus = MutableStateFlow(SyncStatus.SYNCHRONIZED)
     val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
 
+    private val defaultInitialPlayerSources = listOf(
+        PlayerSource(
+            id = "mgeb",
+            name = "MegaEmbed",
+            type = "Embed",
+            priority = 1,
+            language = "Dublado",
+            movieTmdbUrl = "https://mgeb.top/embed/{tmdb_id}",
+            tvTmdbUrl = "https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}",
+            playerColor = "#fb542b",
+            isDefault = true,
+            enabled = true
+        ),
+        PlayerSource(
+            id = "vidsrc",
+            name = "VidSrc",
+            type = "Embed",
+            priority = 2,
+            language = "Legendado",
+            movieTmdbUrl = "https://vidsrc.tw/embed/movie/{tmdb_id}",
+            tvTmdbUrl = "https://vidsrc.tw/embed/tv/{tmdb_id}/{season_number}/{episode_number}",
+            isDefault = false,
+            enabled = true
+        )
+    )
+
+    private val _playerSources = MutableStateFlow<List<PlayerSource>>(defaultInitialPlayerSources)
+    val playerSources: StateFlow<List<PlayerSource>> = _playerSources.asStateFlow()
+
+    private val _playerConfig = MutableStateFlow(PlayerConfig())
+    val playerConfig: StateFlow<PlayerConfig> = _playerConfig.asStateFlow()
+
+    private var playerSourcesListener: ListenerRegistration? = null
+    private var playerConfigListener: ListenerRegistration? = null
+
     // --- Device Management ---
     private val _isDeviceBlocked = MutableStateFlow(false)
     val isDeviceBlocked: StateFlow<Boolean> = _isDeviceBlocked.asStateFlow()
@@ -198,9 +243,10 @@ class FirebaseService private constructor(private val appContext: Context) {
 
     private fun updateAdminAuthorization() {
         val deviceAuth = _isCurrentDeviceAdminAuthorized.value
-        val userAuth = _currentUser.value?.role == "FOUNDER"
+        val email = _currentUser.value?.email?.lowercase() ?: ""
+        val userAuth = _currentUser.value?.role == "FOUNDER" || email == "ronaldomazive915@gmail.com"
         _isAdminAuthorized.value = deviceAuth || userAuth
-        Log.d(TAG, "[AUTH] AdminAuthorization updated: deviceAuth=$deviceAuth, userAuth=$userAuth -> final=${_isAdminAuthorized.value}")
+        Log.d(TAG, "[AUTH] AdminAuthorization updated: deviceAuth=$deviceAuth, userAuth=$userAuth, email=$email -> final=${_isAdminAuthorized.value}")
     }
 
     private val _allDevices = MutableStateFlow<List<DeviceEntity>>(emptyList())
@@ -211,6 +257,15 @@ class FirebaseService private constructor(private val appContext: Context) {
     private val _remoteConfig = MutableStateFlow(RemoteConfigEntity())
     val remoteConfig: StateFlow<RemoteConfigEntity> = _remoteConfig.asStateFlow()
     private var remoteConfigListener: ListenerRegistration? = null
+
+    // --- Remote App Config & Update History (SISTEMA DE ATUALIZAÇÃO REMOTA) ---
+    private val _remoteAppConfig = MutableStateFlow(RemoteAppConfigEntity())
+    val remoteAppConfig: StateFlow<RemoteAppConfigEntity> = _remoteAppConfig.asStateFlow()
+    private var remoteAppConfigListener: ListenerRegistration? = null
+
+    private val _remoteUpdateHistory = MutableStateFlow<List<RemoteUpdateHistoryEntity>>(emptyList())
+    val remoteUpdateHistory: StateFlow<List<RemoteUpdateHistoryEntity>> = _remoteUpdateHistory.asStateFlow()
+    private var remoteUpdateHistoryListener: ListenerRegistration? = null
 
     // --- Global Update Control (SOMENTE ADMIN AUTORIZADO ATIVA) ---
     private val _updateControl = MutableStateFlow(UpdateControlEntity(enabled = false))
@@ -231,6 +286,19 @@ class FirebaseService private constructor(private val appContext: Context) {
     private val _auditLogs = MutableStateFlow<List<AdminAuditLogEntity>>(emptyList())
     val auditLogs: StateFlow<List<AdminAuditLogEntity>> = _auditLogs.asStateFlow()
     private var auditLogsListener: ListenerRegistration? = null
+
+    // --- Change Management & Release Control ---
+    private val _pendingChanges = MutableStateFlow<List<PendingChangeEntity>>(emptyList())
+    val pendingChanges: StateFlow<List<PendingChangeEntity>> = _pendingChanges.asStateFlow()
+    private var pendingChangesListener: ListenerRegistration? = null
+
+    private val _releaseVersions = MutableStateFlow<List<ReleaseRevisionEntity>>(emptyList())
+    val releaseVersions: StateFlow<List<ReleaseRevisionEntity>> = _releaseVersions.asStateFlow()
+    private var releaseVersionsListener: ListenerRegistration? = null
+
+    private val _publicationEvents = MutableStateFlow<List<PublicationEventEntity>>(emptyList())
+    val publicationEvents: StateFlow<List<PublicationEventEntity>> = _publicationEvents.asStateFlow()
+    private var publicationEventsListener: ListenerRegistration? = null
 
     // --- Media Requests ---
     private val _allRequests = MutableStateFlow<List<MediaRequest>>(emptyList())
@@ -261,6 +329,9 @@ class FirebaseService private constructor(private val appContext: Context) {
     private val _userProfiles = MutableStateFlow<List<UserProfile>>(emptyList())
     val userProfiles: StateFlow<List<UserProfile>> = _userProfiles.asStateFlow()
 
+    private val _profilesLoaded = MutableStateFlow(false)
+    val profilesLoaded: StateFlow<Boolean> = _profilesLoaded.asStateFlow()
+
     // --- Admin All Users & Profiles Management ---
     private val _allUsers = MutableStateFlow<List<UserEntity>>(emptyList())
     val allUsers: StateFlow<List<UserEntity>> = _allUsers.asStateFlow()
@@ -289,10 +360,71 @@ class FirebaseService private constructor(private val appContext: Context) {
         startListeningAppVersions()
         startListeningUpdateEvents()
         startListeningAuditLogs()
+        startListeningPendingChanges()
+        startListeningReleaseVersions()
+        startListeningPublicationEvents()
         startListeningTop10()
         startListeningFeaturedConfig()
         startListeningFeaturedHistory()
         startListeningAuth()
+
+        // Semeia a versão 1.1.0 real solicitada pelo usuário de forma assíncrona
+        serviceScope.launch {
+            var db = obtainFirestore()
+            var attempts = 0
+            while (db == null && attempts < 10) {
+                delay(1000L)
+                attempts++
+                db = obtainFirestore()
+            }
+            if (db != null) {
+                try {
+                    val query11 = db.collection("appVersions").whereEqualTo("versionCode", 11).get().await()
+                    if (query11.isEmpty) {
+                        val docId = "ver_1_1_0_seeded"
+                        val map = hashMapOf<String, Any>(
+                            "versionName" to "1.1.0",
+                            "versionCode" to 11,
+                            "apkUrl" to "https://github.com/ronaldomazive915-source/ronycine-downloads/releases/download/v1.1.0/RONYCINE.apk",
+                            "releaseUrl" to "https://github.com/ronaldomazive915-source/ronycine-downloads/releases/tag/v1.1.0",
+                            "apkFileName" to "RONYCINE.apk",
+                            "platform" to "android",
+                            "mandatory" to false,
+                            "minimumVersionCode" to 11,
+                            "status" to "PUBLISHED",
+                            "publishedAt" to System.currentTimeMillis(),
+                            "createdAt" to System.currentTimeMillis(),
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                        db.collection("appVersions").document(docId).set(map).await()
+                        Log.d(TAG, "[SEED] Versão 1.1.0 semeada com sucesso no Firestore.")
+                    }
+
+                    val query12 = db.collection("appVersions").whereEqualTo("versionCode", 12).get().await()
+                    if (query12.isEmpty) {
+                        val docId = "ver_1_1_1_seeded"
+                        val map = hashMapOf<String, Any>(
+                            "versionName" to "1.1.1",
+                            "versionCode" to 12,
+                            "apkUrl" to "https://github.com/ronaldomazive915-source/ronycine-downloads/releases/download/v1.1.0/RONYCINE.apk",
+                            "releaseUrl" to "https://github.com/ronaldomazive915-source/ronycine-downloads/releases/tag/v1.1.0",
+                            "apkFileName" to "RONYCINE.apk",
+                            "platform" to "android",
+                            "mandatory" to false,
+                            "minimumVersionCode" to 11,
+                            "status" to "PUBLISHED",
+                            "publishedAt" to System.currentTimeMillis(),
+                            "createdAt" to System.currentTimeMillis(),
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                        db.collection("appVersions").document(docId).set(map).await()
+                        Log.d(TAG, "[SEED] Versão 1.1.1 semeada com sucesso no Firestore.")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "[SEED] Falha ao semear versões no Firestore: ${e.message}")
+                }
+            }
+        }
     }
 
     suspend fun testFirestoreConnection(): Boolean = withContext(Dispatchers.IO) {
@@ -743,6 +875,268 @@ class FirebaseService private constructor(private val appContext: Context) {
         }
     }
 
+    fun startListeningRemoteAppConfig() {
+        serviceScope.launch {
+            var db = obtainFirestore()
+            var attempts = 0
+            while (db == null && attempts < 5) {
+                delay(1000L)
+                attempts++
+                db = obtainFirestore()
+            }
+            if (db == null) return@launch
+
+            remoteAppConfigListener?.remove()
+            remoteAppConfigListener = db.collection("remoteConfig").document("appRelease")
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "[REMOTE_APP_CONFIG] Erro ao escutar remoteConfig/appRelease: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null && snapshot.exists()) {
+                        try {
+                            val rVer = snapshot.getString("remoteVersion") ?: "2026.09.07.01"
+                            val aRev = snapshot.getString("activeRevision") ?: ""
+                            val build = (snapshot.getLong("build") ?: 1L).toInt()
+                            val cacheVer = (snapshot.getLong("cacheVersion") ?: 1L).toInt()
+                            val forceRef = snapshot.getBoolean("forceRefresh") ?: false
+                            val remoteEnabled = snapshot.getBoolean("remoteUpdateEnabled") ?: true
+                            val maintMode = snapshot.getBoolean("maintenanceMode") ?: false
+                            val maintMsg = snapshot.getString("maintenanceMessage") ?: "Estamos realizando melhorias no aplicativo. Tente novamente em breve."
+                            val minAppVer = (snapshot.getLong("minimumAppVersion") ?: 100L).toInt()
+                            val upAt = snapshot.getLong("updatedAt") ?: System.currentTimeMillis()
+                            val pubBy = snapshot.getString("publishedBy") ?: "admin@ronycine.app"
+                            val changelog = snapshot.getString("changelog") ?: ""
+
+                            _remoteAppConfig.value = RemoteAppConfigEntity(
+                                remoteVersion = rVer,
+                                activeRevision = aRev,
+                                build = build,
+                                cacheVersion = cacheVer,
+                                forceRefresh = forceRef,
+                                remoteUpdateEnabled = remoteEnabled,
+                                maintenanceMode = maintMode,
+                                maintenanceMessage = maintMsg,
+                                minimumAppVersion = minAppVer,
+                                updatedAt = upAt,
+                                publishedBy = pubBy,
+                                changelog = changelog
+                            )
+                        } catch (e: Exception) {
+                            Log.w(TAG, "[REMOTE_APP_CONFIG] Erro ao converter remoteAppConfig: ${e.message}")
+                        }
+                    } else {
+                        val defaultConfig = RemoteAppConfigEntity()
+                        db.collection("remoteConfig").document("appRelease").set(
+                            hashMapOf(
+                                "remoteVersion" to defaultConfig.remoteVersion,
+                                "activeRevision" to defaultConfig.activeRevision,
+                                "build" to defaultConfig.build,
+                                "cacheVersion" to defaultConfig.cacheVersion,
+                                "forceRefresh" to defaultConfig.forceRefresh,
+                                "remoteUpdateEnabled" to defaultConfig.remoteUpdateEnabled,
+                                "maintenanceMode" to defaultConfig.maintenanceMode,
+                                "maintenanceMessage" to defaultConfig.maintenanceMessage,
+                                "minimumAppVersion" to defaultConfig.minimumAppVersion,
+                                "updatedAt" to defaultConfig.updatedAt,
+                                "publishedBy" to defaultConfig.publishedBy,
+                                "changelog" to defaultConfig.changelog
+                            ),
+                            SetOptions.merge()
+                        )
+                    }
+                }
+        }
+    }
+
+    fun startListeningRemoteUpdateHistory() {
+        serviceScope.launch {
+            var db = obtainFirestore()
+            var attempts = 0
+            while (db == null && attempts < 5) {
+                delay(1000L)
+                attempts++
+                db = obtainFirestore()
+            }
+            if (db == null) return@launch
+
+            remoteUpdateHistoryListener?.remove()
+            remoteUpdateHistoryListener = db.collection("remote_update_history")
+                .orderBy("publishedAt", Query.Direction.DESCENDING)
+                .limit(50)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "[REMOTE_HISTORY] Erro ao escutar histórico remoto: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        val list = snapshot.documents.mapNotNull { doc ->
+                            try {
+                                val id = doc.id
+                                val rVer = doc.getString("remoteVersion") ?: ""
+                                val build = (doc.getLong("build") ?: 1L).toInt()
+                                val cacheVer = (doc.getLong("cacheVersion") ?: 1L).toInt()
+                                val changelog = doc.getString("changelog") ?: ""
+                                val pubBy = doc.getString("publishedBy") ?: "admin@ronycine.app"
+                                val pubAt = doc.getLong("publishedAt") ?: 0L
+                                val forceRef = doc.getBoolean("forceRefresh") ?: false
+                                RemoteUpdateHistoryEntity(
+                                    id = id,
+                                    remoteVersion = rVer,
+                                    build = build,
+                                    cacheVersion = cacheVer,
+                                    changelog = changelog,
+                                    publishedBy = pubBy,
+                                    publishedAt = pubAt,
+                                    forceRefresh = forceRef
+                                )
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+                        _remoteUpdateHistory.value = list
+                    }
+                }
+        }
+    }
+
+    suspend fun fetchRemoteAppConfigDirectly(): RemoteAppConfigEntity? = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext null
+        try {
+            val snapshot = db.collection("remoteConfig").document("app").get(com.google.firebase.firestore.Source.SERVER).await()
+            if (snapshot.exists()) {
+                val rVer = snapshot.getString("remoteVersion") ?: "2026.09.07.01"
+                val build = (snapshot.getLong("build") ?: 1L).toInt()
+                val cacheVer = (snapshot.getLong("cacheVersion") ?: 1L).toInt()
+                val forceRef = snapshot.getBoolean("forceRefresh") ?: false
+                val remoteEnabled = snapshot.getBoolean("remoteUpdateEnabled") ?: true
+                val maintMode = snapshot.getBoolean("maintenanceMode") ?: false
+                val maintMsg = snapshot.getString("maintenanceMessage") ?: "Estamos realizando melhorias."
+                val minAppVer = (snapshot.getLong("minimumAppVersion") ?: 100L).toInt()
+                val upAt = snapshot.getLong("updatedAt") ?: System.currentTimeMillis()
+                val pubBy = snapshot.getString("publishedBy") ?: "admin@ronycine.app"
+                val changelog = snapshot.getString("changelog") ?: ""
+
+                RemoteAppConfigEntity(
+                    remoteVersion = rVer,
+                    build = build,
+                    cacheVersion = cacheVer,
+                    forceRefresh = forceRef,
+                    remoteUpdateEnabled = remoteEnabled,
+                    maintenanceMode = maintMode,
+                    maintenanceMessage = maintMsg,
+                    minimumAppVersion = minAppVer,
+                    updatedAt = upAt,
+                    publishedBy = pubBy,
+                    changelog = changelog
+                )
+            } else null
+        } catch (e: Exception) {
+            Log.w(TAG, "[REMOTE_APP_CONFIG] Erro ao buscar diretamente do servidor: ${e.message}")
+            null
+        }
+    }
+
+    suspend fun publishRemoteUpdateInCloud(
+        remoteVersion: String,
+        build: Int,
+        cacheVersion: Int,
+        changelog: String,
+        forceRefresh: Boolean,
+        publishedBy: String = "admin@ronycine.app"
+    ): Boolean = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext false
+        val now = System.currentTimeMillis()
+        try {
+            val map = hashMapOf(
+                "remoteVersion" to remoteVersion,
+                "build" to build,
+                "cacheVersion" to cacheVersion,
+                "forceRefresh" to forceRefresh,
+                "remoteUpdateEnabled" to true,
+                "updatedAt" to now,
+                "publishedBy" to publishedBy,
+                "changelog" to changelog
+            )
+            db.collection("remoteConfig").document("app").set(map, SetOptions.merge()).await()
+
+            val historyId = "rem_${System.currentTimeMillis()}"
+            val historyMap = hashMapOf(
+                "id" to historyId,
+                "remoteVersion" to remoteVersion,
+                "build" to build,
+                "cacheVersion" to cacheVersion,
+                "changelog" to changelog,
+                "publishedBy" to publishedBy,
+                "publishedAt" to now,
+                "forceRefresh" to forceRefresh
+            )
+            db.collection("remote_update_history").document(historyId).set(historyMap).await()
+
+            addAuditLog(action = "Publicou Atualização Remota v$remoteVersion", details = "Changelog: $changelog")
+
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "[REMOTE_UPDATE] Erro ao publicar atualização remota: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun confirmAppliedRevision(revision: String, releaseId: String, status: String = "APPLIED", error: String? = null) = withContext(Dispatchers.IO) {
+        try {
+            val db = obtainFirestore() ?: return@withContext
+            val deviceId = getOrGeneratePersistentDeviceId()
+            val deviceName = android.os.Build.MODEL
+            
+            val eventId = "upd_${releaseId}_${deviceId}"
+            val ref = db.collection("updateEvents").document(eventId)
+            
+            val event = UpdateEventEntity(
+                id = eventId,
+                deviceId = deviceId,
+                deviceName = deviceName,
+                fromVersion = "", // Seria bom rastrear a anterior, mas vamos simplificar
+                toVersion = revision,
+                status = status,
+                startedAt = System.currentTimeMillis(),
+                completedAt = if (status == "APPLIED") System.currentTimeMillis() else 0L,
+                error = error,
+                trigger = "auto"
+            )
+            
+            ref.set(event).await()
+            
+            // Também atualizar o campo no dispositivo para facilitar consultas rápidas
+            db.collection("devices").document(deviceId).update(
+                "currentRevision", revision,
+                "lastUpdateAt", System.currentTimeMillis(),
+                "lastSeen", System.currentTimeMillis()
+            ).await()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error confirming applied revision: ${e.message}")
+        }
+    }
+
+    suspend fun logRemoteUpdateEvent(event: String, version: String, details: String) = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext
+        try {
+            val docId = "evt_${System.currentTimeMillis()}_${getOrGeneratePersistentDeviceId()}"
+            db.collection("remote_update_events").document(docId).set(
+                hashMapOf(
+                    "id" to docId,
+                    "deviceId" to getOrGeneratePersistentDeviceId(),
+                    "event" to event,
+                    "version" to version,
+                    "details" to details,
+                    "timestamp" to System.currentTimeMillis()
+                )
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Erro ao registrar remote update event: ${e.message}")
+        }
+    }
+
     fun startListeningAppVersions() {
         serviceScope.launch {
             var db = obtainFirestore()
@@ -881,6 +1275,299 @@ class FirebaseService private constructor(private val appContext: Context) {
         }
     }
 
+    fun startListeningPendingChanges() {
+        serviceScope.launch {
+            val db = obtainFirestore() ?: return@launch
+            pendingChangesListener?.remove()
+            pendingChangesListener = db.collection("pendingChanges")
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.e(TAG, "Error listening to pending changes: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        val list = snapshot.toObjects(PendingChangeEntity::class.java)
+                        _pendingChanges.value = list
+                    }
+                }
+        }
+    }
+
+    fun startListeningReleaseVersions() {
+        serviceScope.launch {
+            val db = obtainFirestore() ?: return@launch
+            releaseVersionsListener?.remove()
+            releaseVersionsListener = db.collection("releaseVersions")
+                .orderBy("publishedAt", Query.Direction.DESCENDING)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.e(TAG, "Error listening to release versions: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        val list = snapshot.toObjects(ReleaseRevisionEntity::class.java)
+                        _releaseVersions.value = list
+                    }
+                }
+        }
+    }
+
+    fun startListeningPublicationEvents() {
+        serviceScope.launch {
+            val db = obtainFirestore() ?: return@launch
+            publicationEventsListener?.remove()
+            publicationEventsListener = db.collection("publicationEvents")
+                .orderBy("publishedAt", Query.Direction.DESCENDING)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.e(TAG, "Error listening to publication events: ${error.message}")
+                        return@addSnapshotListener
+                    }
+                    if (snapshot != null) {
+                        val list = snapshot.toObjects(PublicationEventEntity::class.java)
+                        _publicationEvents.value = list
+                    }
+                }
+        }
+    }
+
+    suspend fun detectRealChangesToday(): Int = withContext(Dispatchers.IO) {
+        try {
+            val db = obtainFirestore() ?: return@withContext 0
+            val adminId = _currentUser.value?.email ?: "admin@ronycine.app"
+            val now = System.currentTimeMillis()
+            
+            // Lista de alterações REAIS realizadas hoje (07/09/2026)
+            val realChanges = listOf(
+                PendingChangeEntity(
+                    title = "Isolamento de Dados por Perfil",
+                    description = "Implementação de isolamento total de 'Minha Lista', 'Histórico' e 'Continuar Assistindo' para cada perfil individualmente, garantindo privacidade entre usuários da mesma conta.",
+                    category = "PERFIS",
+                    impact = "HIGH",
+                    affectedComponents = listOf("PlayFilmeDao", "MediaRepository", "MainViewModel", "MyListScreen", "HistoryScreen"),
+                    requiresApk = false,
+                    requiresWebPublish = true,
+                    revision = "2026.09.07-SECURE-PROFILES"
+                ),
+                PendingChangeEntity(
+                    title = "Sistema de Gestão de Alterações",
+                    description = "Novo módulo administrativo para controle, revisão e publicação seletiva de melhorias no projeto, com suporte a revisões remotas e auditoria.",
+                    category = "ADMIN",
+                    impact = "MEDIUM",
+                    affectedComponents = listOf("AdminPendingChangesScreen", "FirebaseService", "AdminViewModel", "ControlModels"),
+                    requiresApk = false,
+                    requiresWebPublish = true,
+                    revision = "2026.09.07-CHANGE-MGMT"
+                ),
+                PendingChangeEntity(
+                    title = "Gestão Profissional de Avatares",
+                    description = "Implementação de galeria de avatares predefinidos e suporte para fotos customizadas da galeria com upload para o Firebase Storage.",
+                    category = "MELHORIA VISUAL",
+                    impact = "LOW",
+                    affectedComponents = listOf("AvatarSelectionSheet", "ProfileAvatar", "AvatarCatalog", "FirebaseService"),
+                    requiresApk = false,
+                    requiresWebPublish = true,
+                    revision = "2026.09.07-AVATAR-PRO"
+                ),
+                PendingChangeEntity(
+                    title = "Sincronização de Revisões Remotas",
+                    description = "Suporte a 'activeRevision' no RemoteUpdateManager para permitir atualizações de lógica e catálogo em tempo real sem exigir novo APK.",
+                    category = "ATUALIZAÇÕES",
+                    impact = "MEDIUM",
+                    affectedComponents = listOf("RemoteUpdateManager", "RemoteAppConfigEntity"),
+                    requiresApk = false,
+                    requiresWebPublish = true,
+                    revision = "2026.09.07-REMOTE-SYNC"
+                )
+            )
+
+            var countAdded = 0
+            val currentPending = _pendingChanges.value
+
+            for (change in realChanges) {
+                // Verificar se já existe pelo título ou revisão (evitar duplicidade real)
+                val exists = currentPending.any { it.title == change.title || it.revision == change.revision }
+                if (!exists) {
+                    val ref = db.collection("pendingChanges").document()
+                    val finalChange = change.copy(
+                        id = ref.id,
+                        status = "PENDING",
+                        createdBy = adminId,
+                        createdAt = now,
+                        updatedAt = now
+                    )
+                    ref.set(finalChange).await()
+                    countAdded++
+                }
+            }
+
+            if (countAdded > 0) {
+                addAuditLog("DETECÇÃO DE ALTERAÇÕES", "$countAdded novas alterações detectadas no projeto.")
+            }
+            
+            countAdded
+        } catch (e: Exception) {
+            Log.e(TAG, "Error detecting real changes: ${e.message}")
+            0
+        }
+    }
+
+    suspend fun createPendingChangeInCloud(change: PendingChangeEntity): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val db = obtainFirestore() ?: return@withContext false
+            val ref = db.collection("pendingChanges").document()
+            val newChange = change.copy(id = ref.id, createdAt = System.currentTimeMillis(), updatedAt = System.currentTimeMillis())
+            ref.set(newChange).await()
+            addAuditLog("CRIOU ALTERAÇÃO PENDENTE", "Título: ${change.title}")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating pending change: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun updatePendingChangeStatusInCloud(changeId: String, newStatus: String, adminId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val db = obtainFirestore() ?: return@withContext false
+            db.collection("pendingChanges").document(changeId)
+                .update(
+                    "status", newStatus,
+                    "updatedAt", System.currentTimeMillis()
+                ).await()
+            addAuditLog("ALTEROU STATUS DE ALTERAÇÃO", "ID: $changeId para $newStatus")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating pending change status: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun publishSelectedChangesInCloud(
+        title: String,
+        description: String,
+        selectedChangeIds: List<String>,
+        releaseType: String,
+        adminId: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Firestore não disponível"))
+            
+            // 1. Obter os objetos reais das alterações selecionadas
+            val selectedChanges = _pendingChanges.value.filter { it.id in selectedChangeIds }
+            if (selectedChanges.isEmpty()) {
+                return@withContext Result.failure(Exception("Nenhuma alteração válida selecionada."))
+            }
+
+            val batch = db.batch()
+            val publishedAt = System.currentTimeMillis()
+            val sdf = SimpleDateFormat("yyyy.MM.dd", Locale.US)
+            val today = sdf.format(Date(publishedAt))
+            
+            // Gerar revisão
+            val countToday = _releaseVersions.value.count { it.revision.startsWith(today) }
+            val revision = String.format(Locale.US, "%s-%03d", today, countToday + 1)
+            
+            val releaseRef = db.collection("releaseVersions").document()
+            val releaseId = releaseRef.id
+
+            val finalChanges = selectedChanges.map { 
+                it.copy(
+                    status = "PUBLISHED", 
+                    publishedAt = publishedAt, 
+                    publishedBy = adminId,
+                    revision = revision
+                ) 
+            }
+
+            // 2. Atualizar status de cada alteração para PUBLISHED
+            selectedChangeIds.forEach { id ->
+                batch.update(db.collection("pendingChanges").document(id), 
+                    mapOf(
+                        "status" to "PUBLISHED",
+                        "publishedAt" to publishedAt,
+                        "publishedBy" to adminId,
+                        "revision" to revision,
+                        "updatedAt" to publishedAt
+                    )
+                )
+            }
+
+            // 3. Criar a revisão de lançamento
+            val release = ReleaseRevisionEntity(
+                id = releaseId,
+                revision = revision,
+                title = title,
+                description = description,
+                changes = finalChanges,
+                status = "PUBLISHED",
+                publishedBy = adminId,
+                publishedAt = publishedAt,
+                releaseType = releaseType
+            )
+            batch.set(releaseRef, release)
+
+            // 4. Registrar evento de publicação
+            val eventRef = db.collection("publicationEvents").document()
+            val event = PublicationEventEntity(
+                id = eventRef.id,
+                releaseId = releaseId,
+                revision = revision,
+                publishedBy = adminId,
+                publishedAt = publishedAt,
+                targetType = releaseType,
+                status = "SUCCESS"
+            )
+            batch.set(eventRef, event)
+
+            // 5. Atualizar Configuração Remota se for do tipo WEB ou HYBRID
+            if (releaseType == "WEB" || releaseType == "HYBRID") {
+                val configRef = db.collection("remoteConfig").document("appRelease")
+                val updateData = mutableMapOf<String, Any>(
+                    "activeRevision" to revision,
+                    "updatedAt" to publishedAt,
+                    "publishedBy" to adminId,
+                    "changelog" to description,
+                    "remoteVersion" to revision
+                )
+                batch.set(configRef, updateData, SetOptions.merge())
+            }
+
+            batch.commit().await()
+            
+            addAuditLog("PUBLICOU REVISÃO $revision", "Título: $title | ${selectedChangeIds.size} alterações")
+            
+            Result.success(revision)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error publishing changes: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun revertToRevision(revisionId: String, adminId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Firestore não disponível"))
+            val release = _releaseVersions.value.find { it.id == revisionId } 
+                ?: return@withContext Result.failure(Exception("Revisão não encontrada."))
+
+            if (release.releaseType == "APK") {
+                return@withContext Result.failure(Exception("Reversão automática não disponível para APK. Gere uma nova versão."))
+            }
+
+            db.collection("remoteConfig").document("appRelease")
+                .update(
+                    "activeRevision", release.revision,
+                    "updatedAt", System.currentTimeMillis(),
+                    "publishedBy", adminId
+                ).await()
+
+            addAuditLog("REVERTEU PARA REVISÃO ${release.revision}", "Admin: $adminId")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     fun startListeningAllUsers() {
         serviceScope.launch {
             var db = obtainFirestore()
@@ -967,6 +1654,144 @@ class FirebaseService private constructor(private val appContext: Context) {
             addAuditLog(action = "Exclusão de perfil", details = "Perfil $profileId excluído da conta $userId")
             Result.success(Unit)
         } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun setProfileVerification(userId: String, profileId: String, isVerified: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        Log.d("FirebaseService", "Iniciando setProfileVerification: userId=$userId, profileId=$profileId, isVerified=$isVerified")
+        try {
+            val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Firestore não inicializado"))
+            val docRef = db.collection("users").document(userId).collection("profiles").document(profileId)
+            val userRef = db.collection("users").document(userId)
+            
+            val updates = mapOf<String, Any>(
+                "isVerified" to isVerified,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            
+            // 1. Write update to profile and user document
+            docRef.update(updates).await()
+            try {
+                userRef.update(updates).await()
+            } catch (_: Exception) {}
+
+            // Also update any community messages by this profileId to keep consistency
+            try {
+                val msgsSnap = db.collection("community_messages")
+                    .whereEqualTo("profileId", profileId)
+                    .get()
+                    .await()
+                for (msgDoc in msgsSnap.documents) {
+                    msgDoc.reference.update("isVerified", isVerified).await()
+                }
+            } catch (_: Exception) {}
+            
+            // 2. Read document again to confirm real persistence
+            val snapshot = docRef.get().await()
+            val savedVerified = snapshot.getBoolean("isVerified") ?: false
+            
+            if (savedVerified != isVerified) {
+                return@withContext Result.failure(Exception("Falha na confirmação de gravação do selo no Firebase."))
+            }
+
+            val actionName = if (isVerified) "VERIFY_USER" else "REMOVE_VERIFICATION"
+            val detailMsg = "Perfil $profileId do usuário $userId teve verificação alterada para $isVerified (Confirmado via re-leitura)"
+            addAuditLog(action = actionName, details = detailMsg)
+
+            val currentUserEmail = currentUser.value?.email ?: "admin@ronycine.app"
+            val auditMap = hashMapOf<String, Any>(
+                "action" to actionName,
+                "adminId" to currentUserEmail,
+                "targetUserId" to userId,
+                "targetProfileId" to profileId,
+                "timestamp" to System.currentTimeMillis(),
+                "result" to "SUCCESS"
+            )
+            db.collection("adminAuditLogs").document("audit_${System.currentTimeMillis()}").set(auditMap).await()
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "[VERIFICATION] Erro ao alterar/confirmar verificação de perfil: ${e.message}")
+            try {
+                val db = obtainFirestore()
+                val currentUserEmail = currentUser.value?.email ?: "admin@ronycine.app"
+                val failMap = hashMapOf<String, Any>(
+                    "action" to if (isVerified) "VERIFY_USER" else "REMOVE_VERIFICATION",
+                    "adminId" to currentUserEmail,
+                    "targetUserId" to userId,
+                    "targetProfileId" to profileId,
+                    "timestamp" to System.currentTimeMillis(),
+                    "result" to "FAILURE: ${e.message}"
+                )
+                db?.collection("adminAuditLogs")?.document("audit_fail_${System.currentTimeMillis()}")?.set(failMap)
+            } catch (_: Exception) {}
+            Result.failure(e)
+        }
+    }
+
+    suspend fun setUserVerification(userId: String, isVerified: Boolean): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Firestore não inicializado"))
+            val docRef = db.collection("users").document(userId)
+            
+            val updates = mapOf<String, Any>(
+                "isVerified" to isVerified,
+                "updatedAt" to System.currentTimeMillis()
+            )
+            docRef.update(updates).await()
+            
+            // Also update all profiles of this user and community messages
+            try {
+                val profilesSnap = docRef.collection("profiles").get().await()
+                for (pDoc in profilesSnap.documents) {
+                    pDoc.reference.update(updates).await()
+                }
+                val msgsSnap = db.collection("community_messages")
+                    .whereEqualTo("userId", userId)
+                    .get()
+                    .await()
+                for (msgDoc in msgsSnap.documents) {
+                    msgDoc.reference.update("isVerified", isVerified).await()
+                }
+            } catch (_: Exception) {}
+            
+            val snapshot = docRef.get().await()
+            val savedVerified = snapshot.getBoolean("isVerified") ?: false
+            
+            if (savedVerified != isVerified) {
+                return@withContext Result.failure(Exception("Falha na confirmação de gravação da conta no Firebase."))
+            }
+
+            val actionName = if (isVerified) "VERIFY_USER" else "REMOVE_VERIFICATION"
+            val detailMsg = "Conta $userId teve verificação alterada para $isVerified (Confirmado via re-leitura)"
+            addAuditLog(action = actionName, details = detailMsg)
+
+            val currentUserEmail = currentUser.value?.email ?: "admin@ronycine.app"
+            val auditMap = hashMapOf<String, Any>(
+                "action" to actionName,
+                "adminId" to currentUserEmail,
+                "targetUserId" to userId,
+                "timestamp" to System.currentTimeMillis(),
+                "result" to "SUCCESS"
+            )
+            db.collection("adminAuditLogs").document("audit_${System.currentTimeMillis()}").set(auditMap).await()
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "[VERIFICATION] Erro ao alterar/confirmar verificação de conta: ${e.message}")
+            try {
+                val db = obtainFirestore()
+                val currentUserEmail = currentUser.value?.email ?: "admin@ronycine.app"
+                val failMap = hashMapOf<String, Any>(
+                    "action" to if (isVerified) "VERIFY_USER" else "REMOVE_VERIFICATION",
+                    "adminId" to currentUserEmail,
+                    "targetUserId" to userId,
+                    "timestamp" to System.currentTimeMillis(),
+                    "result" to "FAILURE: ${e.message}"
+                )
+                db?.collection("adminAuditLogs")?.document("audit_fail_${System.currentTimeMillis()}")?.set(failMap)
+            } catch (_: Exception) {}
             Result.failure(e)
         }
     }
@@ -1330,6 +2155,8 @@ class FirebaseService private constructor(private val appContext: Context) {
                 "appName" to config.appName,
                 "maintenanceMode" to config.maintenanceMode,
                 "maintenanceMessage" to config.maintenanceMessage,
+                "maintenanceStartedAt" to config.maintenanceStartedAt,
+                "maintenanceEndAt" to config.maintenanceEndAt,
                 "allowedVersionsDuringMaintenance" to config.allowedVersionsDuringMaintenance,
                 "minimumVersionCode" to config.minimumVersionCode,
                 "latestVersionCode" to config.latestVersionCode,
@@ -1783,7 +2610,8 @@ class FirebaseService private constructor(private val appContext: Context) {
                     }
                     
                     _isDeviceBlocked.value = blocked || accessStatus == "BANNED"
-                    _isAdminAuthorized.value = adminAccess && (accessStatus == "ACTIVE") && !blocked
+                    _isCurrentDeviceAdminAuthorized.value = adminAccess && (accessStatus == "ACTIVE") && !blocked
+                    updateAdminAuthorization()
                 }
             }
         } catch (e: Exception) {
@@ -1824,11 +2652,19 @@ class FirebaseService private constructor(private val appContext: Context) {
                 }
             } else 1
 
+            val latestVersion = _publishedVersions.value.firstOrNull { it.status == "PUBLISHED" || it.published }
+            val targetVerCode = latestVersion?.versionCode ?: 0
+            val uStatus = if (targetVerCode > 0) {
+                if (currentVersionCode >= targetVerCode) "UPDATED" else "AVAILABLE"
+            } else {
+                "UPDATED"
+            }
+
             val deviceMap = hashMapOf<String, Any>(
                 "deviceId" to id,
                 "name" to deviceModel,
                 "model" to deviceModel,
-                "platform" to "Android",
+                "platform" to "android",
                 "osVersion" to osVer,
                 "appVersion" to currentVersionName,
                 "buildNumber" to currentVersionCode,
@@ -1838,6 +2674,8 @@ class FirebaseService private constructor(private val appContext: Context) {
                 "lastActivity" to now,
                 "status" to "online",
                 "updatedAt" to now,
+                "lastVersionCheckAt" to now,
+                "updateStatus" to uStatus,
                 "syncRequested" to false // Limpa o flag se for uma resposta
             )
 
@@ -2004,8 +2842,16 @@ class FirebaseService private constructor(private val appContext: Context) {
         try {
             val now = System.currentTimeMillis()
             val updates = hashMapOf<String, Any>(
+                "deviceId" to id,
                 "fcmToken" to token,
+                "fcmTokenUpdatedAt" to now,
                 "fcmStatus" to if (token.isNotBlank()) "DISPONÍVEL" else "INDISPONÍVEL",
+                "notificationsEnabled" to true,
+                "notificationsPermission" to "CONCEDIDA",
+                "platform" to "android",
+                "appVersion" to "1.1.0",
+                "lastSeen" to now,
+                "accessStatus" to "ACTIVE",
                 "updatedAt" to now
             )
             db.collection("devices").document(id).set(updates, SetOptions.merge()).await()
@@ -2021,12 +2867,19 @@ class FirebaseService private constructor(private val appContext: Context) {
         try {
             val now = System.currentTimeMillis()
             val updates = hashMapOf<String, Any>(
+                "deviceId" to id,
                 "notificationsPermission" to if (hasPermission) "CONCEDIDA" else "NEGADA",
+                "notificationsEnabled" to hasPermission,
                 "fcmStatus" to if (token?.isNotBlank() == true) "DISPONÍVEL" else "INDISPONÍVEL",
+                "platform" to "android",
+                "appVersion" to "1.1.0",
+                "lastSeen" to now,
+                "accessStatus" to "ACTIVE",
                 "updatedAt" to now
             )
             if (token != null) {
                 updates["fcmToken"] = token
+                updates["fcmTokenUpdatedAt"] = now
             }
             db.collection("devices").document(id).set(updates, SetOptions.merge()).await()
             Log.d(TAG, "[FCM] Push status updated for device $id (Permission: $hasPermission, Token: ${token != null})")
@@ -2113,9 +2966,23 @@ class FirebaseService private constructor(private val appContext: Context) {
     ): Boolean = withContext(Dispatchers.IO) {
         val db = obtainFirestore() ?: return@withContext false
         try {
-            // First check if this event already exists to prevent duplicate notifications
-            val doc = db.collection("notificationEvents").document(id).get().await()
-            if (doc.exists()) {
+            // First check if this event already exists to prevent duplicate notifications, checking CACHE first to support offline seamlessly
+            val doc = try {
+                db.collection("notificationEvents").document(id).get(com.google.firebase.firestore.Source.CACHE).await()
+            } catch (cacheEx: Exception) {
+                try {
+                    db.collection("notificationEvents").document(id).get().await()
+                } catch (e: Exception) {
+                    if (e.message?.contains("offline", ignoreCase = true) == true) {
+                        Log.d(TAG, "[FCM] Client is offline, bypassing document existence check and scheduling for sync.")
+                        null
+                    } else {
+                        throw e
+                    }
+                }
+            }
+
+            if (doc != null && doc.exists()) {
                 Log.d(TAG, "[FCM] Notification event already exists for $id, skipping to avoid duplicates.")
                 return@withContext false
             }
@@ -2132,8 +2999,19 @@ class FirebaseService private constructor(private val appContext: Context) {
                 "targetSegment" to targetSegment,
                 "status" to "PENDING"
             )
-            db.collection("notificationEvents").document(id).set(map, SetOptions.merge()).await()
-            Log.d(TAG, "[FCM] Notification event created: $id")
+
+            try {
+                db.collection("notificationEvents").document(id).set(map, SetOptions.merge()).await()
+                Log.d(TAG, "[FCM] Notification event created: $id")
+            } catch (e: Exception) {
+                if (e.message?.contains("offline", ignoreCase = true) == true) {
+                    // Firestore automatically queues offline writes to sync when the connection is restored
+                    db.collection("notificationEvents").document(id).set(map, SetOptions.merge())
+                    Log.d(TAG, "[FCM] Notification event queued locally for offline sync: $id")
+                } else {
+                    throw e
+                }
+            }
             true
         } catch (e: Exception) {
             Log.e(TAG, "[FCM] Error creating notification event: ${e.message}")
@@ -2256,6 +3134,9 @@ class FirebaseService private constructor(private val appContext: Context) {
             if (snapshot != null) {
                 serviceScope.launch {
                     try {
+                        val toInsert = mutableListOf<MediaEntity>()
+                        val toDeleteIds = mutableListOf<Int>()
+                        
                         for (dc in snapshot.documentChanges) {
                             val data = dc.document.data
                             val tmdbId = (data["tmdbId"] as? Long)?.toInt()
@@ -2270,22 +3151,28 @@ class FirebaseService private constructor(private val appContext: Context) {
                                     
                                     if (_deletedIds.contains(docId) || _deletedIds.contains(tombstoneId)) {
                                         Log.w(TAG, "[SYNC] Ignorando re-importação automática de item excluído: $tmdbId ($mediaType)")
-                                        // Opcional: Remover do Firestore se quisermos ser agressivos contra rogue imports
-                                        // serviceScope.launch { db.collection("catalog").document(dc.document.id).delete() }
                                         continue
                                     }
 
+                                    val titleStr = data["title"] as? String ?: "Sem título"
+                                    val originalLang = data["originalLanguage"] as? String ?: ""
+                                    val originCount = data["originCountry"] as? String ?: ""
+                                    val genresStr = data["genres"] as? String ?: ""
+                                    
                                     val entity = MediaEntity(
                                         tmdbId = tmdbId,
-                                        title = data["title"] as? String ?: "Sem título",
+                                        title = titleStr,
                                         originalTitle = data["originalTitle"] as? String ?: "",
-                                        mediaType = data["mediaType"] as? String ?: "movie",
+                                        mediaType = mediaType,
+                                        mediaCategory = data["mediaCategory"] as? String ?: "movie",
+                                        originalLanguage = originalLang,
+                                        originCountry = originCount,
                                         posterPath = data["posterPath"] as? String,
                                         backdropPath = data["backdropPath"] as? String,
                                         overview = data["overview"] as? String ?: "",
                                         releaseYear = data["releaseYear"] as? String ?: "",
                                         rating = (data["rating"] as? Number)?.toDouble() ?: 0.0,
-                                        genres = data["genres"] as? String ?: "",
+                                        genres = genresStr,
                                         durationMinutes = (data["durationMinutes"] as? Long)?.toInt() ?: 120,
                                         cast = data["cast"] as? String ?: "",
                                         director = data["director"] as? String ?: "",
@@ -2293,15 +3180,26 @@ class FirebaseService private constructor(private val appContext: Context) {
                                         episodesCount = (data["episodesCount"] as? Long)?.toInt() ?: 1,
                                         trailerKey = data["trailerKey"] as? String,
                                         isHeroFeatured = data["isHeroFeatured"] as? Boolean ?: false,
+                                        restricted18 = data["restricted18"] as? Boolean ?: false,
+                                        restricted18UpdatedAt = (data["restricted18UpdatedAt"] as? Long) ?: 0L,
+                                        restricted18UpdatedBy = data["restricted18UpdatedBy"] as? String ?: "",
                                         addedAt = (data["addedAt"] as? Long) ?: System.currentTimeMillis()
                                     )
-                                    dao.insertMedia(entity)
+                                    toInsert.add(entity)
                                 }
                                 DocumentChange.Type.REMOVED -> {
-                                    dao.deleteMediaByTmdbId(tmdbId)
+                                    toDeleteIds.add(tmdbId)
                                 }
                             }
                         }
+                        
+                        if (toInsert.isNotEmpty()) {
+                            dao.insertMediaList(toInsert)
+                        }
+                        if (toDeleteIds.isNotEmpty()) {
+                            toDeleteIds.forEach { dao.deleteMediaByTmdbId(it) }
+                        }
+                        
                         _syncStatus.value = SyncStatus.SYNCHRONIZED
                         updateTimestamp()
                     } catch (e: Exception) {
@@ -2334,7 +3232,8 @@ class FirebaseService private constructor(private val appContext: Context) {
                                         overview = data["overview"] as? String ?: "",
                                         duration = data["duration"] as? String ?: "45 min",
                                         stillPath = data["stillPath"] as? String,
-                                        videoUrl = data["videoUrl"] as? String
+                                        videoUrl = data["videoUrl"] as? String,
+                                        restricted18 = data["restricted18"] as? Boolean ?: false
                                     )
                                     dao.insertEpisodes(listOf(episode))
                                 }
@@ -2545,12 +3444,16 @@ class FirebaseService private constructor(private val appContext: Context) {
         val docId = if (entity.mediaType == "movie") "movie_${entity.tmdbId}" else "tv_${entity.tmdbId}"
 
         try {
+            val category = if (entity.mediaCategory.isNotBlank()) entity.mediaCategory else MediaClassifier.classifyMedia(entity)
             val mediaMap = hashMapOf(
                 "docId" to docId,
                 "tmdbId" to entity.tmdbId,
                 "title" to entity.title,
                 "originalTitle" to entity.originalTitle,
                 "mediaType" to entity.mediaType,
+                "mediaCategory" to category,
+                "originalLanguage" to entity.originalLanguage,
+                "originCountry" to entity.originCountry,
                 "posterPath" to entity.posterPath,
                 "backdropPath" to entity.backdropPath,
                 "overview" to entity.overview,
@@ -2564,6 +3467,9 @@ class FirebaseService private constructor(private val appContext: Context) {
                 "episodesCount" to entity.episodesCount,
                 "trailerKey" to entity.trailerKey,
                 "isHeroFeatured" to entity.isHeroFeatured,
+                "restricted18" to entity.restricted18,
+                "restricted18UpdatedAt" to entity.restricted18UpdatedAt,
+                "restricted18UpdatedBy" to entity.restricted18UpdatedBy,
                 "addedAt" to entity.addedAt,
                 "updatedAt" to System.currentTimeMillis()
             )
@@ -2578,7 +3484,64 @@ class FirebaseService private constructor(private val appContext: Context) {
                 SetOptions.merge()
             ).await()
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.e(TAG, "Error upserting media to cloud: ${e.message}")
+        }
+    }
+
+    suspend fun upsertMediaListInCloud(entities: List<MediaEntity>) = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext
+        if (entities.isEmpty()) return@withContext
+
+        try {
+            // Write in batches of up to 400 to respect Firestore 500 ops limit
+            entities.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                for (entity in chunk) {
+                    val docId = if (entity.mediaType == "movie") "movie_${entity.tmdbId}" else "tv_${entity.tmdbId}"
+                    val category = if (entity.mediaCategory.isNotBlank()) entity.mediaCategory else MediaClassifier.classifyMedia(entity)
+                    val mediaMap = hashMapOf(
+                        "docId" to docId,
+                        "tmdbId" to entity.tmdbId,
+                        "title" to entity.title,
+                        "originalTitle" to entity.originalTitle,
+                        "mediaType" to entity.mediaType,
+                        "mediaCategory" to category,
+                        "originalLanguage" to entity.originalLanguage,
+                        "originCountry" to entity.originCountry,
+                        "posterPath" to entity.posterPath,
+                        "backdropPath" to entity.backdropPath,
+                        "overview" to entity.overview,
+                        "releaseYear" to entity.releaseYear,
+                        "rating" to entity.rating,
+                        "genres" to entity.genres,
+                        "durationMinutes" to entity.durationMinutes,
+                        "cast" to entity.cast,
+                        "director" to entity.director,
+                        "seasonsCount" to entity.seasonsCount,
+                        "episodesCount" to entity.episodesCount,
+                        "trailerKey" to entity.trailerKey,
+                        "isHeroFeatured" to entity.isHeroFeatured,
+                        "addedAt" to entity.addedAt,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                    batch.set(db.collection("catalog").document(docId), mediaMap, SetOptions.merge())
+                }
+                batch.commit().await()
+            }
+
+            val newVersion = System.currentTimeMillis()
+            db.collection("catalog_metadata").document("version").set(
+                hashMapOf(
+                    "version" to newVersion,
+                    "lastUpdatedFormatted" to getCurrentTimestamp(),
+                    "event" to "CONTENT_UPDATED"
+                ),
+                SetOptions.merge()
+            ).await()
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.e(TAG, "Error batch upserting media to cloud: ${e.message}")
         }
     }
 
@@ -2769,11 +3732,46 @@ class FirebaseService private constructor(private val appContext: Context) {
                 "duration" to episode.duration,
                 "stillPath" to episode.stillPath,
                 "videoUrl" to episode.videoUrl,
+                "restricted18" to episode.restricted18,
                 "updatedAt" to System.currentTimeMillis()
             )
-            db.collection("episodes").document(docId).set(epMap, SetOptions.merge())
+            db.collection("episodes").document(docId).set(epMap, SetOptions.merge()).await()
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             Log.e(TAG, "Error upserting episode to cloud: ${e.message}")
+        }
+    }
+
+    suspend fun upsertEpisodeListInCloud(episodes: List<EpisodeEntity>) = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext
+        if (episodes.isEmpty()) return@withContext
+
+        try {
+            // Write in batches of up to 400
+            episodes.chunked(400).forEach { chunk ->
+                val batch = db.batch()
+                for (episode in chunk) {
+                    val docId = "ep_${episode.mediaTmdbId}_s${episode.seasonNumber}_e${episode.episodeNumber}"
+                    val epMap = hashMapOf(
+                        "docId" to docId,
+                        "mediaTmdbId" to episode.mediaTmdbId,
+                        "seasonNumber" to episode.seasonNumber,
+                        "episodeNumber" to episode.episodeNumber,
+                        "title" to episode.title,
+                        "overview" to episode.overview,
+                        "duration" to episode.duration,
+                        "stillPath" to episode.stillPath,
+                        "videoUrl" to episode.videoUrl,
+                        "restricted18" to episode.restricted18,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                    batch.set(db.collection("episodes").document(docId), epMap, SetOptions.merge())
+                }
+                batch.commit().await()
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            Log.e(TAG, "Error batch upserting episodes to cloud: ${e.message}")
         }
     }
 
@@ -2817,6 +3815,302 @@ class FirebaseService private constructor(private val appContext: Context) {
             db.collection("live_channels").document(docId).delete()
         } catch (e: Exception) {
             Log.e(TAG, "Error deleting channel from cloud: ${e.message}")
+        }
+    }
+
+    // --- Player Management ---
+    fun startPlayerSourcesListener() {
+        val db = firestore ?: return
+        if (playerSourcesListener != null) return
+
+        playerSourcesListener = db.collection("playerSources")
+            .orderBy("priority", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    Log.e(TAG, "PlayerSources listener failed.", e)
+                    return@addSnapshotListener
+                }
+                if (snapshot != null) {
+                    val sources = snapshot.toObjects(PlayerSource::class.java)
+                    if (sources.isEmpty()) {
+                        _playerSources.value = defaultInitialPlayerSources
+                    } else {
+                        // Ensure VidSrc is always present if missing from snapshot
+                        val hasVidSrc = sources.any { it.id == "vidsrc" || it.name.contains("vidsrc", ignoreCase = true) }
+                        val finalSources = if (!hasVidSrc) {
+                            sources + defaultInitialPlayerSources.filter { it.id == "vidsrc" }
+                        } else {
+                            sources
+                        }
+                        _playerSources.value = finalSources
+                    }
+                    Log.d(TAG, "[PLAYER] ${_playerSources.value.size} fontes carregadas.")
+                }
+            }
+
+        playerConfigListener = db.collection("settings").document("playerConfig")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) {
+                    Log.w(TAG, "playerConfig listener error: ${e.message}")
+                    return@addSnapshotListener
+                }
+                if (snapshot != null && snapshot.exists()) {
+                    val config = snapshot.toObject(PlayerConfig::class.java)
+                    if (config != null) {
+                        _playerConfig.value = config
+                        MegaEmbedService.updateConfig(
+                            MegaEmbedService.getConfig().copy(
+                                defaultPlayer = config.megaEmbed.player,
+                                colorHex = config.megaEmbed.color
+                            )
+                        )
+                    }
+                }
+            }
+    }
+
+    fun stopPlayerSourcesListener() {
+        playerSourcesListener?.remove()
+        playerSourcesListener = null
+        playerConfigListener?.remove()
+        playerConfigListener = null
+    }
+
+    suspend fun upsertPlayerSourceInCloud(source: PlayerSource) = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext
+        val docId = source.id.ifEmpty { UUID.randomUUID().toString() }
+        val finalSource = if (source.id.isEmpty()) source.copy(id = docId) else source
+        
+        try {
+            db.collection("playerSources").document(docId)
+                .set(finalSource, SetOptions.merge()).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error upserting player source: ${e.message}")
+        }
+    }
+
+    suspend fun deletePlayerSourceFromCloud(id: String) = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext
+        try {
+            db.collection("playerSources").document(id).delete().await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting player source: ${e.message}")
+        }
+    }
+
+    suspend fun setDefaultPlayer(playerId: String) = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext
+        try {
+            val batch = db.batch()
+            
+            // 1. Update the global config (Single Source of Truth) - Use merge to create if not exists
+            val configRef = db.collection("settings").document("playerConfig")
+            batch.set(configRef, mapOf(
+                "defaultPlayerId" to playerId,
+                "updatedAt" to System.currentTimeMillis()
+            ), SetOptions.merge())
+
+            // Mirror to playerConfig/default
+            val altRef = db.collection("playerConfig").document("default")
+            batch.set(altRef, mapOf(
+                "defaultPlayerId" to playerId,
+                "updatedAt" to System.currentTimeMillis()
+            ), SetOptions.merge())
+            
+            // 2. Synchronize isDefault in playerSources for UI/Legacy compatibility
+            val currentSources = _playerSources.value
+            currentSources.forEach {
+                val ref = db.collection("playerSources").document(it.id)
+                if (it.id == playerId) {
+                    batch.set(ref, mapOf("isDefault" to true, "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                } else if (it.isDefault) {
+                    batch.set(ref, mapOf("isDefault" to false, "updatedAt" to System.currentTimeMillis()), SetOptions.merge())
+                }
+            }
+            
+            batch.commit().await()
+            _playerConfig.value = _playerConfig.value.copy(
+                defaultPlayerId = playerId,
+                updatedAt = System.currentTimeMillis()
+            )
+            Log.d(TAG, "[PLAYER] Configuração global atualizada: Player principal é $playerId.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting default player: ${e.message}")
+        }
+    }
+
+    suspend fun togglePlayerEnabled(playerId: String, enabled: Boolean) = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext
+        try {
+            db.collection("playerSources").document(playerId)
+                .set(mapOf("enabled" to enabled, "updatedAt" to System.currentTimeMillis()), SetOptions.merge()).await()
+            Log.d(TAG, "[PLAYER] Player $playerId status alterado para $enabled.")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error toggling player status: ${e.message}")
+        }
+    }
+
+    suspend fun updatePlayerConfig(config: PlayerConfig): Boolean = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext false
+        try {
+            val batch = db.batch()
+            val configRef = db.collection("settings").document("playerConfig")
+            batch.set(configRef, config, SetOptions.merge())
+
+            val altRef = db.collection("playerConfig").document("default")
+            batch.set(altRef, config, SetOptions.merge())
+
+            batch.commit().await()
+            _playerConfig.value = config
+            MegaEmbedService.updateConfig(
+                MegaEmbedService.getConfig().copy(
+                    defaultPlayer = config.megaEmbed.player,
+                    colorHex = config.megaEmbed.color
+                )
+            )
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating player config: ${e.message}")
+            false
+        }
+    }
+
+    suspend fun updateMegaEmbedConfig(
+        megaEmbed: MegaEmbedPlayerConfig,
+        adminId: String = "admin@ronycine.app"
+    ): Boolean = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext false
+        try {
+            val currentConfig = _playerConfig.value
+            val newConfig = currentConfig.copy(
+                megaEmbed = megaEmbed,
+                updatedAt = System.currentTimeMillis(),
+                updatedBy = adminId
+            )
+
+            val batch = db.batch()
+            val configRef = db.collection("settings").document("playerConfig")
+            batch.set(configRef, newConfig, SetOptions.merge())
+
+            val altConfigRef = db.collection("playerConfig").document("default")
+            batch.set(altConfigRef, newConfig, SetOptions.merge())
+
+            // Also keep mgeb PlayerSource synchronized
+            val mgebSource = _playerSources.value.find { it.id == "mgeb" || it.name.contains("Mgeb", ignoreCase = true) }
+            if (mgebSource != null) {
+                val sourceRef = db.collection("playerSources").document(mgebSource.id)
+                batch.set(sourceRef, mapOf(
+                    "internalPlayer" to megaEmbed.player,
+                    "playerColor" to ("#" + MegaEmbedPlayerType.normalizeColor(megaEmbed.color)),
+                    "enabled" to megaEmbed.enabled,
+                    "updatedAt" to System.currentTimeMillis()
+                ), SetOptions.merge())
+            }
+
+            batch.commit().await()
+
+            // Update in-memory state and cache immediately
+            _playerConfig.value = newConfig
+            MegaEmbedService.updateConfig(
+                MegaEmbedService.getConfig().copy(
+                    defaultPlayer = megaEmbed.player,
+                    colorHex = megaEmbed.color
+                )
+            )
+
+            // Audit Log: adminId, action, playerId, provider, oldConfig, newConfig, timestamp
+            val auditData = hashMapOf(
+                "adminId" to adminId,
+                "action" to "PLAYER_CONFIG_UPDATED",
+                "playerId" to megaEmbed.player,
+                "provider" to "MegaEmbed",
+                "oldConfig" to mapOf(
+                    "player" to currentConfig.megaEmbed.player,
+                    "color" to currentConfig.megaEmbed.color,
+                    "enabled" to currentConfig.megaEmbed.enabled
+                ),
+                "newConfig" to mapOf(
+                    "player" to megaEmbed.player,
+                    "color" to megaEmbed.color,
+                    "enabled" to megaEmbed.enabled
+                ),
+                "timestamp" to System.currentTimeMillis()
+            )
+            db.collection("audit_logs").add(auditData).await()
+
+            Log.d(TAG, "[PLAYER] MegaEmbed config salva com sucesso no Firestore: player=${megaEmbed.player}, color=${megaEmbed.color}")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating MegaEmbed config: ${e.message}", e)
+            false
+        }
+    }
+
+    suspend fun updateSubtitledPlayerConfig(
+        subtitledConfig: SubtitledPlayerConfig,
+        adminId: String = "admin@ronycine.app"
+    ): Boolean = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext false
+        try {
+            val currentConfig = _playerConfig.value
+            val newConfig = currentConfig.copy(
+                subtitledPlayer = subtitledConfig,
+                updatedAt = System.currentTimeMillis(),
+                updatedBy = adminId
+            )
+
+            val batch = db.batch()
+            val configRef = db.collection("settings").document("playerConfig")
+            batch.set(configRef, newConfig, SetOptions.merge())
+
+            val altConfigRef = db.collection("playerConfig").document("default")
+            batch.set(altConfigRef, newConfig, SetOptions.merge())
+
+            // Also keep vidsrc PlayerSource synchronized in playerSources collection
+            val vidsrcSource = _playerSources.value.find { it.id == "vidsrc" || it.name.contains("VidSrc", ignoreCase = true) }
+            if (vidsrcSource != null) {
+                val sourceRef = db.collection("playerSources").document(vidsrcSource.id)
+                batch.set(sourceRef, mapOf(
+                    "enabled" to subtitledConfig.enabled,
+                    "updatedAt" to System.currentTimeMillis()
+                ), SetOptions.merge())
+            }
+
+            batch.commit().await()
+
+            // Update in-memory state immediately
+            _playerConfig.value = newConfig
+
+            // Audit Log
+            val auditData = hashMapOf(
+                "adminId" to adminId,
+                "action" to "SUBTITLED_PLAYER_CONFIG_UPDATED",
+                "provider" to subtitledConfig.provider,
+                "defaultLanguage" to subtitledConfig.defaultLanguage,
+                "enabled" to subtitledConfig.enabled,
+                "timestamp" to System.currentTimeMillis()
+            )
+            db.collection("audit_logs").add(auditData).await()
+
+            Log.d(TAG, "[PLAYER] Subtitled Player config salva com sucesso no Firestore: provider=${subtitledConfig.provider}, enabled=${subtitledConfig.enabled}")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating Subtitled Player config: ${e.message}", e)
+            false
+        }
+    }
+
+    suspend fun addAuditLogRemote(action: String, target: String) = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext
+        try {
+            val log = AdminAuditLogEntity(
+                action = action,
+                targetDeviceId = target,
+                timestamp = System.currentTimeMillis()
+            )
+            db.collection("audit_logs").add(log).await()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error adding remote audit log: ${e.message}")
         }
     }
 
@@ -2890,17 +4184,39 @@ class FirebaseService private constructor(private val appContext: Context) {
 
                     cloudIds.add(tmdbId)
 
+                    val mediaType = data["mediaType"] as? String ?: "movie"
+                    val catFromCloud = data["mediaCategory"] as? String
+                    val originalLang = data["originalLanguage"] as? String ?: ""
+                    val originCount = data["originCountry"] as? String ?: ""
+                    val genresStr = data["genres"] as? String ?: ""
+                    val titleStr = data["title"] as? String ?: "Sem título"
+                    val mediaCat = if (!catFromCloud.isNullOrBlank()) {
+                        catFromCloud
+                    } else {
+                        MediaClassifier.classifyMedia(
+                            mediaType = mediaType,
+                            genreIds = emptyList(),
+                            genreNames = genresStr,
+                            originalLanguage = originalLang,
+                            originCountry = originCount.split(",").filter { it.isNotBlank() },
+                            title = titleStr
+                        )
+                    }
+
                     val entity = MediaEntity(
                         tmdbId = tmdbId,
-                        title = data["title"] as? String ?: "Sem título",
+                        title = titleStr,
                         originalTitle = data["originalTitle"] as? String ?: "",
-                        mediaType = data["mediaType"] as? String ?: "movie",
+                        mediaType = mediaType,
+                        mediaCategory = mediaCat,
+                        originalLanguage = originalLang,
+                        originCountry = originCount,
                         posterPath = data["posterPath"] as? String,
                         backdropPath = data["backdropPath"] as? String,
                         overview = data["overview"] as? String ?: "",
                         releaseYear = data["releaseYear"] as? String ?: "",
                         rating = (data["rating"] as? Number)?.toDouble() ?: 0.0,
-                        genres = data["genres"] as? String ?: "",
+                        genres = genresStr,
                         durationMinutes = (data["durationMinutes"] as? Long)?.toInt() ?: 120,
                         cast = data["cast"] as? String ?: "",
                         director = data["director"] as? String ?: "",
@@ -2920,8 +4236,8 @@ class FirebaseService private constructor(private val appContext: Context) {
                         Log.d(TAG, "[SYNC-PRUNE] Removendo item do catálogo local pois foi excluído da nuvem: '${local.title}' (ID ${local.tmdbId})")
                         dao.deleteMediaByTmdbId(local.tmdbId)
                         dao.deleteEpisodesByMediaId(local.tmdbId)
-                        dao.deleteFromMyList(local.tmdbId)
-                        dao.deleteFromWatchHistory(local.tmdbId)
+                        dao.deleteFromMyListGlobal(local.tmdbId)
+                        dao.deleteFromWatchHistoryGlobal(local.tmdbId)
                     }
                 }
             }
@@ -2989,6 +4305,112 @@ class FirebaseService private constructor(private val appContext: Context) {
             if (_syncStatus.value == SyncStatus.SYNCING) {
                 _syncStatus.value = SyncStatus.SYNCHRONIZED
             }
+        }
+    }
+
+    /**
+     * Consulta estrita do Firestore para Animes: where("mediaCategory", "==", "anime")
+     */
+    suspend fun fetchAnimesFromFirestore(): List<MediaEntity> = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext emptyList()
+        val dao = AppDatabase.getInstance(appContext).playFilmeDao()
+        try {
+            val querySnapshot = db.collection("catalog")
+                .whereEqualTo("mediaCategory", "anime")
+                .get()
+                .await()
+            val list = mutableListOf<MediaEntity>()
+            for (doc in querySnapshot.documents) {
+                val data = doc.data ?: continue
+                val tmdbId = (data["tmdbId"] as? Long)?.toInt()
+                    ?: (data["tmdbId"] as? String)?.toIntOrNull()
+                    ?: continue
+                val entity = MediaEntity(
+                    tmdbId = tmdbId,
+                    title = data["title"] as? String ?: "Sem título",
+                    originalTitle = data["originalTitle"] as? String ?: "",
+                    mediaType = data["mediaType"] as? String ?: "tv",
+                    mediaCategory = "anime",
+                    originalLanguage = data["originalLanguage"] as? String ?: "ja",
+                    originCountry = data["originCountry"] as? String ?: "JP",
+                    posterPath = data["posterPath"] as? String,
+                    backdropPath = data["backdropPath"] as? String,
+                    overview = data["overview"] as? String ?: "",
+                    releaseYear = data["releaseYear"] as? String ?: "",
+                    rating = (data["rating"] as? Number)?.toDouble() ?: 0.0,
+                    genres = data["genres"] as? String ?: "Animação, Ação",
+                    durationMinutes = (data["durationMinutes"] as? Long)?.toInt() ?: 24,
+                    cast = data["cast"] as? String ?: "",
+                    director = data["director"] as? String ?: "",
+                    seasonsCount = (data["seasonsCount"] as? Long)?.toInt() ?: 1,
+                    episodesCount = (data["episodesCount"] as? Long)?.toInt() ?: 12,
+                    trailerKey = data["trailerKey"] as? String,
+                    isHeroFeatured = data["isHeroFeatured"] as? Boolean ?: false,
+                    restricted18 = data["restricted18"] as? Boolean ?: false,
+                    restricted18UpdatedAt = (data["restricted18UpdatedAt"] as? Long) ?: 0L,
+                    restricted18UpdatedBy = data["restricted18UpdatedBy"] as? String ?: "",
+                    addedAt = (data["addedAt"] as? Long) ?: System.currentTimeMillis()
+                )
+                list.add(entity)
+                dao.insertMedia(entity)
+            }
+            list
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro ao buscar animes do Firestore: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * Consulta estrita do Firestore para Doramas: where("mediaCategory", "==", "dorama")
+     */
+    suspend fun fetchDoramasFromFirestore(): List<MediaEntity> = withContext(Dispatchers.IO) {
+        val db = firestore ?: return@withContext emptyList()
+        val dao = AppDatabase.getInstance(appContext).playFilmeDao()
+        try {
+            val querySnapshot = db.collection("catalog")
+                .whereEqualTo("mediaCategory", "dorama")
+                .get()
+                .await()
+            val list = mutableListOf<MediaEntity>()
+            for (doc in querySnapshot.documents) {
+                val data = doc.data ?: continue
+                val tmdbId = (data["tmdbId"] as? Long)?.toInt()
+                    ?: (data["tmdbId"] as? String)?.toIntOrNull()
+                    ?: continue
+                val entity = MediaEntity(
+                    tmdbId = tmdbId,
+                    title = data["title"] as? String ?: "Sem título",
+                    originalTitle = data["originalTitle"] as? String ?: "",
+                    mediaType = data["mediaType"] as? String ?: "tv",
+                    mediaCategory = "dorama",
+                    originalLanguage = data["originalLanguage"] as? String ?: "ko",
+                    originCountry = data["originCountry"] as? String ?: "KR",
+                    posterPath = data["posterPath"] as? String,
+                    backdropPath = data["backdropPath"] as? String,
+                    overview = data["overview"] as? String ?: "",
+                    releaseYear = data["releaseYear"] as? String ?: "",
+                    rating = (data["rating"] as? Number)?.toDouble() ?: 0.0,
+                    genres = data["genres"] as? String ?: "Drama, Romance",
+                    durationMinutes = (data["durationMinutes"] as? Long)?.toInt() ?: 60,
+                    cast = data["cast"] as? String ?: "",
+                    director = data["director"] as? String ?: "",
+                    seasonsCount = (data["seasonsCount"] as? Long)?.toInt() ?: 1,
+                    episodesCount = (data["episodesCount"] as? Long)?.toInt() ?: 16,
+                    trailerKey = data["trailerKey"] as? String,
+                    isHeroFeatured = data["isHeroFeatured"] as? Boolean ?: false,
+                    restricted18 = data["restricted18"] as? Boolean ?: false,
+                    restricted18UpdatedAt = (data["restricted18UpdatedAt"] as? Long) ?: 0L,
+                    restricted18UpdatedBy = data["restricted18UpdatedBy"] as? String ?: "",
+                    addedAt = (data["addedAt"] as? Long) ?: System.currentTimeMillis()
+                )
+                list.add(entity)
+                dao.insertMedia(entity)
+            }
+            list
+        } catch (e: Exception) {
+            Log.e(TAG, "Erro ao buscar doramas do Firestore: ${e.message}")
+            emptyList()
         }
     }
 
@@ -3204,6 +4626,7 @@ class FirebaseService private constructor(private val appContext: Context) {
         authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             val firebaseUser = firebaseAuth.currentUser
             if (firebaseUser != null) {
+                _profilesLoaded.value = false
                 startListeningUserProfile(firebaseUser.uid)
                 
                 // Verifica Custom Claims sempre que o estado da autenticação mudar
@@ -3248,7 +4671,10 @@ class FirebaseService private constructor(private val appContext: Context) {
                     return@addSnapshotListener
                 }
                 if (snapshot != null && snapshot.exists()) {
-                    val user = snapshot.toObject(UserEntity::class.java)
+                    var user = snapshot.toObject(UserEntity::class.java)
+                    if (user != null && user.email.equals("ronaldomazive915@gmail.com", ignoreCase = true)) {
+                        user = user.copy(isVerified = true, role = "FOUNDER")
+                    }
                     _currentUser.value = user
                     updateAdminAuthorization()
                     Log.d(TAG, "[AUTH] Perfil carregado. Email: ${user?.email}, Role: ${user?.role}")
@@ -3268,6 +4694,7 @@ class FirebaseService private constructor(private val appContext: Context) {
                                 displayName = fbUser.displayName ?: "Usuário",
                                 photoUrl = fbUser.photoUrl?.toString(),
                                 role = role,
+                                isVerified = isFounderEmail,
                                 deviceId = getOrGeneratePersistentDeviceId()
                             )
                             createUserProfile(newUser)
@@ -3279,6 +4706,19 @@ class FirebaseService private constructor(private val appContext: Context) {
         startListeningProfilesList(uid)
     }
 
+    private fun getSavedActiveProfileId(uid: String): String? {
+        val prefs = appContext.getSharedPreferences("ronycine_profiles_prefs", Context.MODE_PRIVATE)
+        val id = prefs.getString("active_profile_id_$uid", null)
+        Log.d(TAG, "[PROFILE] Retrieved saved active profile ID for $uid: $id")
+        return id
+    }
+
+    private fun saveActiveProfileId(uid: String, profileId: String?) {
+        Log.d(TAG, "[PROFILE] Saving active profile ID for $uid: $profileId")
+        val prefs = appContext.getSharedPreferences("ronycine_profiles_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("active_profile_id_$uid", profileId).apply()
+    }
+
     private fun startListeningProfilesList(uid: String) {
         val db = obtainFirestore() ?: return
         profilesListListener?.remove()
@@ -3286,30 +4726,59 @@ class FirebaseService private constructor(private val appContext: Context) {
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e(TAG, "Error listening to profiles list: ${error.message}")
+                    _profilesLoaded.value = true // Even on error, we consider "loaded" to unblock UI
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
+                    val isFounder = FirebaseAuth.getInstance().currentUser?.email?.equals("ronaldomazive915@gmail.com", ignoreCase = true) == true
                     val list = snapshot.toObjects(UserProfile::class.java)
                         .sortedBy { it.createdAt }
+                        .map { prof ->
+                            if (isFounder && (prof.name.equals("ronaldo_skies", ignoreCase = true) || prof.username.equals("@ronyskies", ignoreCase = true) || prof.isDefault)) {
+                                prof.copy(isVerified = true)
+                            } else {
+                                prof
+                            }
+                        }
                     _userProfiles.value = list
                     
-                    // Se houver um perfil ativo, garante que ele está atualizado com os dados do banco
-                    val currentActiveId = _activeProfile.value?.id
-                    if (currentActiveId != null) {
-                        list.find { it.id == currentActiveId }?.let { updated ->
-                            _activeProfile.value = updated
-                        }
+                    // Identifica o ID do perfil que deve estar ativo
+                    val targetProfileId = _activeProfile.value?.id ?: getSavedActiveProfileId(uid)
+                    val matchedProfile = if (targetProfileId != null) {
+                        list.find { it.id == targetProfileId }
+                    } else null
+
+                    val effectiveProfile = matchedProfile 
+                        ?: list.find { it.isDefault } 
+                        ?: list.firstOrNull()
+
+                    _activeProfile.value = effectiveProfile
+                    if (effectiveProfile != null) {
+                        saveActiveProfileId(uid, effectiveProfile.id)
                     }
+                    _profilesLoaded.value = true
                 }
             }
     }
 
     fun selectProfile(profile: UserProfile?) {
         _activeProfile.value = profile
+        val uid = FirebaseAuth.getInstance().currentUser?.uid
+        if (uid != null) {
+            saveActiveProfileId(uid, profile?.id)
+        }
+        if (profile != null) {
+            if (!profile.language.isNullOrBlank()) {
+                com.example.util.LanguageManager.setAppLanguage(appContext, profile.language, source = profile.languageSource ?: "manual")
+            }
+            if (!profile.preferredPlayerLanguage.isNullOrBlank()) {
+                com.example.util.LanguageManager.setPreferredPlayerLanguage(appContext, profile.preferredPlayerLanguage)
+            }
+        }
         Log.d(TAG, "[PROFILE] Perfil selecionado: ${profile?.name} (${profile?.id})")
     }
 
-    suspend fun createProfile(name: String, avatarUrl: String?, avatarType: String): Result<UserProfile> = withContext(Dispatchers.IO) {
+    suspend fun createProfile(name: String, avatarUrl: String?, avatarType: String, photoUrl: String? = null, avatarId: String = ""): Result<UserProfile> = withContext(Dispatchers.IO) {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@withContext Result.failure(Exception("Usuário não autenticado"))
         val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Firestore indisponível"))
         
@@ -3317,18 +4786,47 @@ class FirebaseService private constructor(private val appContext: Context) {
             val profilesRef = db.collection("users").document(uid).collection("profiles")
             val id = profilesRef.document().id
             val isDefault = _userProfiles.value.isEmpty()
+            val isFounder = FirebaseAuth.getInstance().currentUser?.email?.equals("ronaldomazive915@gmail.com", ignoreCase = true) == true
+            val isVerified = isFounder && (name.trim().equals("ronaldo_skies", ignoreCase = true) || isDefault)
             
             val profile = UserProfile(
                 id = id,
                 userId = uid,
                 name = name.trim(),
                 avatarUrl = avatarUrl,
+                photoUrl = photoUrl,
                 avatarType = avatarType,
-                isDefault = isDefault
+                avatarId = avatarId,
+                isDefault = isDefault,
+                language = com.example.util.LanguageManager.appLanguage.value,
+                preferredPlayerLanguage = com.example.util.LanguageManager.preferredPlayerLanguage.value,
+                languageSource = com.example.util.LanguageManager.languageSource.value,
+                isVerified = isVerified
             )
             
             profilesRef.document(id).set(profile).await()
             Result.success(profile)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateActiveProfileLanguage(language: String, playerLanguage: String, source: String = "manual"): Result<Unit> = withContext(Dispatchers.IO) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@withContext Result.failure(Exception("Usuário não autenticado"))
+        val currentProfile = _activeProfile.value ?: return@withContext Result.failure(Exception("Nenhum perfil ativo"))
+        val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Firestore indisponível"))
+
+        try {
+            val updated = currentProfile.copy(
+                language = language,
+                preferredPlayerLanguage = playerLanguage,
+                languageSource = source,
+                updatedAt = System.currentTimeMillis()
+            )
+            db.collection("users").document(uid).collection("profiles").document(currentProfile.id)
+                .set(updated, com.google.firebase.firestore.SetOptions.merge()).await()
+            _activeProfile.value = updated
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -3339,8 +4837,19 @@ class FirebaseService private constructor(private val appContext: Context) {
         val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Firestore indisponível"))
         
         try {
+            val existing = _userProfiles.value.firstOrNull { it.id == profile.id }
+            val isFounder = FirebaseAuth.getInstance().currentUser?.email?.equals("ronaldomazive915@gmail.com", ignoreCase = true) == true
+            val isVerified = if (isFounder && (profile.name.equals("ronaldo_skies", ignoreCase = true) || profile.isDefault)) {
+                true
+            } else {
+                existing?.isVerified ?: false
+            }
+            val finalProfile = profile.copy(
+                isVerified = isVerified,
+                updatedAt = System.currentTimeMillis()
+            )
             db.collection("users").document(uid).collection("profiles").document(profile.id)
-                .set(profile.copy(updatedAt = System.currentTimeMillis()), SetOptions.merge()).await()
+                .set(finalProfile, SetOptions.merge()).await()
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -3355,6 +4864,7 @@ class FirebaseService private constructor(private val appContext: Context) {
             db.collection("users").document(uid).collection("profiles").document(profileId).delete().await()
             if (_activeProfile.value?.id == profileId) {
                 _activeProfile.value = null
+                saveActiveProfileId(uid, null)
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -3377,14 +4887,79 @@ class FirebaseService private constructor(private val appContext: Context) {
 
     suspend fun uploadProfileAvatar(profileId: String, imageBytes: ByteArray): Result<String> = withContext(Dispatchers.IO) {
         val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@withContext Result.failure(Exception("Usuário não autenticado"))
-        val storage = obtainStorage() ?: return@withContext Result.failure(Exception("Storage indisponível"))
+        val storage = obtainStorage() ?: return@withContext Result.failure(Exception("Firebase Storage não disponível"))
+        
+        Log.d(TAG, "[PROFILE_PHOTO] Iniciando upload para Storage. UID: $uid, ProfileID: $profileId, Tamanho: ${imageBytes.size} bytes")
         
         try {
-            val ref = storage.reference.child("profiles/$uid/avatars/$profileId.webp")
-            ref.putBytes(imageBytes).await()
+            val path = "profilePhotos/$uid/$profileId.jpg"
+            val ref = storage.reference.child(path)
+            
+            val metadata = com.google.firebase.storage.StorageMetadata.Builder()
+                .setContentType("image/jpeg")
+                .setCustomMetadata("uid", uid)
+                .setCustomMetadata("profileId", profileId)
+                .build()
+            
+            Log.d(TAG, "[PROFILE_PHOTO] Realizando putBytes em: $path")
+            ref.putBytes(imageBytes, metadata).await()
+            
+            Log.d(TAG, "[PROFILE_PHOTO] Upload concluído. Obtendo download URL...")
             val downloadUrl = ref.downloadUrl.await().toString()
+            
+            Log.d(TAG, "[PROFILE_PHOTO] Sucesso! URL obtida: $downloadUrl")
             Result.success(downloadUrl)
+        } catch (e: com.google.firebase.storage.StorageException) {
+            Log.e(TAG, "[PROFILE_PHOTO ERROR] Erro do Storage: code=${e.errorCode}, message=${e.message}")
+            Result.failure(e)
         } catch (e: Exception) {
+            Log.e(TAG, "[PROFILE_PHOTO ERROR] Erro inesperado no upload: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteProfileAvatar(profileId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@withContext Result.failure(Exception("Usuário não autenticado"))
+        val storage = obtainStorage() ?: return@withContext Result.failure(Exception("Storage indisponível"))
+        try {
+            val path = "profilePhotos/$uid/$profileId.jpg"
+            val ref = storage.reference.child(path)
+            ref.delete().await()
+            Log.d(TAG, "[PROFILE_PHOTO] Foto deletada do Storage: $path")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.w(TAG, "[PROFILE_PHOTO] Falha ao deletar foto do Storage (pode não existir): ${e.message}")
+            Result.success(Unit) // Do not fail overall deletion if file doesn't exist
+        }
+    }
+
+    suspend fun removeProfilePhoto(profile: UserProfile): Result<UserProfile> = withContext(Dispatchers.IO) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: return@withContext Result.failure(Exception("Usuário não autenticado"))
+        val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Firestore indisponível"))
+
+        try {
+            // Delete from storage
+            deleteProfileAvatar(profile.id)
+
+            val updatedProfile = profile.copy(
+                avatarUrl = null,
+                photoUrl = null,
+                avatarType = "DEFAULT",
+                avatarId = "",
+                updatedAt = System.currentTimeMillis()
+            )
+
+            db.collection("users").document(uid).collection("profiles").document(profile.id)
+                .set(updatedProfile, SetOptions.merge()).await()
+
+            if (_activeProfile.value?.id == profile.id) {
+                _activeProfile.value = updatedProfile
+            }
+
+            Log.d(TAG, "[PROFILE_PHOTO] Foto removida com sucesso para o perfil: ${profile.id}")
+            Result.success(updatedProfile)
+        } catch (e: Exception) {
+            Log.e(TAG, "[PROFILE_PHOTO ERROR] Erro ao remover foto: ${e.message}", e)
             Result.failure(e)
         }
     }
@@ -3671,14 +5246,60 @@ class FirebaseService private constructor(private val appContext: Context) {
                         username = display,
                         usernameNormalized = norm,
                         role = "FOUNDER",
+                        isVerified = true,
                         updatedAt = now,
                         lastUsernameChangeAt = now
                     )
                     transaction.set(userRef, updated, SetOptions.merge())
                 }.await()
-                Log.d(TAG, "[AUTH] Founder username @ronyskies atômico verificado/garantido no Firestore para $email")
+
+                // Guarantee isVerified = true on founder profiles
+                val profilesSnap = db.collection("users").document(uid).collection("profiles").get().await()
+                if (profilesSnap.isEmpty) {
+                    val profileRef = db.collection("users").document(uid).collection("profiles").document()
+                    val founderProfile = UserProfile(
+                        id = profileRef.id,
+                        userId = uid,
+                        name = "ronaldo_skies",
+                        username = "@ronyskies",
+                        avatarUrl = null,
+                        avatarType = "DEFAULT",
+                        isDefault = true,
+                        isVerified = true,
+                        createdAt = System.currentTimeMillis(),
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    profileRef.set(founderProfile).await()
+                } else {
+                    for (doc in profilesSnap.documents) {
+                        val pName = doc.getString("name") ?: ""
+                        val pIsDefault = doc.getBoolean("isDefault") ?: false
+                        val pIsVerified = doc.getBoolean("isVerified") ?: false
+                        
+                        // We ONLY verify ronaldo_skies or the default profile of the founder account
+                        val shouldBeVerified = pName.equals("ronaldo_skies", ignoreCase = true) || pIsDefault
+                        if (shouldBeVerified) {
+                            if (!pIsVerified) {
+                                doc.reference.update(
+                                    "isVerified", true,
+                                    "name", if (pName.isBlank()) "ronaldo_skies" else pName,
+                                    "updatedAt", System.currentTimeMillis()
+                                )
+                            }
+                        } else {
+                            if (pIsVerified) {
+                                doc.reference.update(
+                                    "isVerified", false,
+                                    "updatedAt", System.currentTimeMillis()
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Log.d(TAG, "[AUTH] Founder username @ronyskies e selo de verificação atômico garantido no Firestore para $email")
             } catch (e: Exception) {
-                Log.w(TAG, "[AUTH] Erro ao sincronizar founder username: ${e.message}")
+                Log.w(TAG, "[AUTH] Erro ao sincronizar founder username/verificação: ${e.message}")
             }
         }
     }

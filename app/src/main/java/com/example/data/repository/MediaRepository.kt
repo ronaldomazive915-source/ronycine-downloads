@@ -15,6 +15,8 @@ import com.example.data.remote.MegaEmbedService
 import com.example.data.remote.TmdbApiService
 import com.example.data.remote.TmdbMediaDto
 import com.example.data.remote.TmdbNetwork
+import com.example.data.remote.TmdbPageResponse
+import com.example.util.MediaClassifier
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -327,6 +329,29 @@ class MediaRepository(
                     }
                 }
             }
+
+            // INTEGRANDO DESCOBERTA AUTOMÁTICA ADICIONAL VIA MGEB APIS
+            try {
+                if (fetchMovies) {
+                    val mgebMovies = com.example.data.remote.MegaEmbedService.fetchMegaEmbedMovies(forceRefresh = true)
+                    mgebMovies.forEach { item ->
+                        item.tmdbId?.let { id -> if (id > 0) candidates.add(Pair(id, "movie")) }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("MediaRepository", "Falha ao carregar filmes da Mgeb para auto-sync: ${e.message}")
+            }
+
+            try {
+                if (fetchSeries) {
+                    val mgebSeries = com.example.data.remote.MegaEmbedService.fetchMegaEmbedSeries(forceRefresh = true)
+                    mgebSeries.forEach { item ->
+                        item.tmdbId?.let { id -> if (id > 0) candidates.add(Pair(id, "tv")) }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("MediaRepository", "Falha ao carregar series da Mgeb para auto-sync: ${e.message}")
+            }
         } catch (e: Exception) {
             Log.e("MediaRepository", "[TMDB AUTO-SYNC] Erro durante consulta ao TMDB: ${e.message}", e)
         }
@@ -486,16 +511,19 @@ class MediaRepository(
             while (attempts < 3 && !importSuccess && isAutoSyncRunning.get()) {
                 attempts++
                 try {
-                    val dto = kotlinx.coroutines.withTimeoutOrNull(20_000L) {
+                    val dto = try {
                         if (type == "movie") {
                             api.getMovieDetails(movieId = tmdbId, apiKey = apiKey)
                         } else {
                             api.getSeriesDetails(seriesId = tmdbId, apiKey = apiKey)
                         }
+                    } catch (e: Exception) {
+                        Log.e("MediaRepository", "Error fetching metadata for TMDB #$tmdbId: ${e.message}")
+                        null
                     }
 
                     if (dto == null) {
-                        lastErr = "Timeout ao comunicar com TMDB (20s)"
+                        lastErr = "Falha ao comunicar com TMDB"
                         delay(500L)
                         continue
                     }
@@ -703,33 +731,43 @@ class MediaRepository(
         val db = firebaseService?.firestoreInstance ?: throw IllegalStateException("Firestore unavailable")
         val jobId = "job_${System.currentTimeMillis()}"
         
+        val isMgebAll = source == "mgeb_all"
+        val typesList = if (type == "both") listOf("movie", "tv") else listOf(type)
+        
         val job = ImportJob(
             id = jobId,
+            jobId = jobId,
             type = type,
             source = source,
-            total = ids.size,
-            status = "queued",
+            types = typesList,
+            total = if (isMgebAll) 0 else ids.size,
+            status = if (isMgebAll) "discovering" else "queued",
+            currentPhase = if (isMgebAll) "DISCOVERING" else "QUEUED",
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis(),
             config = config
         )
         
         db.collection("import_jobs").document(jobId).set(job).await()
         
-        // Add items in batches to Firestore
-        val batchSize = 500
-        ids.chunked(batchSize).forEach { chunk ->
-            db.runBatch { batch ->
-                chunk.forEach { (tmdbId, mediaType) ->
-                    val itemId = "${jobId}_${mediaType}_${tmdbId}"
-                    val item = ImportItem(
-                        id = itemId,
-                        jobId = jobId,
-                        tmdbId = tmdbId,
-                        mediaType = mediaType,
-                        status = "pending"
-                    )
-                    batch.set(db.collection("import_items").document(itemId), item)
-                }
-            }.await()
+        if (!isMgebAll) {
+            // Add items in batches to Firestore
+            val batchSize = 500
+            ids.chunked(batchSize).forEach { chunk ->
+                db.runBatch { batch ->
+                    chunk.forEach { (tmdbId, mediaType) ->
+                        val itemId = "${jobId}_${mediaType}_${tmdbId}"
+                        val item = ImportItem(
+                            id = itemId,
+                            jobId = jobId,
+                            tmdbId = tmdbId,
+                            mediaType = mediaType,
+                            status = "pending"
+                        )
+                        batch.set(db.collection("import_items").document(itemId), item)
+                    }
+                }.await()
+            }
         }
         
         // Auto-start if it's the only one or if it's high priority
@@ -758,7 +796,135 @@ class MediaRepository(
         val db = firebaseService?.firestoreInstance ?: return
         
         Log.d("MediaRepository", "[BATCH] Iniciando processamento do lote $jobId")
+        
+        // Fetch current job object
+        val jobSnap = db.collection("import_jobs").document(jobId).get().await()
+        var jobObj = jobSnap.toObject(ImportJob::class.java) ?: return
+        
+        // Phase 1: Automatic Discovery
+        if (jobObj.status == "discovering" || jobObj.currentPhase == "DISCOVERING") {
+            try {
+                Log.d("MediaRepository", "[DISCOVER] Iniciando descoberta automática do catálogo Mgeb")
+                val selectedTypes = jobObj.types.ifEmpty { 
+                    if (jobObj.type == "both") listOf("movie", "tv") else listOf(jobObj.type)
+                }
+                val discovered = mutableListOf<Pair<Int, String>>()
+                
+                if (selectedTypes.contains("movie") || selectedTypes.contains("both")) {
+                    db.collection("import_jobs").document(jobId).update(
+                        mapOf(
+                            "currentPhase" to "DISCOVERING",
+                            "lastError" to "Buscando catálogo de filmes na API Mgeb...",
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                    ).await()
+                    val moviesList = MegaEmbedService.fetchMegaEmbedMovies(forceRefresh = true)
+                    moviesList.forEach { item ->
+                        item.tmdbId?.let { id -> discovered.add(Pair(id, "movie")) }
+                    }
+                }
+                
+                // Cancel checkpoint during movie discovery
+                val checkSnap1 = db.collection("import_jobs").document(jobId).get().await()
+                if (checkSnap1.getBoolean("cancelRequested") == true || checkSnap1.getString("status") == "cancelled") {
+                    db.collection("import_jobs").document(jobId).update("status", "cancelled", "currentPhase", "CANCELLED").await()
+                    return
+                }
+
+                if (selectedTypes.contains("tv") || selectedTypes.contains("both") || selectedTypes.contains("anime") || selectedTypes.contains("dorama")) {
+                    db.collection("import_jobs").document(jobId).update(
+                        mapOf(
+                            "currentPhase" to "DISCOVERING",
+                            "lastError" to "Buscando catálogo de séries na API Mgeb...",
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                    ).await()
+                    val seriesList = MegaEmbedService.fetchMegaEmbedSeries(forceRefresh = true)
+                    seriesList.forEach { item ->
+                        item.tmdbId?.let { id -> discovered.add(Pair(id, "tv")) }
+                    }
+                }
+                
+                // Cancel checkpoint during series discovery
+                val checkSnap2 = db.collection("import_jobs").document(jobId).get().await()
+                if (checkSnap2.getBoolean("cancelRequested") == true || checkSnap2.getString("status") == "cancelled") {
+                    db.collection("import_jobs").document(jobId).update("status", "cancelled", "currentPhase", "CANCELLED").await()
+                    return
+                }
+
+                val totalDiscovered = discovered.size
+                db.collection("import_jobs").document(jobId).update(
+                    mapOf(
+                        "totalDiscovered" to totalDiscovered,
+                        "total" to totalDiscovered,
+                        "currentPhase" to "QUEUED",
+                        "status" to "queued",
+                        "lastError" to "Enfileirando $totalDiscovered itens encontrados no Firestore...",
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                ).await()
+                
+                // Enqueue in chunks of 500
+                val batchSize = 500
+                var queuedCount = 0
+                discovered.chunked(batchSize).forEachIndexed { index, chunk ->
+                    val loopSnap = db.collection("import_jobs").document(jobId).get().await()
+                    if (loopSnap.getBoolean("cancelRequested") == true || loopSnap.getString("status") == "cancelled") {
+                        db.collection("import_jobs").document(jobId).update("status", "cancelled", "currentPhase", "CANCELLED").await()
+                        return@processImportJob
+                    }
+                    if (loopSnap.getBoolean("pauseRequested") == true || loopSnap.getString("status") == "paused") {
+                        db.collection("import_jobs").document(jobId).update("status", "paused", "currentPhase", "PAUSED").await()
+                        return@processImportJob
+                    }
+
+                    db.runBatch { batch ->
+                        chunk.forEach { (tmdbId, mediaType) ->
+                            val itemId = "${jobId}_${mediaType}_${tmdbId}"
+                            val item = ImportItem(
+                                id = itemId,
+                                jobId = jobId,
+                                tmdbId = tmdbId,
+                                mediaType = mediaType,
+                                status = "pending"
+                            )
+                            batch.set(db.collection("import_items").document(itemId), item)
+                        }
+                    }.await()
+                    
+                    queuedCount += chunk.size
+                    db.collection("import_jobs").document(jobId).update(
+                        mapOf(
+                            "totalQueued" to queuedCount,
+                            "currentPage" to (index + 1),
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                    ).await()
+                }
+                
+                db.collection("import_jobs").document(jobId).update(
+                    mapOf(
+                        "status" to "processing",
+                        "currentPhase" to "PROCESSING",
+                        "lastError" to "Descoberta de $totalDiscovered itens concluída com sucesso! Iniciando fila..."
+                    )
+                ).await()
+                
+            } catch (e: Exception) {
+                Log.e("MediaRepository", "Erro na descoberta do catálogo Mgeb: ${e.message}")
+                db.collection("import_jobs").document(jobId).update(
+                    mapOf(
+                        "status" to "failed",
+                        "currentPhase" to "FAILED",
+                        "lastError" to "Falha na descoberta: ${e.localizedMessage}"
+                    )
+                ).await()
+                return
+            }
+        }
+
         updateJobStatus(jobId, "processing", startedAt = System.currentTimeMillis())
+        db.collection("import_jobs").document(jobId).update("currentPhase", "PROCESSING").await()
         
         val jobConfig = db.collection("import_jobs").document(jobId).get().await()
             .toObject(ImportJob::class.java)?.config ?: ImportConfig()
@@ -766,61 +932,87 @@ class MediaRepository(
         val maxConcurrency = jobConfig.concurrentWorkers.coerceIn(1, 5)
             
         while (true) {
-            val jobSnapshot = db.collection("import_jobs").document(jobId).get().await()
-            val currentStatus = jobSnapshot.getString("status") ?: "failed"
-            if (currentStatus != "processing") {
-                Log.d("MediaRepository", "[BATCH] Lote $jobId parou com status: $currentStatus")
+            val currentJobSnap = db.collection("import_jobs").document(jobId).get().await()
+            val currentJob = currentJobSnap.toObject(ImportJob::class.java)
+            if (currentJob == null) {
+                Log.d("MediaRepository", "[BATCH] Lote $jobId não encontrado no Firestore")
+                break
+            }
+            if (currentJob.status == "paused" || currentJob.pauseRequested) {
+                Log.d("MediaRepository", "[BATCH] Lote $jobId pausado")
+                db.collection("import_jobs").document(jobId).update("status", "paused", "currentPhase", "PAUSED").await()
+                break
+            }
+            if (currentJob.status == "cancelled" || currentJob.cancelRequested) {
+                Log.d("MediaRepository", "[BATCH] Lote $jobId cancelado")
+                db.collection("import_jobs").document(jobId).update("status", "cancelled", "currentPhase", "CANCELLED").await()
                 break
             }
             
-            // Fetch all items for this job to avoid composite index requirements
-            val allItemsSnapshot = db.collection("import_items")
+            // Scalable O(1) Fetch: Query ONLY pending items instead of fetching all 50k into memory!
+            val pendingItemsSnapshot = db.collection("import_items")
                 .whereEqualTo("jobId", jobId)
+                .whereEqualTo("status", "pending")
+                .limit(maxConcurrency.toLong())
                 .get().await()
             
-            val allItems = allItemsSnapshot.toObjects(ImportItem::class.java)
-            val pendingItems = allItems.filter { it.status == "pending" }.take(maxConcurrency)
+            val pendingItems = pendingItemsSnapshot.toObjects(ImportItem::class.java)
             
             if (pendingItems.isEmpty()) {
-                val processingItems = allItems.filter { it.status == "processing" }
-                val now = System.currentTimeMillis()
-                val stuckItems = processingItems.filter { (now - (it.processedAt ?: now)) > 120000L } // stuck > 2 mins
+                // Check if any are still in 'processing' status
+                val processingItemsSnapshot = db.collection("import_items")
+                    .whereEqualTo("jobId", jobId)
+                    .whereEqualTo("status", "processing")
+                    .limit(20)
+                    .get().await()
                 
-                if (stuckItems.isNotEmpty()) {
-                    Log.w("MediaRepository", "[BATCH] Encontrados ${stuckItems.size} itens travados em 'processing'. Reivindicando...")
-                    stuckItems.forEach { stuck ->
-                        if (stuck.retryCount >= 2) {
-                            updateItemStatus(jobId, stuck.id, "failed", error = "Timeout excedido no processamento", stage = "ERRO")
-                        } else {
-                            db.collection("import_items").document(stuck.id).update(
-                                mapOf(
-                                    "status" to "pending",
-                                    "retryCount" to stuck.retryCount + 1,
-                                    "stage" to "PENDENTE"
-                                )
-                            ).await()
-                        }
-                    }
-                    delay(500)
-                    continue
-                }
+                val processingItems = processingItemsSnapshot.toObjects(ImportItem::class.java)
                 
-                // Check if any items are still processing
                 if (processingItems.isEmpty()) {
-                    val finalSuccess = allItems.count { it.status == "success" }
-                    val finalFailed = allItems.count { it.status == "failed" || it.status == "incomplete" }
-                    val finalStatus = if (finalFailed > 0 && finalSuccess == 0) "failed" else "completed"
-                    Log.d("MediaRepository", "[BATCH] Lote $jobId concluído. Status final: $finalStatus")
-                    updateJobStatus(jobId, finalStatus, finishedAt = System.currentTimeMillis())
+                    // No pending and no processing left. The job is done!
+                    val finalJobSnap = db.collection("import_jobs").document(jobId).get().await()
+                    val finalJob = finalJobSnap.toObject(ImportJob::class.java) ?: currentJob
+                    
+                    val phaseStatus = if (finalJob.failed > 0) "COMPLETED_WITH_ERRORS" else "COMPLETED"
+                    Log.d("MediaRepository", "[BATCH] Lote $jobId concluído. Status: $phaseStatus")
+                    
+                    db.collection("import_jobs").document(jobId).update(
+                        mapOf(
+                            "status" to "completed",
+                            "currentPhase" to phaseStatus,
+                            "finishedAt" to System.currentTimeMillis(),
+                            "updatedAt" to System.currentTimeMillis(),
+                            "lastError" to "Importação concluída com sucesso!"
+                        )
+                    ).await()
                     break
                 } else {
-                    // Still processing items, wait a bit
-                    delay(1000)
+                    // Reclaim stuck items (timeout > 2 mins)
+                    val now = System.currentTimeMillis()
+                    val stuckItems = processingItems.filter { (now - (it.processedAt ?: now)) > 120000L }
+                    
+                    if (stuckItems.isNotEmpty()) {
+                        Log.w("MediaRepository", "[BATCH] Reivindicando ${stuckItems.size} itens travados em 'processing'")
+                        stuckItems.forEach { stuck ->
+                            if (stuck.retryCount >= 2) {
+                                updateItemStatus(jobId, stuck.id, "failed", error = "Timeout excedido no processamento (2m)", stage = "ERRO")
+                            } else {
+                                db.collection("import_items").document(stuck.id).update(
+                                    mapOf(
+                                        "status" to "pending",
+                                        "retryCount" to stuck.retryCount + 1,
+                                        "stage" to "PENDENTE"
+                                    )
+                                ).await()
+                            }
+                        }
+                    }
+                    delay(2000)
                     continue
                 }
             }
             
-            // Process pending items concurrently with maxConcurrency
+            // Process pending items concurrently
             coroutineScope {
                 pendingItems.map { item ->
                     async(Dispatchers.IO) {
@@ -855,18 +1047,21 @@ class MediaRepository(
                 return
             }
             
-            // 2. Fetch from TMDB with timeout
+            // 2. Fetch from TMDB
             db.collection("import_items").document(item.id).update("stage", "METADADOS").await()
-            val dto = kotlinx.coroutines.withTimeoutOrNull(20000L) {
+            val dto = try {
                 if (item.mediaType == "movie") {
                     api.getMovieDetails(item.tmdbId, apiKey)
                 } else {
                     api.getSeriesDetails(item.tmdbId, apiKey)
                 }
+            } catch (e: Exception) {
+                Log.e("MediaRepository", "Error fetching metadata for TMDB #${item.tmdbId}: ${e.message}")
+                null
             }
             
             if (dto == null) {
-                updateItemStatus(jobId, item.id, "failed", error = "Timeout de resposta do TMDB (20s)", stage = "ERRO")
+                updateItemStatus(jobId, item.id, "failed", error = "Falha ao obter resposta do TMDB", stage = "ERRO")
                 return
             }
             
@@ -892,9 +1087,17 @@ class MediaRepository(
                 db.collection("import_items").document(item.id).update("stage", "EPISÓDIOS").await()
                 fetchAndStoreAllSeasonsAndEpisodes(entity.tmdbId, dto.numberOfSeasons)
             }
+
+            // CONFIRMAÇÃO OBRIGATÓRIA NO FIRESTORE ANTES DE MARCAR COMO SUCESSO
+            db.collection("import_items").document(item.id).update("stage", "CONFIRMANDO").await()
+            val expectedDocId = if (entity.mediaType == "movie") "movie_${entity.tmdbId}" else "tv_${entity.tmdbId}"
+            val checkConfirm = db.collection("catalog").document(expectedDocId).get().await()
+            if (!checkConfirm.exists()) {
+                throw IllegalStateException("Erro de Sincronização: Documento $expectedDocId não foi encontrado na coleção catalog após o upload.")
+            }
             
             updateItemStatus(jobId, item.id, "success", title = entity.title, stage = "IMPORTADO")
-            Log.d("MediaRepository", "[ITEM SUCCESS] TMDB #${item.tmdbId} (${entity.title}) importado com sucesso.")
+            Log.d("MediaRepository", "[ITEM SUCCESS] TMDB #${item.tmdbId} (${entity.title}) importado e confirmado no Catálogo.")
             
         } catch (e: Exception) {
             Log.e("MediaRepository", "[ITEM ERROR] Falha ao importar TMDB #${item.tmdbId}: ${e.message}", e)
@@ -968,12 +1171,43 @@ class MediaRepository(
         db.collection("import_jobs").document(jobId).update(updates).await()
     }
     
-    suspend fun pauseImportJob(jobId: String) = updateJobStatus(jobId, "paused")
+    suspend fun pauseImportJob(jobId: String) {
+        val db = firebaseService?.firestoreInstance ?: return
+        db.collection("import_jobs").document(jobId).update(
+            mapOf(
+                "status" to "paused",
+                "pauseRequested" to true,
+                "currentPhase" to "PAUSED",
+                "updatedAt" to System.currentTimeMillis()
+            )
+        ).await()
+    }
+    
     suspend fun resumeImportJob(jobId: String) {
-        updateJobStatus(jobId, "processing")
+        val db = firebaseService?.firestoreInstance ?: return
+        db.collection("import_jobs").document(jobId).update(
+            mapOf(
+                "status" to "processing",
+                "pauseRequested" to false,
+                "cancelRequested" to false,
+                "currentPhase" to "PROCESSING",
+                "updatedAt" to System.currentTimeMillis()
+            )
+        ).await()
         startImportWorker(jobId)
     }
-    suspend fun cancelImportJob(jobId: String) = updateJobStatus(jobId, "cancelled")
+    
+    suspend fun cancelImportJob(jobId: String) {
+        val db = firebaseService?.firestoreInstance ?: return
+        db.collection("import_jobs").document(jobId).update(
+            mapOf(
+                "status" to "cancelled",
+                "cancelRequested" to true,
+                "currentPhase" to "CANCELLED",
+                "updatedAt" to System.currentTimeMillis()
+            )
+        ).await()
+    }
 
     suspend fun reprocessFailedItems(jobId: String) = withContext(Dispatchers.IO) {
         val db = firebaseService?.firestoreInstance ?: return@withContext
@@ -1013,26 +1247,34 @@ class MediaRepository(
         val db = firebaseService?.firestoreInstance
         if (db == null) {
             return@withContext ImportSummary(
-                totalMovies = dao.getMovieCount(),
-                totalSeries = dao.getSeriesCount(),
+                totalMovies = dao.getMediaCountByCategory("movie"),
+                totalSeries = dao.getMediaCountByCategory("series"),
+                totalAnimes = dao.getMediaCountByCategory("anime"),
+                totalDoramas = dao.getMediaCountByCategory("dorama"),
                 activeJobsCount = 0
             )
         }
         try {
-            val moviesCount = db.collection("catalog").whereEqualTo("mediaType", "movie").count().get(com.google.firebase.firestore.AggregateSource.SERVER).await().count
-            val seriesCount = db.collection("catalog").whereEqualTo("mediaType", "tv").count().get(com.google.firebase.firestore.AggregateSource.SERVER).await().count
+            val moviesCount = db.collection("catalog").whereEqualTo("mediaCategory", "movie").count().get(com.google.firebase.firestore.AggregateSource.SERVER).await().count
+            val seriesCount = db.collection("catalog").whereEqualTo("mediaCategory", "series").count().get(com.google.firebase.firestore.AggregateSource.SERVER).await().count
+            val animesCount = db.collection("catalog").whereEqualTo("mediaCategory", "anime").count().get(com.google.firebase.firestore.AggregateSource.SERVER).await().count
+            val doramasCount = db.collection("catalog").whereEqualTo("mediaCategory", "dorama").count().get(com.google.firebase.firestore.AggregateSource.SERVER).await().count
             val activeJobs = db.collection("import_jobs").whereIn("status", listOf("queued", "processing", "paused")).get().await().size()
             
             ImportSummary(
-                totalMovies = moviesCount.toInt(),
-                totalSeries = seriesCount.toInt(),
+                totalMovies = if (moviesCount > 0) moviesCount.toInt() else dao.getMediaCountByCategory("movie"),
+                totalSeries = if (seriesCount > 0) seriesCount.toInt() else dao.getMediaCountByCategory("series"),
+                totalAnimes = if (animesCount > 0) animesCount.toInt() else dao.getMediaCountByCategory("anime"),
+                totalDoramas = if (doramasCount > 0) doramasCount.toInt() else dao.getMediaCountByCategory("dorama"),
                 activeJobsCount = activeJobs
             )
         } catch (e: Exception) {
             Log.w("MediaRepository", "Firestore stats unavailable (${e.message}), falling back to local database counts.")
             ImportSummary(
-                totalMovies = dao.getMovieCount(),
-                totalSeries = dao.getSeriesCount(),
+                totalMovies = dao.getMediaCountByCategory("movie"),
+                totalSeries = dao.getMediaCountByCategory("series"),
+                totalAnimes = dao.getMediaCountByCategory("anime"),
+                totalDoramas = dao.getMediaCountByCategory("dorama"),
                 activeJobsCount = 0
             )
         }
@@ -1054,14 +1296,24 @@ class MediaRepository(
 
     // --- Catalog Observables ---
     val allMedia: Flow<List<MediaEntity>> = dao.getAllMedia()
-    val movies: Flow<List<MediaEntity>> = dao.getMediaByType("movie")
-    val series: Flow<List<MediaEntity>> = dao.getMediaByType("tv")
+    val animes: Flow<List<MediaEntity>> = dao.getAllMedia().map { list ->
+        list.filter { MediaClassifier.classifyMedia(it) == MediaClassifier.CATEGORY_ANIME }
+    }
+    val doramas: Flow<List<MediaEntity>> = dao.getAllMedia().map { list ->
+        list.filter { MediaClassifier.classifyMedia(it) == MediaClassifier.CATEGORY_DORAMA }
+    }
+    val movies: Flow<List<MediaEntity>> = dao.getAllMedia().map { list ->
+        list.filter { MediaClassifier.classifyMedia(it) == MediaClassifier.CATEGORY_MOVIE }
+    }
+    val series: Flow<List<MediaEntity>> = dao.getAllMedia().map { list ->
+        list.filter { MediaClassifier.classifyMedia(it) == MediaClassifier.CATEGORY_SERIES }
+    }
     val featuredHeroMedia: Flow<List<MediaEntity>> = dao.getFeaturedHeroMedia()
-    val myList: Flow<List<MediaEntity>> = dao.getMyList()
-    val continueWatching: Flow<List<WatchHistoryEntity>> = dao.getContinueWatching().map { list ->
+    fun getMyList(profileId: String): Flow<List<MediaEntity>> = dao.getMyList(profileId)
+    fun getContinueWatching(profileId: String): Flow<List<WatchHistoryEntity>> = dao.getContinueWatching(profileId).map { list ->
         list.distinctBy { it.tmdbId }
     }
-    val watchHistory: Flow<List<WatchHistoryEntity>> = dao.getWatchHistory()
+    fun getWatchHistory(profileId: String): Flow<List<WatchHistoryEntity>> = dao.getWatchHistory(profileId)
 
     // --- Featured Media Management Observables ---
     val activeFeaturedItems: Flow<List<FeaturedMediaItem>> = combine(
@@ -1112,6 +1364,8 @@ class MediaRepository(
     // --- Statistics Observables ---
     val movieCount: Flow<Int> = dao.observeMovieCount()
     val seriesCount: Flow<Int> = dao.observeSeriesCount()
+    val animeCount: Flow<Int> = dao.observeMediaCountByCategory("anime")
+    val doramaCount: Flow<Int> = dao.observeMediaCountByCategory("dorama")
     val episodeCount: Flow<Int> = dao.observeEpisodeCount()
     val myListCount: Flow<Int> = dao.observeMyListCount()
     val watchHistoryCount: Flow<Int> = dao.observeWatchHistoryCount()
@@ -1164,26 +1418,41 @@ class MediaRepository(
         }
     }
 
-    suspend fun getOrFetchMediaByTmdbId(tmdbId: Int, type: String? = null): MediaEntity? = withContext(Dispatchers.IO) {
-        val local = getMediaByTmdbId(tmdbId, type)
-        if (local != null) return@withContext local
+    private val detailsMemoryCache = java.util.concurrent.ConcurrentHashMap<String, MediaEntity>()
 
-        // If not in local database, fetch metadata from TMDB for temporary display (do NOT save to DB)
-        val mediaType = type ?: "movie"
+    suspend fun getOrFetchMediaByTmdbId(tmdbId: Int, type: String? = null): MediaEntity? = withContext(Dispatchers.IO) {
+        if (tmdbId <= 0) return@withContext null
+        val normType = if (type.equals("tv", ignoreCase = true) || type.equals("serie", ignoreCase = true) || type.equals("series", ignoreCase = true)) "tv" else "movie"
+        val cacheKey = "${normType}_$tmdbId"
+
+        detailsMemoryCache[cacheKey]?.let { return@withContext it }
+
+        val local = getMediaByTmdbId(tmdbId, normType) ?: getMediaByTmdbId(tmdbId, null)
+        if (local != null) {
+            detailsMemoryCache[cacheKey] = local
+            return@withContext local
+        }
+
         try {
-            if (mediaType == "movie" || mediaType == "filme") {
-                val dto = api.getMovieDetails(tmdbId, apiKey)
-                mapDtoToEntity(dto, "movie")
-            } else {
-                val dto = api.getSeriesDetails(tmdbId, apiKey)
-                mapDtoToEntity(dto, "tv")
+            kotlinx.coroutines.withTimeout(5000L) {
+                val entity = if (normType == "movie") {
+                    val dto = api.getMovieDetails(tmdbId, apiKey)
+                    mapDtoToEntity(dto, "movie")
+                } else {
+                    val dto = api.getSeriesDetails(tmdbId, apiKey)
+                    mapDtoToEntity(dto, "tv")
+                }
+                if (entity != null) {
+                    detailsMemoryCache[cacheKey] = entity
+                }
+                entity
             }
         } catch (e: Exception) {
             null
         }
     }
     fun observeMediaByTmdbId(tmdbId: Int): Flow<MediaEntity?> = dao.observeMediaByTmdbId(tmdbId)
-    fun isMediaInMyList(tmdbId: Int): Flow<Boolean> = dao.isMediaInMyList(tmdbId)
+    fun isMediaInMyList(tmdbId: Int, profileId: String): Flow<Boolean> = dao.isMediaInMyList(tmdbId, profileId)
 
     // --- Initial Seed & Protection ---
     suspend fun seedInitialCatalogIfEmpty() = withContext(Dispatchers.IO) {
@@ -1452,19 +1721,42 @@ class MediaRepository(
     suspend fun importMediaEntity(entity: MediaEntity): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         Log.d("MediaRepository", "[IMPORT] iniciado | TMDB ID: ${entity.tmdbId} | tipo: ${entity.mediaType} | título: ${entity.title}")
         try {
-            val existing = dao.getMediaByTmdbId(entity.tmdbId)
+            val existing = dao.getMediaByTmdbIdAndType(entity.tmdbId, entity.mediaType)
             val isUpdate = existing != null
             
-            Log.d("MediaRepository", "[IMPORT] salvando no Firestore...")
-            kotlinx.coroutines.withTimeout(20000L) {
-                dao.insertMedia(entity)
-                firebaseService?.upsertMediaInCloud(entity)
+            val canonicalCat = MediaClassifier.classifyMedia(entity)
+            val entityToSave = if (entity.mediaCategory != canonicalCat) {
+                entity.copy(mediaCategory = canonicalCat)
+            } else {
+                entity
+            }
 
-                if (entity.mediaType == "tv") {
-                    fetchAndStoreEpisodes(entity.tmdbId, 1)
+            Log.d("MediaRepository", "[IMPORT] Salvando no SQLite local...")
+            dao.insertMedia(entityToSave)
+
+            Log.d("MediaRepository", "[IMPORT] Salvando no Firestore Cloud...")
+            firebaseService?.upsertMediaInCloud(entityToSave)
+
+            if (entityToSave.mediaType == "tv" || entityToSave.mediaType == "serie") {
+                Log.d("MediaRepository", "[IMPORT] Processando episódios da 1ª temporada...")
+                fetchAndStoreEpisodes(entityToSave.tmdbId, 1)
+            }
+
+            // CONFIRMAÇÃO OBRIGATÓRIA NO FIRESTORE ANTES DE MARCAR COMO SUCESSO
+            if (firebaseService != null) {
+                val db = firebaseService.firestoreInstance
+                if (db != null) {
+                    Log.d("MediaRepository", "[IMPORT] Verificando persistência no Firestore...")
+                    val expectedDocId = if (entityToSave.mediaType == "movie") "movie_${entityToSave.tmdbId}" else "tv_${entityToSave.tmdbId}"
+                    val checkConfirm = db.collection("catalog").document(expectedDocId).get().await()
+                    if (!checkConfirm.exists()) {
+                        Log.e("MediaRepository", "[IMPORT ERROR] Documento $expectedDocId não encontrado após tentativa de upload.")
+                        return@withContext Pair(false, "Erro de Sincronização: O conteúdo não foi encontrado no servidor após o salvamento.")
+                    }
                 }
             }
-            Log.d("MediaRepository", "[IMPORT] Firestore confirmou e concluído.")
+            
+            Log.d("MediaRepository", "[IMPORT] Firestore confirmado e concluído.")
             
             val message = if (isUpdate) {
                 "Conteúdo '${entity.title}' foi atualizado com sucesso no catálogo!"
@@ -1516,8 +1808,8 @@ class MediaRepository(
             // 2. Só depois exclui do SQLite local
             dao.deleteMediaByTmdbId(tmdbId)
             dao.deleteEpisodesByMediaId(tmdbId)
-            dao.deleteFromMyList(tmdbId)
-            dao.deleteFromWatchHistory(tmdbId)
+            dao.deleteFromMyListGlobal(tmdbId)
+            dao.deleteFromWatchHistoryGlobal(tmdbId)
 
             Log.d("MediaRepository", "[DELETE] SQLite local atualizado.")
             Pair(true, "Conteúdo '$title' foi excluído do catálogo com sucesso.")
@@ -1561,8 +1853,8 @@ class MediaRepository(
                 val tmdbId = item.first
                 dao.deleteMediaByTmdbId(tmdbId)
                 dao.deleteEpisodesByMediaId(tmdbId)
-                dao.deleteFromMyList(tmdbId)
-                dao.deleteFromWatchHistory(tmdbId)
+                dao.deleteFromMyListGlobal(tmdbId)
+                dao.deleteFromWatchHistoryGlobal(tmdbId)
             }
             
             Log.d("MediaRepository", "[BULK-DELETE] SQLite local lote atualizado com sucesso.")
@@ -1956,9 +2248,7 @@ class MediaRepository(
 
             if (episodes.isNotEmpty()) {
                 dao.insertEpisodes(episodes)
-                episodes.forEach { ep ->
-                    firebaseService?.upsertEpisodeInCloud(ep)
-                }
+                firebaseService?.upsertEpisodeListInCloud(episodes)
             }
         } catch (e: Exception) {
             // Keep default generated episodes if offline
@@ -1981,19 +2271,20 @@ class MediaRepository(
     }
 
     // --- My List & History ---
-    fun getWatchHistoryForMedia(tmdbId: Int): Flow<WatchHistoryEntity?> = dao.getWatchHistoryForMedia(tmdbId)
+    fun getWatchHistoryForMedia(tmdbId: Int, profileId: String): Flow<WatchHistoryEntity?> = dao.getWatchHistoryForMedia(tmdbId, profileId)
     fun getSimilarMedia(type: String, excludeTmdbId: Int): Flow<List<MediaEntity>> = dao.getSimilarMedia(type, excludeTmdbId)
 
-    suspend fun toggleMyList(tmdbId: Int, mediaType: String) = withContext(Dispatchers.IO) {
-        val inList = dao.isMediaInMyList(tmdbId).first()
+    suspend fun toggleMyList(tmdbId: Int, mediaType: String, profileId: String) = withContext(Dispatchers.IO) {
+        val inList = dao.isMediaInMyList(tmdbId, profileId).first()
         if (inList) {
-            dao.removeFromMyList(tmdbId)
+            dao.removeFromMyList(tmdbId, profileId)
         } else {
-            dao.addToMyList(MyListEntity(tmdbId = tmdbId, mediaType = mediaType))
+            dao.addToMyList(MyListEntity(tmdbId = tmdbId, profileId = profileId, mediaType = mediaType))
         }
     }
 
     suspend fun saveWatchProgress(
+        profileId: String,
         tmdbId: Int,
         mediaType: String,
         title: String,
@@ -2006,14 +2297,15 @@ class MediaRepository(
     ) = withContext(Dispatchers.IO) {
         val isTv = mediaType == "tv" || mediaType == "serie"
         val existing = if (isTv) {
-            dao.getWatchHistoryItemByKey(tmdbId, mediaType, seasonNumber, episodeNumber)
+            dao.getWatchHistoryItemByKey(tmdbId, profileId, mediaType, seasonNumber, episodeNumber)
         } else {
-            dao.getWatchHistoryItemByKey(tmdbId, mediaType, null, null)
+            dao.getWatchHistoryItemByKey(tmdbId, profileId, mediaType, null, null)
         }
         val idToUse = existing?.id ?: 0
         dao.saveWatchProgress(
             WatchHistoryEntity(
                 id = idToUse,
+                profileId = profileId,
                 tmdbId = tmdbId,
                 mediaType = mediaType,
                 title = title,
@@ -2213,6 +2505,37 @@ class MediaRepository(
         )
     }
 
+    private fun getGenreNameById(id: Int): String {
+        return when (id) {
+            16 -> "Animação"
+            18 -> "Drama"
+            10749 -> "Romance"
+            28 -> "Ação"
+            12 -> "Aventura"
+            35 -> "Comédia"
+            80 -> "Crime"
+            99 -> "Documentário"
+            14 -> "Fantasia"
+            27 -> "Terror"
+            10751 -> "Família"
+            9648 -> "Mistério"
+            878 -> "Ficção Científica"
+            10770 -> "Cinema TV"
+            53 -> "Suspense"
+            10752 -> "Guerra"
+            37 -> "Faroeste"
+            10759 -> "Ação & Aventura"
+            10762 -> "Infantil"
+            10763 -> "Notícias"
+            10764 -> "Reality"
+            10765 -> "Sci-Fi & Fantasia"
+            10766 -> "Novela"
+            10767 -> "Talk Show"
+            10768 -> "Guerra & Política"
+            else -> ""
+        }
+    }
+
     // --- Helper DTO Mapping ---
     private fun mapDtoToEntity(dto: TmdbMediaDto, defaultType: String, isHero: Boolean = false): MediaEntity {
         val title = dto.title ?: dto.name ?: "Sem título"
@@ -2232,17 +2555,33 @@ class MediaRepository(
         
         val trailerKey = rankYouTubeVideos(dto.videos?.results).firstOrNull()?.key
 
+        val genreList = mutableListOf<String>()
+        dto.genres?.forEach { g -> if (g.name.isNotBlank()) genreList.add(g.name) }
+        dto.genreIds?.forEach { id ->
+            val name = getGenreNameById(id)
+            if (name.isNotBlank() && !genreList.contains(name)) {
+                genreList.add(name)
+            }
+        }
+        val genresFormatted = if (genreList.isNotEmpty()) genreList.joinToString(", ") else "Geral"
+        val lang = dto.originalLanguage ?: ""
+        val country = dto.originCountry?.joinToString(",") ?: ""
+        val category = MediaClassifier.classifyMedia(dto, type)
+
         return MediaEntity(
             tmdbId = dto.id,
             title = title,
             originalTitle = originalTitle,
             mediaType = type,
+            mediaCategory = category,
+            originalLanguage = lang,
+            originCountry = country,
             posterPath = poster,
             backdropPath = backdrop,
             overview = if (dto.overview.isNullOrBlank()) "Uma emocionante história exclusiva para você assistir no RONYCINE." else dto.overview,
             releaseYear = year,
             rating = Math.round(rating * 10) / 10.0,
-            genres = "Ação, Drama, Lançamentos",
+            genres = genresFormatted,
             durationMinutes = dto.runtime ?: 118,
             cast = castStr,
             director = directorStr,
@@ -2656,5 +2995,229 @@ class MediaRepository(
         }
 
         emptyList()
+    }
+
+    // =========================================================================
+    // --- ANIMES & DORAMAS PROFESSIONAL DISCOVERY & IMPORT ENGINE ---
+    // =========================================================================
+
+    suspend fun fetchAnimeFromTMDB(page: Int = 1, sortBy: String = "popularity.desc"): TmdbPageResponse<TmdbMediaDto> = withContext(Dispatchers.IO) {
+        api.discoverTv(
+            apiKey = apiKey,
+            language = "pt-BR",
+            withGenres = "16",
+            withOriginalLanguage = "ja",
+            includeAdult = false,
+            page = page,
+            sortBy = sortBy
+        )
+    }
+
+    suspend fun fetchDoramaFromTMDB(page: Int = 1, sortBy: String = "popularity.desc"): TmdbPageResponse<TmdbMediaDto> = withContext(Dispatchers.IO) {
+        api.discoverTv(
+            apiKey = apiKey,
+            language = "pt-BR",
+            withGenres = "18",
+            withOriginCountry = "KR",
+            withOriginalLanguage = "ko",
+            includeAdult = false,
+            page = page,
+            sortBy = sortBy
+        )
+    }
+
+    suspend fun importAnimeFromTMDB(tmdbId: Int): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        try {
+            val dto = api.getSeriesDetails(tmdbId, apiKey)
+            val entity = mapDtoToEntity(dto, "tv").copy(
+                mediaCategory = MediaClassifier.CATEGORY_ANIME,
+                originalLanguage = dto.originalLanguage ?: "ja",
+                originCountry = dto.originCountry?.joinToString(",") ?: "JP"
+            )
+            val res = importMediaEntity(entity)
+            if (res.first) {
+                fetchAndStoreEpisodes(entity.tmdbId, 1)
+            }
+            res
+        } catch (e: Exception) {
+            Pair(false, "Falha ao importar anime: ${e.message}")
+        }
+    }
+
+    suspend fun importDoramaFromTMDB(tmdbId: Int): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        try {
+            val dto = api.getSeriesDetails(tmdbId, apiKey)
+            val entity = mapDtoToEntity(dto, "tv").copy(
+                mediaCategory = MediaClassifier.CATEGORY_DORAMA,
+                originalLanguage = dto.originalLanguage ?: "ko",
+                originCountry = dto.originCountry?.joinToString(",") ?: "KR"
+            )
+            val res = importMediaEntity(entity)
+            if (res.first) {
+                fetchAndStoreEpisodes(entity.tmdbId, 1)
+            }
+            res
+        } catch (e: Exception) {
+            Pair(false, "Falha ao importar dorama: ${e.message}")
+        }
+    }
+
+    fun startAnimeMassImport(pagesToImport: Int = 2) = flow {
+        isMassImportCancelled.set(false)
+        var progress = MassImportProgress()
+        emit(progress)
+
+        val itemsToProcess = mutableListOf<Int>()
+        try {
+            for (p in 1..pagesToImport) {
+                if (isMassImportCancelled.get()) break
+                val resp = fetchAnimeFromTMDB(page = p)
+                resp.results.forEach { itemsToProcess.add(it.id) }
+            }
+        } catch (e: Exception) {
+            Log.e("MediaRepository", "Erro ao buscar animes TMDB: ${e.message}")
+        }
+
+        progress = progress.copy(total = itemsToProcess.size)
+        emit(progress)
+
+        for (tmdbId in itemsToProcess) {
+            if (isMassImportCancelled.get()) {
+                progress = progress.copy(cancelled = true, isFinished = true)
+                emit(progress)
+                return@flow
+            }
+
+            val existing = dao.getMediaByTmdbId(tmdbId)
+            if (existing != null) {
+                if (existing.mediaCategory.isBlank() || existing.mediaCategory != MediaClassifier.CATEGORY_ANIME) {
+                    val updated = existing.copy(mediaCategory = MediaClassifier.CATEGORY_ANIME)
+                    dao.insertMedia(updated)
+                    firebaseService?.upsertMediaInCloud(updated)
+                }
+                progress = progress.copy(
+                    processed = progress.processed + 1,
+                    existing = progress.existing + 1,
+                    currentTitle = existing.title
+                )
+                emit(progress)
+                continue
+            }
+
+            try {
+                val dto = api.getSeriesDetails(tmdbId, apiKey)
+                val entity = mapDtoToEntity(dto, "tv").copy(
+                    mediaCategory = MediaClassifier.CATEGORY_ANIME,
+                    originalLanguage = dto.originalLanguage ?: "ja",
+                    originCountry = dto.originCountry?.joinToString(",") ?: "JP"
+                )
+                dao.insertMedia(entity)
+                firebaseService?.upsertMediaInCloud(entity)
+                fetchAndStoreEpisodes(entity.tmdbId, 1)
+
+                progress = progress.copy(
+                    processed = progress.processed + 1,
+                    success = progress.success + 1,
+                    currentTitle = entity.title
+                )
+                emit(progress)
+            } catch (e: Exception) {
+                progress = progress.copy(
+                    processed = progress.processed + 1,
+                    failed = progress.failed + 1
+                )
+                emit(progress)
+            }
+        }
+
+        progress = progress.copy(isFinished = true)
+        emit(progress)
+    }
+
+    fun startDoramaMassImport(pagesToImport: Int = 2) = flow {
+        isMassImportCancelled.set(false)
+        var progress = MassImportProgress()
+        emit(progress)
+
+        val itemsToProcess = mutableListOf<Int>()
+        try {
+            for (p in 1..pagesToImport) {
+                if (isMassImportCancelled.get()) break
+                val resp = fetchDoramaFromTMDB(page = p)
+                resp.results.forEach { itemsToProcess.add(it.id) }
+            }
+        } catch (e: Exception) {
+            Log.e("MediaRepository", "Erro ao buscar doramas TMDB: ${e.message}")
+        }
+
+        progress = progress.copy(total = itemsToProcess.size)
+        emit(progress)
+
+        for (tmdbId in itemsToProcess) {
+            if (isMassImportCancelled.get()) {
+                progress = progress.copy(cancelled = true, isFinished = true)
+                emit(progress)
+                return@flow
+            }
+
+            val existing = dao.getMediaByTmdbId(tmdbId)
+            if (existing != null) {
+                if (existing.mediaCategory.isBlank() || existing.mediaCategory != MediaClassifier.CATEGORY_DORAMA) {
+                    val updated = existing.copy(mediaCategory = MediaClassifier.CATEGORY_DORAMA)
+                    dao.insertMedia(updated)
+                    firebaseService?.upsertMediaInCloud(updated)
+                }
+                progress = progress.copy(
+                    processed = progress.processed + 1,
+                    existing = progress.existing + 1,
+                    currentTitle = existing.title
+                )
+                emit(progress)
+                continue
+            }
+
+            try {
+                val dto = api.getSeriesDetails(tmdbId, apiKey)
+                val entity = mapDtoToEntity(dto, "tv").copy(
+                    mediaCategory = MediaClassifier.CATEGORY_DORAMA,
+                    originalLanguage = dto.originalLanguage ?: "ko",
+                    originCountry = dto.originCountry?.joinToString(",") ?: "KR"
+                )
+                dao.insertMedia(entity)
+                firebaseService?.upsertMediaInCloud(entity)
+                fetchAndStoreEpisodes(entity.tmdbId, 1)
+
+                progress = progress.copy(
+                    processed = progress.processed + 1,
+                    success = progress.success + 1,
+                    currentTitle = entity.title
+                )
+                emit(progress)
+            } catch (e: Exception) {
+                progress = progress.copy(
+                    processed = progress.processed + 1,
+                    failed = progress.failed + 1
+                )
+                emit(progress)
+            }
+        }
+
+        progress = progress.copy(isFinished = true)
+        emit(progress)
+    }
+
+    suspend fun reclassifyExistingCatalog(): Int = withContext(Dispatchers.IO) {
+        val all = dao.getAllMediaSync()
+        var updatedCount = 0
+        for (item in all) {
+            val newCategory = MediaClassifier.classifyMedia(item)
+            if (item.mediaCategory != newCategory) {
+                val updated = item.copy(mediaCategory = newCategory)
+                dao.insertMedia(updated)
+                firebaseService?.upsertMediaInCloud(updated)
+                updatedCount++
+            }
+        }
+        updatedCount
     }
 }

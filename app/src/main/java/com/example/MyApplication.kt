@@ -3,9 +3,33 @@ package com.example
 import android.app.Application
 import android.os.Build
 import android.webkit.WebView
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import java.io.File
 
-class MyApplication : Application() {
+class MyApplication : Application(), ImageLoaderFactory {
+
+    override fun newImageLoader(): ImageLoader {
+        return ImageLoader.Builder(this)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25)
+                    .strongReferencesEnabled(true)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(150L * 1024 * 1024) // 150 MB
+                    .build()
+            }
+            .respectCacheHeaders(false)
+            .crossfade(false)
+            .build()
+    }
+
     override fun onCreate() {
         super.onCreate()
 
@@ -23,19 +47,34 @@ class MyApplication : Application() {
             }
         }
 
-        // Ensure WebView Code Cache directories (js and wasm) are initialized
-        // to prevent Chromium simple_file_enumerator opendir errors
+        // Ensure WebView Code Cache directories (js, wasm, index-dir) are initialized
+        // to prevent Chromium simple_file_enumerator opendir errors and simple_index_file warnings
         try {
             val basePaths = listOf(
                 "WebView/Default/HTTP Cache/Code Cache",
                 "webview/Default/HTTP Cache/Code Cache",
-                "webview_playfilme_webview/Default/HTTP Cache/Code Cache"
+                "WebView/Default/Code Cache",
+                "webview/Default/Code Cache",
+                "WebView/HTTP Cache/Code Cache",
+                "webview/HTTP Cache/Code Cache",
+                "WebView/Default/HTTP Cache",
+                "webview/Default/HTTP Cache",
+                "webview_playfilme_webview/Default/HTTP Cache/Code Cache",
+                "app_webview/Default/HTTP Cache/Code Cache"
             )
-            basePaths.forEach { basePath ->
-                val jsDir = File(cacheDir, "$basePath/js")
-                val wasmDir = File(cacheDir, "$basePath/wasm")
-                if (!jsDir.exists()) jsDir.mkdirs()
-                if (!wasmDir.exists()) wasmDir.mkdirs()
+            listOf(cacheDir, filesDir).forEach { root ->
+                basePaths.forEach { basePath ->
+                    try {
+                        val baseDir = File(root, basePath)
+                        if (!baseDir.exists()) baseDir.mkdirs()
+                        val jsDir = File(root, "$basePath/js")
+                        val wasmDir = File(root, "$basePath/wasm")
+                        val indexDir = File(root, "$basePath/index-dir")
+                        if (!jsDir.exists()) jsDir.mkdirs()
+                        if (!wasmDir.exists()) wasmDir.mkdirs()
+                        if (!indexDir.exists()) indexDir.mkdirs()
+                    } catch (_: Exception) {}
+                }
             }
         } catch (_: Exception) {}
 

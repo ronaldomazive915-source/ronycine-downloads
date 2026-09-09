@@ -97,6 +97,18 @@ interface TmdbApiService {
         @Query("page") page: Int = 1
     ): TmdbPageResponse<TmdbMediaDto>
 
+    @GET("discover/tv")
+    suspend fun discoverTv(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String = "pt-BR",
+        @Query("with_genres") withGenres: String? = null,
+        @Query("with_original_language") withOriginalLanguage: String? = null,
+        @Query("with_origin_country") withOriginCountry: String? = null,
+        @Query("include_adult") includeAdult: Boolean = false,
+        @Query("page") page: Int = 1,
+        @Query("sort_by") sortBy: String = "popularity.desc"
+    ): TmdbPageResponse<TmdbMediaDto>
+
     @GET("tv/on_the_air")
     suspend fun getOnTheAirSeries(
         @Query("api_key") apiKey: String,

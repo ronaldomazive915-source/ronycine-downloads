@@ -62,13 +62,13 @@ fun PlayfilmeFooter(
                     )
                 )
             )
-            .padding(horizontal = 20.dp, vertical = 32.dp)
+            .padding(horizontal = 14.dp, vertical = 16.dp)
             .testTag("playfilme_footer")
     ) {
         val isWide = maxWidth >= 600.dp
 
         if (isWide) {
-            // Desktop / Tablet Layout (Columns)
+            // Desktop / Tablet Layout
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -80,23 +80,23 @@ fun PlayfilmeFooter(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     // Col 1: Identity & About
-                    Column(modifier = Modifier.weight(1.3f).padding(end = 24.dp)) {
+                    Column(modifier = Modifier.weight(1.3f).padding(end = 20.dp)) {
                         BrandHeader()
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         AboutText()
                     }
 
                     // Col 2: Navigation Links
                     if (onNavigate != null) {
-                        Column(modifier = Modifier.weight(0.9f).padding(horizontal = 16.dp)) {
+                        Column(modifier = Modifier.weight(0.9f).padding(horizontal = 12.dp)) {
                             Text(
                                 text = "NAVEGAÇÃO",
                                 color = BrandRed,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                letterSpacing = 1.5.sp
+                                letterSpacing = 1.2.sp
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             FooterNavLink("Início") { onNavigate(ScreenRoute.HOME.route) }
                             FooterNavLink("Explorar") { onNavigate(ScreenRoute.SEARCH.route) }
                             FooterNavLink("Filmes") { onNavigate(ScreenRoute.MOVIES.route) }
@@ -108,15 +108,15 @@ fun PlayfilmeFooter(
                     }
 
                     // Col 3: Social Contacts
-                    Column(modifier = Modifier.weight(1.2f).padding(horizontal = 16.dp)) {
+                    Column(modifier = Modifier.weight(1.2f).padding(horizontal = 12.dp)) {
                         Text(
                             text = "FALE CONOSCO",
                             color = BrandRed,
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp
+                            letterSpacing = 1.2.sp
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         ContactCard(
                             title = "WhatsApp",
                             subtitle = "Fale conosco",
@@ -124,10 +124,10 @@ fun PlayfilmeFooter(
                             iconTint = Color(0xFF25D366),
                             onClick = { openUrl("https://wa.me/qr/T2SBXRX6HAB4D1") }
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         ContactCard(
                             title = "Telegram",
-                            subtitle = "Entre no nosso canal",
+                            subtitle = "Canal oficial",
                             icon = Icons.AutoMirrored.Filled.Send,
                             iconTint = Color(0xFF229ED9),
                             onClick = { openUrl("https://t.me/ronycine") }
@@ -135,165 +135,98 @@ fun PlayfilmeFooter(
                     }
 
                     // Col 4: Website & Founder
-                    Column(modifier = Modifier.weight(1.1f).padding(start = 16.dp)) {
+                    Column(modifier = Modifier.weight(1.1f).padding(start = 12.dp)) {
                         Text(
                             text = "NOSSO SITE",
                             color = BrandRed,
-                            fontSize = 13.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp
+                            letterSpacing = 1.2.sp
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         SiteCard(onVisit = { openUrl("https://filmora.ai.studio") })
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         FounderCard()
                     }
                 }
 
-                Spacer(modifier = Modifier.height(28.dp))
-                HorizontalDivider(color = CardBorder, thickness = 1.dp)
                 Spacer(modifier = Modifier.height(20.dp))
+                HorizontalDivider(color = CardBorder, thickness = 0.8.dp)
+                Spacer(modifier = Modifier.height(12.dp))
                 CopyrightRow()
             }
         } else {
-            // Mobile Vertical Flow (Content -> Sobre Nós -> Contato -> Nosso Site -> Fundador -> Copyright)
+            // Compact Mobile Vertical / Grid Flow
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 BrandHeader()
 
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Section: Sobre o RONYCINE
+                // Compact About Section
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = DarkSurface),
                     border = BorderStroke(1.dp, CardBorder),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(10.dp)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Text(
                             text = "Sobre o RONYCINE",
                             color = Color.White,
-                            fontSize = 15.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         AboutText()
                     }
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Fale Conosco Title
-                Text(
-                    text = "FALE CONOSCO",
-                    color = BrandRed,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                    modifier = Modifier.align(Alignment.Start)
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // WhatsApp Card
-                ContactCard(
-                    title = "WhatsApp",
-                    subtitle = "Fale conosco",
-                    icon = Icons.Default.Chat,
-                    iconTint = Color(0xFF25D366),
-                    onClick = { openUrl("https://wa.me/qr/T2SBXRX6HAB4D1") }
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Telegram Card
-                ContactCard(
-                    title = "Telegram",
-                    subtitle = "Entre no nosso canal",
-                    icon = Icons.AutoMirrored.Filled.Send,
-                    iconTint = Color(0xFF229ED9),
-                    onClick = { openUrl("https://t.me/ronycine") }
-                )
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Section: Nosso Site
-                Text(
-                    text = "NOSSO SITE",
-                    color = BrandRed,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                    modifier = Modifier.align(Alignment.Start)
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                SiteCard(onVisit = { openUrl("https://filmora.ai.studio") })
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Section: Suporte
-                Card(
+                // Row 1: WhatsApp & Telegram side-by-side (Compact)
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = BorderStroke(1.dp, CardBorder),
-                    shape = RoundedCornerShape(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.HeadsetMic,
-                                contentDescription = null,
-                                tint = BrandRed,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "PRECISA DE AJUDA?",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Entre em contato conosco caso tenha alguma dúvida ou problema.",
-                            color = Color.Gray,
-                            fontSize = 12.sp
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = { openUrl("https://wa.me/qr/T2SBXRX6HAB4D1") },
-                            colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().height(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SupportAgent,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("FALAR COM SUPORTE", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
+                    ContactCard(
+                        title = "WhatsApp",
+                        subtitle = "Fale conosco →",
+                        icon = Icons.Default.Chat,
+                        iconTint = Color(0xFF25D366),
+                        onClick = { openUrl("https://wa.me/qr/T2SBXRX6HAB4D1") },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    ContactCard(
+                        title = "Telegram",
+                        subtitle = "Canal oficial →",
+                        icon = Icons.AutoMirrored.Filled.Send,
+                        iconTint = Color(0xFF229ED9),
+                        onClick = { openUrl("https://t.me/ronycine") },
+                        modifier = Modifier.weight(1f)
+                    )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                // Row 2: Nosso Site & Precisa de Ajuda? side-by-side
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CompactSiteCard(
+                        onVisit = { openUrl("https://filmora.ai.studio") },
+                        modifier = Modifier.weight(1f)
+                    )
 
-                // Section: Fundador
+                    CompactSupportCard(
+                        onSupport = { openUrl("https://wa.me/qr/T2SBXRX6HAB4D1") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Compact Founder Card
                 FounderCard(modifier = Modifier.fillMaxWidth())
 
-                Spacer(modifier = Modifier.height(24.dp))
-
-                HorizontalDivider(color = CardBorder, thickness = 1.dp)
-
-                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
 
                 CopyrightRow()
             }
@@ -379,7 +312,7 @@ private fun ContactCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
+                .padding(horizontal = 10.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -389,7 +322,7 @@ private fun ContactCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(32.dp)
                         .clip(CircleShape)
                         .background(iconTint.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center
@@ -398,23 +331,23 @@ private fun ContactCard(
                         imageVector = icon,
                         contentDescription = title,
                         tint = iconTint,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Column {
                     Text(
                         text = title,
                         color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = subtitle,
                         color = Color.Gray,
-                        fontSize = 11.sp
+                        fontSize = 10.sp
                     )
                 }
             }
@@ -422,9 +355,125 @@ private fun ContactCard(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = "Acessar $title",
-                tint = Color.LightGray,
-                modifier = Modifier.size(16.dp)
+                tint = Color.Gray,
+                modifier = Modifier.size(13.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun CompactSiteCard(
+    onVisit: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onVisit() }
+            .testTag("site_card"),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = BorderStroke(1.dp, CardBorder),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(BrandRed.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🌐", fontSize = 14.sp)
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Column {
+                    Text(
+                        text = "NOSSO SITE",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Visitar site →",
+                        color = BrandRed,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactSupportCard(
+    onSupport: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable { onSupport() }
+            .testTag("support_card"),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        border = BorderStroke(1.dp, CardBorder),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(BrandRed.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.HeadsetMic,
+                        contentDescription = null,
+                        tint = BrandRed,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Column {
+                    Text(
+                        text = "AJUDA?",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Falar com suporte →",
+                        color = TextSecondary,
+                        fontSize = 10.sp
+                    )
+                }
+            }
         }
     }
 }
@@ -446,43 +495,43 @@ private fun SiteCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp)
+                .padding(12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "🌐",
-                    fontSize = 16.sp
+                    fontSize = 15.sp
                 )
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "NOSSO SITE",
                     color = Color.White,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
 
             Text(
                 text = "Conheça nosso site oficial",
                 color = Color.Gray,
-                fontSize = 11.sp
+                fontSize = 10.5.sp
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Button(
                 onClick = onVisit,
                 colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
                 shape = RoundedCornerShape(6.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                modifier = Modifier.height(34.dp)
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(30.dp)
             ) {
                 Text(
                     text = "Visitar site →",
                     color = Color.White,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -498,27 +547,32 @@ private fun FounderCard(modifier: Modifier = Modifier) {
             .testTag("founder_card"),
         colors = CardDefaults.cardColors(containerColor = DarkSurfaceVariant.copy(alpha = 0.7f)),
         border = BorderStroke(1.dp, CardBorder),
-        shape = RoundedCornerShape(10.dp)
+        shape = RoundedCornerShape(8.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
             Text(
                 text = "SOBRE O PROJETO",
                 color = BrandRed,
-                fontSize = 11.sp,
+                fontSize = 10.5.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
+                letterSpacing = 0.8.sp
             )
-            Spacer(modifier = Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "Fundador: ",
                     color = Color.LightGray,
-                    fontSize = 12.sp
+                    fontSize = 10.5.sp
                 )
                 Text(
                     text = "RONALDO MAZIVE",
                     color = Color.White,
-                    fontSize = 13.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.5.sp
                 )

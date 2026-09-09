@@ -41,8 +41,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ui.screens.admin.AdminCineConfigScreen
 import com.example.data.local.FeaturedMediaEntity
 import com.example.data.local.FeaturedMediaItem
+import com.example.util.MediaClassifier
 import com.example.data.local.NotificationEntity
 import com.example.ui.components.extractYoutubeVideoId
 import com.example.ui.components.HeroTrailerPlayer
@@ -375,6 +377,13 @@ fun AdminScreen(
                 AdminSection.TV_AO_VIVO -> {
                     AdminTvScreen()
                 }
+                AdminSection.SINCRONIZACAO_AUTOMATICA -> {
+                    com.example.ui.screens.admin.AdminImportCentralScreen(
+                        adminViewModel = adminViewModel,
+                        initialMode = com.example.ui.screens.admin.ImportMode.AUTOMATIC,
+                        onNavigateToMedia = onNavigateToMedia
+                    )
+                }
                 AdminSection.USUARIOS -> {
                     com.example.ui.screens.admin.AdminUsuariosScreen(adminViewModel = adminViewModel)
                 }
@@ -404,13 +413,24 @@ fun AdminScreen(
                 AdminSection.CONTROLE_REMOTO -> {
                     AdminControleRemotoScreen(viewModel = adminViewModel)
                 }
+                AdminSection.ALTERACOES_PENDENTES -> {
+                    com.example.ui.screens.admin.AdminPendingChangesScreen(adminViewModel = adminViewModel)
+                }
                 AdminSection.SINCRONIZACAO -> {
                     AdminSincronizacaoScreen(
                         adminViewModel = adminViewModel
                     )
                 }
+                AdminSection.PLAYERS -> {
+                    com.example.ui.screens.admin.AdminPlayersScreen(viewModel = adminViewModel)
+                }
                 AdminSection.CONFIGURACOES -> {
                     AdminConfiguracoesScreen(
+                        adminViewModel = adminViewModel
+                    )
+                }
+                AdminSection.CINE_CONFIG -> {
+                    AdminCineConfigScreen(
                         adminViewModel = adminViewModel
                     )
                 }
@@ -874,21 +894,115 @@ fun AdminCatalogoScreen(
     val selectedMedia by adminViewModel.selectedMedia.collectAsState()
     var isShowBulkDeleteConfirmDialog by remember { mutableStateOf(false) }
 
+    // Advanced Local Filters
+    var isGridView by remember { mutableStateOf(true) }
+    var showFilterDialog by remember { mutableStateOf(false) }
+    var filterType by remember { mutableStateOf("all") } // "all", "movie", "tv"
+    var filterCategory by remember { mutableStateOf("all") } // "all", "anime", "dorama", "normal"
+    var selectedGenres by remember { mutableStateOf(setOf<String>()) }
+    var filterStatus by remember { mutableStateOf("all") } // "all", "active", "restricted"
+    var filterSource by remember { mutableStateOf("all") } // "all", "mgeb", "tmdb"
+    var sortBy by remember { mutableStateOf("newest") } // "newest", "oldest", "az", "za", "rating_high", "rating_low"
+    
+    // Page Pagination
+    var currentPage by remember { mutableStateOf(1) }
+    val itemsPerPage = 32
+
+    // Search query with debounce local state
+    var localSearchQuery by remember { mutableStateOf(searchQuery) }
+    LaunchedEffect(localSearchQuery) {
+        if (localSearchQuery != searchQuery) {
+            kotlinx.coroutines.delay(400)
+            adminViewModel.onCatalogSearchQueryChanged(localSearchQuery)
+            currentPage = 1
+        }
+    }
+    LaunchedEffect(searchQuery) {
+        if (searchQuery != localSearchQuery) {
+            localSearchQuery = searchQuery
+        }
+    }
+
+    // Load configs
+    LaunchedEffect(Unit) {
+        adminViewModel.loadTmdbAutoSyncConfig()
+    }
+
     // Counts
-    val movieCount = remember(allMedia) { allMedia.count { it.mediaType == "movie" } }
-    val seriesCount = remember(allMedia) { allMedia.count { it.mediaType == "tv" } }
+    val movieCount = remember(allMedia) { allMedia.count { it.mediaCategory == "movie" || (it.mediaCategory.isBlank() && it.mediaType == "movie" && !MediaClassifier.isAnime(it)) } }
+    val seriesCount = remember(allMedia) { allMedia.count { it.mediaCategory == "series" || (it.mediaCategory.isBlank() && it.mediaType == "tv" && !MediaClassifier.isAnime(it) && !MediaClassifier.isDorama(it)) } }
+    val animeCount = remember(allMedia) { allMedia.count { it.mediaCategory == "anime" || (it.mediaCategory.isBlank() && MediaClassifier.isAnime(it)) } }
+    val doramaCount = remember(allMedia) { allMedia.count { it.mediaCategory == "dorama" || (it.mediaCategory.isBlank() && MediaClassifier.isDorama(it)) } }
+    val restrictedCount = remember(allMedia) { allMedia.count { it.restricted18 } }
     val totalCount = remember(allMedia) { allMedia.size }
 
-    // Filtered list
-    val filteredMedia = remember(allMedia, searchQuery, selectedFilter) {
+    // Start of today for newly added count
+    val startOfToday = remember {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        cal.timeInMillis
+    }
+    val addedTodayCount = remember(allMedia, startOfToday) {
+        allMedia.count { it.addedAt >= startOfToday }
+    }
+
+    // Filtered list with Advanced Logic
+    val filteredMedia = remember(allMedia, searchQuery, selectedFilter, filterType, filterCategory, selectedGenres, filterStatus, filterSource) {
         allMedia.filter { item ->
-            val matchesFilter = when (selectedFilter) {
-                "movie" -> item.mediaType == "movie"
-                "tv" -> item.mediaType == "tv"
+            // Tab Filter
+            val matchesTab = when (selectedFilter) {
+                "movie" -> item.mediaCategory == "movie" || (item.mediaCategory.isBlank() && item.mediaType == "movie" && !MediaClassifier.isAnime(item))
+                "tv" -> item.mediaCategory == "series" || (item.mediaCategory.isBlank() && item.mediaType == "tv" && !MediaClassifier.isAnime(item) && !MediaClassifier.isDorama(item))
+                "anime" -> item.mediaCategory == "anime" || (item.mediaCategory.isBlank() && MediaClassifier.isAnime(item))
+                "dorama" -> item.mediaCategory == "dorama" || (item.mediaCategory.isBlank() && MediaClassifier.isDorama(item))
+                "restricted18" -> item.restricted18
                 else -> true
             }
-            if (!matchesFilter) return@filter false
+            if (!matchesTab) return@filter false
 
+            // Advanced: Type filter
+            if (filterType != "all") {
+                val matchesType = if (filterType == "movie") item.mediaType == "movie" else item.mediaType == "tv"
+                if (!matchesType) return@filter false
+            }
+
+            // Advanced: Category filter
+            if (filterCategory != "all") {
+                val isAnime = item.mediaCategory == "anime" || MediaClassifier.isAnime(item)
+                val isDorama = item.mediaCategory == "dorama" || MediaClassifier.isDorama(item)
+                val matchesCat = when (filterCategory) {
+                    "anime" -> isAnime
+                    "dorama" -> isDorama
+                    "normal" -> !isAnime && !isDorama
+                    else -> true
+                }
+                if (!matchesCat) return@filter false
+            }
+
+            // Advanced: Status filter
+            if (filterStatus != "all") {
+                val matchesStatus = if (filterStatus == "restricted") item.restricted18 else !item.restricted18
+                if (!matchesStatus) return@filter false
+            }
+
+            // Advanced: Source filter
+            if (filterSource != "all") {
+                val isMgeb = item.genres.contains("mgeb", ignoreCase = true) || item.overview.contains("mgeb", ignoreCase = true) || item.posterPath?.contains("mgeb", ignoreCase = true) == true
+                val matchesSource = if (filterSource == "mgeb") isMgeb else !isMgeb
+                if (!matchesSource) return@filter false
+            }
+
+            // Advanced: Genres filter (Item must match ALL selected genres if any selected)
+            if (selectedGenres.isNotEmpty()) {
+                val itemGenres = item.genres.split(",").map { it.trim().lowercase() }
+                val matchesGenres = selectedGenres.all { g -> itemGenres.contains(g.lowercase()) }
+                if (!matchesGenres) return@filter false
+            }
+
+            // Search query match
             if (searchQuery.isBlank()) return@filter true
 
             val q = searchQuery.trim().lowercase()
@@ -901,169 +1015,501 @@ fun AdminCatalogoScreen(
         }
     }
 
-    val pagedList = remember(filteredMedia, displayLimit) {
-        filteredMedia.take(displayLimit)
+    // Sorted list
+    val sortedMedia = remember(filteredMedia, sortBy) {
+        when (sortBy) {
+            "newest" -> filteredMedia.sortedByDescending { it.addedAt }
+            "oldest" -> filteredMedia.sortedBy { it.addedAt }
+            "az" -> filteredMedia.sortedBy { it.title.lowercase() }
+            "za" -> filteredMedia.sortedByDescending { it.title.lowercase() }
+            "rating_high" -> filteredMedia.sortedByDescending { it.rating }
+            "rating_low" -> filteredMedia.sortedBy { it.rating }
+            else -> filteredMedia
+        }
+    }
+
+    // Total Pages calculation
+    val totalPages = remember(sortedMedia) {
+        ((sortedMedia.size + itemsPerPage - 1) / itemsPerPage).coerceAtLeast(1)
+    }
+
+    // Paginated list
+    val pagedList = remember(sortedMedia, currentPage) {
+        val start = (currentPage - 1) * itemsPerPage
+        sortedMedia.drop(start).take(itemsPerPage)
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color.Black)
             .testTag("admin_catalog_screen")
     ) {
-        // Cabeçalho e Contadores do Catálogo
-        Surface(
-            color = DarkSurface,
-            modifier = Modifier.fillMaxWidth()
+        // 1. TOPO ESTILO CONSOLE DE STREAMING
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF0F0F0F))
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Text(
+                    text = "RONYCINE",
+                    color = BrandRed,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.5.sp
+                )
+                Surface(
+                    color = Color(0xFF10B981).copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(100.dp),
+                    border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.5f))
                 ) {
-                    Column {
-                        Text(
-                            text = "CATÁLOGO DE CONTEÚDO",
-                            color = Color.LightGray,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 1.sp
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .background(Color(0xFF10B981), CircleShape)
                         )
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "%,d Filmes".format(movieCount),
-                                color = BrandRed,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text("•", color = Color.Gray, fontSize = 12.sp)
-                            Text(
-                                text = "%,d Séries".format(seriesCount),
-                                color = Color(0xFF3B82F6),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text("•", color = Color.Gray, fontSize = 12.sp)
-                            Text(
-                                text = "%,d Total".format(totalCount),
-                                color = Color(0xFF10B981),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-
-                    if (!isSelectionMode) {
-                        Button(
-                            onClick = { adminViewModel.toggleSelectionMode() },
-                            colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.testTag("admin_catalog_select_mode_toggle")
-                        ) {
-                            Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("SELECIONAR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    } else {
-                        Button(
-                            onClick = { adminViewModel.toggleSelectionMode() },
-                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurface),
-                            border = BorderStroke(1.dp, Color.Gray),
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                            modifier = Modifier.testTag("admin_catalog_select_mode_toggle_cancel")
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.LightGray)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("CANCELAR", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
+                        Text(
+                            text = "Sistema Online",
+                            color = Color(0xFF10B981),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
+            }
 
-                // Campo de Pesquisa no Catálogo
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { adminViewModel.onCatalogSearchQueryChanged(it) },
-                    placeholder = {
-                        Text(
-                            text = "🔍 Pesquisar por título, ID TMDB, ano ou gênero...",
-                            color = Color.Gray,
-                            fontSize = 13.sp
-                        )
-                    },
-                    trailingIcon = {
-                        if (searchQuery.isNotEmpty()) {
-                            IconButton(onClick = { adminViewModel.onCatalogSearchQueryChanged("") }) {
-                                Icon(Icons.Default.Close, contentDescription = "Limpar", tint = Color.Gray)
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = BrandRed,
-                        unfocusedBorderColor = CardBorder,
-                        focusedContainerColor = DarkBackground,
-                        unfocusedContainerColor = DarkBackground,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
-                    ),
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                IconButton(
+                    onClick = { adminViewModel.forceGlobalSync() },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Recarregar", tint = Color.LightGray, modifier = Modifier.size(18.dp))
+                }
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("admin_catalog_search_input")
-                )
+                        .size(28.dp)
+                        .background(BrandRed, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("R", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
+        }
 
-                // Filtros [ Todos ] [ Filmes ] [ Séries ]
+        // 2. CORPO ROLÁVEL COM ESTRUTURA ORGANIZADA
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // TÍTULO E DESCRIÇÃO
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "CATÁLOGO DE CONTEÚDO",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        text = "Gerencie filmes, séries, animes e doramas disponíveis no catálogo do RONYCINE.",
+                        color = Color.Gray,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+
+            // AÇÕES RÁPIDAS PRINCIPAIS (BOTÕES DE TOPO)
+            item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    FilterChip(
-                        selected = selectedFilter == "all",
-                        onClick = { adminViewModel.setCatalogFilter("all") },
-                        label = { Text("✨ Todos (${filteredMedia.size})") },
-                        colors = adminFilterChipColors(),
-                        modifier = Modifier.weight(1f)
-                    )
-                    FilterChip(
-                        selected = selectedFilter == "movie",
-                        onClick = { adminViewModel.setCatalogFilter("movie") },
-                        label = { Text("🎬 Filmes ($movieCount)") },
-                        colors = adminFilterChipColors(),
-                        modifier = Modifier.weight(1f)
-                    )
-                    FilterChip(
-                        selected = selectedFilter == "tv",
-                        onClick = { adminViewModel.setCatalogFilter("tv") },
-                        label = { Text("📺 Séries ($seriesCount)") },
-                        colors = adminFilterChipColors(),
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                    Button(
+                        onClick = { adminViewModel.selectSection(AdminSection.IMPORTACAO) },
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 10.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("ADICIONAR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
 
-                // BARRA DE SELEÇÃO E EXCLUSÃO EM MASSA
-                if (isSelectionMode) {
+                    Button(
+                        onClick = { adminViewModel.selectSection(AdminSection.IMPORTACAO_MASSA) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF262626)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 10.dp)
+                    ) {
+                        Icon(Icons.Default.Publish, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("IMPORTAR MASSA", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    Button(
+                        onClick = { adminViewModel.forceGlobalSync() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF262626)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 10.dp)
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("SINCRONIZAR", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                }
+            }
+
+            // PAINEL DE ESTATÍSTICAS RESUMIDO E COMPACTO
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "ESTATÍSTICAS DO CATÁLOGO",
+                            color = Color.Gray,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                        Surface(
+                            color = Color(0xFFE50914).copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "➕ $addedTodayCount adicionados hoje",
+                                color = BrandRed,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    // Grid responsivo de cards usando Columns e Rows
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatCard("FILMES", "%,d".format(movieCount), "🎬", BrandRed, modifier = Modifier.weight(1f))
+                        StatCard("SÉRIES", "%,d".format(seriesCount), "📺", Color(0xFF3B82F6), modifier = Modifier.weight(1f))
+                        StatCard("ANIMES", "%,d".format(animeCount), "🍥", Color(0xFFF43F5E), modifier = Modifier.weight(1f))
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatCard("DORAMAS", "%,d".format(doramaCount), "🇰🇷", Color(0xFFA855F7), modifier = Modifier.weight(1f))
+                        StatCard("RESTREITOS", "%,d".format(restrictedCount), "🔞", Color(0xFFEF4444), modifier = Modifier.weight(1f))
+                        StatCard("TOTAL", "%,d".format(totalCount), "📦", Color(0xFF10B981), modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+
+            // MONITOR DE SINCRONIZAÇÃO AUTOMÁTICA
+            item {
+                val autoSyncConfig by adminViewModel.tmdbAutoSyncConfig.collectAsState()
+                val syncProgress by adminViewModel.tmdbAutoSyncProgress.collectAsState()
+                
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, CardBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .background(if (autoSyncConfig.enabled) Color(0xFF10B981) else Color.Gray, CircleShape)
+                                )
+                                Text(
+                                    text = "SINCRONIZAÇÃO AUTOMÁTICA",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            
+                            Surface(
+                                color = if (autoSyncConfig.enabled) Color(0xFF10B981).copy(alpha = 0.15f) else Color.Gray.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    text = if (autoSyncConfig.enabled) "ATIVA" else "DESATIVADA",
+                                    color = if (autoSyncConfig.enabled) Color(0xFF10B981) else Color.LightGray,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                val sdf = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.getDefault())
+                                val lastRun = if (autoSyncConfig.lastSyncTimestamp > 0) sdf.format(java.util.Date(autoSyncConfig.lastSyncTimestamp)) else "Nunca executado"
+                                Text(
+                                    text = "Última atualização: $lastRun",
+                                    color = Color.Gray,
+                                    fontSize = 10.sp
+                                )
+                                Text(
+                                    text = "Frequência: a cada ${autoSyncConfig.frequencyHours} horas",
+                                    color = Color.Gray,
+                                    fontSize = 10.sp
+                                )
+                            }
+                            
+                            if (syncProgress.isRunning) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = BrandRed)
+                                    Text("Rodando...", color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else if (syncProgress.pendingCount > 0) {
+                                Text(
+                                    text = "Na fila: ${syncProgress.pendingCount}",
+                                    color = Color.LightGray,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // CONTROLES DE BUSCA, ORDENAÇÃO E EXIBIÇÃO
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Barra de busca principal
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = localSearchQuery,
+                            onValueChange = { localSearchQuery = it },
+                            placeholder = {
+                                Text("Pesquisar título, ID, gênero...", color = Color.Gray, fontSize = 12.sp)
+                            },
+                            trailingIcon = {
+                                if (localSearchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { localSearchQuery = "" }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Limpar", tint = Color.Gray)
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = BrandRed,
+                                unfocusedBorderColor = CardBorder,
+                                focusedContainerColor = DarkSurface,
+                                unfocusedContainerColor = DarkSurface,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                        )
+
+                        // Botão de filtros avançados
+                        IconButton(
+                            onClick = { showFilterDialog = true },
+                            modifier = Modifier
+                                .size(46.dp)
+                                .background(DarkSurface, RoundedCornerShape(8.dp))
+                                .border(1.dp, CardBorder, RoundedCornerShape(8.dp))
+                        ) {
+                            Icon(Icons.Default.FilterList, contentDescription = "Filtros", tint = if (selectedGenres.isNotEmpty() || filterType != "all" || filterCategory != "all" || filterStatus != "all" || filterSource != "all") BrandRed else Color.White)
+                        }
+
+                        // Toggle de exibição Grid/List
+                        IconButton(
+                            onClick = { isGridView = !isGridView },
+                            modifier = Modifier
+                                    .size(46.dp)
+                                    .background(DarkSurface, RoundedCornerShape(8.dp))
+                                    .border(1.dp, CardBorder, RoundedCornerShape(8.dp))
+                        ) {
+                            Icon(
+                                imageVector = if (isGridView) Icons.Default.ViewList else Icons.Default.GridView,
+                                contentDescription = "Exibição",
+                                tint = Color.White
+                            )
+                        }
+                    }
+
+                    // Linha de ordenação e seleção em lote
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Ordenação dropdown
+                        var showSortDropdown by remember { mutableStateOf(false) }
+                        Box {
+                            Surface(
+                                color = DarkSurface,
+                                border = BorderStroke(1.dp, CardBorder),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .clickable { showSortDropdown = true }
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(Icons.Default.SortByAlpha, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(14.dp))
+                                    Text(
+                                        text = when (sortBy) {
+                                            "newest" -> "Mais recentes"
+                                            "oldest" -> "Mais antigos"
+                                            "az" -> "Título A-Z"
+                                            "za" -> "Título Z-A"
+                                            "rating_high" -> "Maior nota"
+                                            "rating_low" -> "Menor nota"
+                                            else -> "Ordenar por"
+                                        },
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(14.dp))
+                                }
+                            }
+
+                            DropdownMenu(
+                                expanded = showSortDropdown,
+                                onDismissRequest = { showSortDropdown = false },
+                                modifier = Modifier.background(DarkSurface).border(1.dp, CardBorder, RoundedCornerShape(8.dp))
+                            ) {
+                                listOf(
+                                    "newest" to "Mais recentes",
+                                    "oldest" to "Mais antigos",
+                                    "az" to "Título A-Z",
+                                    "za" to "Título Z-A",
+                                    "rating_high" to "Maior nota",
+                                    "rating_low" to "Menor nota"
+                                ).forEach { (key, label) ->
+                                    DropdownMenuItem(
+                                        text = { Text(label, color = Color.White, fontSize = 12.sp) },
+                                        onClick = {
+                                            sortBy = key
+                                            showSortDropdown = false
+                                            currentPage = 1
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Modo de seleção
+                        if (!isSelectionMode) {
+                            Button(
+                                onClick = { adminViewModel.toggleSelectionMode() },
+                                colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.Checklist, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("SELECIONAR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Button(
+                                onClick = { adminViewModel.toggleSelectionMode() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF262626)),
+                                border = BorderStroke(1.dp, Color.Gray),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp), tint = Color.LightGray)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("CANCELAR", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TABS DE FILTRO DE CATEGORIAS
+            item {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "all" to "✨ Todos (${filteredMedia.size})",
+                        "movie" to "🎬 Filmes ($movieCount)",
+                        "tv" to "📺 Séries ($seriesCount)",
+                        "anime" to "🍥 Animes ($animeCount)",
+                        "dorama" to "🇰🇷 Doramas ($doramaCount)",
+                        "restricted18" to "🔞 +18 ($restrictedCount)"
+                    ).forEach { (fVal, fLabel) ->
+                        item {
+                            FilterChip(
+                                selected = selectedFilter == fVal,
+                                onClick = {
+                                    adminViewModel.setCatalogFilter(fVal)
+                                    currentPage = 1
+                                },
+                                label = { Text(fLabel, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                                colors = adminFilterChipColors()
+                            )
+                        }
+                    }
+                }
+            }
+
+            // SELEÇÃO MULTIPLA E EXCLUSÃO EM MASSA CONTROLADOR DE LOTE
+            if (isSelectionMode) {
+                item {
                     Surface(
-                        color = DarkBackground,
+                        color = Color(0xFF0F0F0F),
                         border = BorderStroke(1.dp, CardBorder),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1072,53 +1518,39 @@ fun AdminCatalogoScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(0.9f)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = if (selectedMedia.isNotEmpty()) BrandRed else Color.Gray,
-                                    modifier = Modifier.size(16.dp)
+                                Checkbox(
+                                    checked = selectedMedia.size == filteredMedia.size && filteredMedia.isNotEmpty(),
+                                    onCheckedChange = { check ->
+                                        if (check) {
+                                            adminViewModel.selectAllMedia(filteredMedia)
+                                        } else {
+                                            adminViewModel.clearSelection()
+                                        }
+                                    },
+                                    colors = CheckboxDefaults.colors(checkedColor = BrandRed)
                                 )
                                 Text(
-                                    text = if (selectedMedia.isEmpty()) "Nenhum selecionado" else "${selectedMedia.size} selecionados",
+                                    text = if (selectedMedia.isEmpty()) "Selecionar Tudo" else "${selectedMedia.size} selecionados",
                                     color = Color.White,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
 
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                TextButton(
-                                    onClick = { adminViewModel.selectAllMedia(filteredMedia) },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                    modifier = Modifier.testTag("admin_catalog_select_all_button")
-                                ) {
-                                    Text("TODOS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
-
-                                if (selectedMedia.isNotEmpty()) {
-                                    TextButton(
-                                        onClick = { adminViewModel.clearSelection() },
-                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                        modifier = Modifier.testTag("admin_catalog_clear_selection_button")
-                                    ) {
-                                        Text("LIMPAR", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            if (selectedMedia.isNotEmpty()) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(onClick = { adminViewModel.clearSelection() }) {
+                                        Text("LIMPAR", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
-
                                     Button(
                                         onClick = { isShowBulkDeleteConfirmDialog = true },
                                         colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
                                         shape = RoundedCornerShape(6.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                        modifier = Modifier.testTag("admin_catalog_delete_selected_button")
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                     ) {
                                         Icon(Icons.Default.Delete, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("EXCLUIR", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        Text("EXCLUIR", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -1126,89 +1558,183 @@ fun AdminCatalogoScreen(
                     }
                 }
             }
-        }
 
-        // Grade de Cards Responsiva e Paginada
-        if (filteredMedia.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.SearchOff,
-                        contentDescription = null,
-                        tint = Color.Gray,
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Text(
-                        text = if (searchQuery.isNotBlank()) "Nenhum conteúdo encontrado para \"$searchQuery\"" else "Nenhum conteúdo no catálogo",
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-                    Text(
-                        text = "Vá para a aba Importação para adicionar filmes e séries.",
-                        color = Color.Gray,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 150.dp),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(pagedList, key = { it.tmdbId }) { media ->
-                    val isSelected = selectedMedia.contains(Pair(media.tmdbId, media.mediaType))
-                    CatalogMediaCard(
-                        media = media,
-                        isSelectionMode = isSelectionMode,
-                        isSelected = isSelected,
-                        onToggleSelect = { adminViewModel.toggleSelectMedia(media.tmdbId, media.mediaType) },
-                        onEdit = { adminViewModel.openEditDialog(media) },
-                        onViewDetails = { adminViewModel.openDetailDialog(media) },
-                        onRefreshInfo = { adminViewModel.refreshMediaInfo(media.tmdbId, media.mediaType) },
-                        onDelete = { adminViewModel.openDeleteDialog(media) }
-                    )
-                }
-
-                // Botão de Paginação / Carregar Mais
-                if (filteredMedia.size > displayLimit) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
+            // RENDERIZAÇÃO DA GRADE / LISTA DE CONTEÚDOS COM PAGINAÇÃO
+            if (sortedMedia.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 48.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
+                            Icon(
+                                imageVector = Icons.Default.SearchOff,
+                                contentDescription = null,
+                                tint = Color.Gray,
+                                modifier = Modifier.size(64.dp)
+                            )
                             Text(
-                                text = "Mostrando ${pagedList.size} de ${filteredMedia.size} conteúdos",
+                                text = "Nenhum conteúdo encontrado",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Tente limpar os filtros ou buscar por outro termo.",
                                 color = Color.Gray,
                                 fontSize = 12.sp
                             )
                             Button(
-                                onClick = { adminViewModel.loadMoreCatalog() },
-                                colors = ButtonDefaults.buttonColors(containerColor = DarkSurface),
-                                border = BorderStroke(1.dp, BrandRed),
-                                shape = RoundedCornerShape(10.dp),
-                                modifier = Modifier.testTag("catalog_load_more_button")
+                                onClick = {
+                                    localSearchQuery = ""
+                                    adminViewModel.onCatalogSearchQueryChanged("")
+                                    filterType = "all"
+                                    filterCategory = "all"
+                                    selectedGenres = emptySet()
+                                    filterStatus = "all"
+                                    filterSource = "all"
+                                    adminViewModel.setCatalogFilter("all")
+                                    currentPage = 1
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF262626)),
+                                border = BorderStroke(1.dp, CardBorder)
                             ) {
-                                Icon(Icons.Default.ExpandMore, contentDescription = null, tint = BrandRed)
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Carregar mais (+30)", color = Color.White, fontWeight = FontWeight.Bold)
+                                Text("LIMPAR TODOS OS FILTROS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             }
+                        }
+                    }
+                }
+            } else {
+                if (isGridView) {
+                    // Render do Grid de Cards agrupados em linhas de 2 itens
+                    val chunkedList = pagedList.chunked(2)
+                    items(chunkedList) { rowItems ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            rowItems.forEach { media ->
+                                val isSelected = selectedMedia.contains(Pair(media.tmdbId, media.mediaType))
+                                Box(modifier = Modifier.weight(1f)) {
+                                    CatalogMediaCard(
+                                        media = media,
+                                        isSelectionMode = isSelectionMode,
+                                        isSelected = isSelected,
+                                        onToggleSelect = { adminViewModel.toggleSelectMedia(media.tmdbId, media.mediaType) },
+                                        onEdit = { adminViewModel.openEditDialog(media) },
+                                        onViewDetails = { adminViewModel.openDetailDialog(media) },
+                                        onRefreshInfo = { adminViewModel.refreshMediaInfo(media.tmdbId, media.mediaType) },
+                                        onToggleRestricted18 = { adminViewModel.toggleMediaRestricted18(media) },
+                                        onDelete = { adminViewModel.openDeleteDialog(media) },
+                                        onAddToFeatured = {
+                                            val featuredItem = com.example.data.remote.FeaturedItemConfigEntity(
+                                                id = "manual_${media.tmdbId}_${media.mediaType}",
+                                                tmdbId = media.tmdbId,
+                                                mediaType = media.mediaType,
+                                                title = media.title,
+                                                originalTitle = media.originalTitle,
+                                                posterPath = media.posterPath,
+                                                backdropPath = media.backdropPath,
+                                                rating = media.rating,
+                                                releaseYear = media.releaseYear.toIntOrNull() ?: 0,
+                                                overview = media.overview,
+                                                genres = media.genres,
+                                                trailerUrl = media.trailerKey ?: "",
+                                                autoPlayTrailer = true
+                                            )
+                                            adminViewModel.addManualFeaturedItem(featuredItem)
+                                        },
+                                        onAddToTop10 = {
+                                            val currentTop10 = adminViewModel.top10Config.value
+                                            val existing = currentTop10.items.toMutableList()
+                                            if (!existing.any { it.tmdbId == media.tmdbId && it.mediaType == media.mediaType }) {
+                                                val newItem = com.example.data.remote.Top10ItemEntity(
+                                                    tmdbId = media.tmdbId,
+                                                    mediaType = media.mediaType,
+                                                    title = media.title,
+                                                    posterPath = media.posterPath,
+                                                    rank = existing.size + 1
+                                                )
+                                                existing.add(newItem)
+                                                val newConfig = currentTop10.copy(
+                                                    items = existing.mapIndexed { idx, it -> it.copy(rank = idx + 1) },
+                                                    lastUpdatedAt = System.currentTimeMillis()
+                                                )
+                                                adminViewModel.saveTop10Config(newConfig)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                            if (rowItems.size < 2) {
+                                Box(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                } else {
+                    // Render da Lista tabular
+                    items(pagedList) { media ->
+                        val isSelected = selectedMedia.contains(Pair(media.tmdbId, media.mediaType))
+                        CatalogMediaRow(
+                            media = media,
+                            isSelectionMode = isSelectionMode,
+                            isSelected = isSelected,
+                            onToggleSelect = { adminViewModel.toggleSelectMedia(media.tmdbId, media.mediaType) },
+                            onEdit = { adminViewModel.openEditDialog(media) },
+                            onViewDetails = { adminViewModel.openDetailDialog(media) },
+                            onRefreshInfo = { adminViewModel.refreshMediaInfo(media.tmdbId, media.mediaType) },
+                            onToggleRestricted18 = { adminViewModel.toggleMediaRestricted18(media) },
+                            onDelete = { adminViewModel.openDeleteDialog(media) }
+                        )
+                    }
+                }
+            }
+
+            // PAGINAÇÃO REAL - CONTROLES DE RODAPÉ
+            if (totalPages > 1) {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { if (currentPage > 1) currentPage-- },
+                            enabled = currentPage > 1
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowBack,
+                                contentDescription = "Página Anterior",
+                                tint = if (currentPage > 1) Color.White else Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Text(
+                            text = "Página $currentPage de $totalPages",
+                            color = Color.LightGray,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+
+                        IconButton(
+                            onClick = { if (currentPage < totalPages) currentPage++ },
+                            enabled = currentPage < totalPages
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ArrowForward,
+                                contentDescription = "Próxima Página",
+                                tint = if (currentPage < totalPages) Color.White else Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
                         }
                     }
                 }
@@ -1349,6 +1875,298 @@ fun AdminCatalogoScreen(
 }
 
 // ==================================================
+// STAT CARD COMPONENT
+// ==================================================
+@Composable
+fun StatCard(
+    label: String,
+    value: String,
+    emoji: String,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, CardBorder.copy(alpha = 0.5f)),
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = label,
+                    color = Color.Gray,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
+                Text(text = emoji, fontSize = 12.sp)
+            }
+            Text(
+                text = value,
+                color = color,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Black
+            )
+        }
+    }
+}
+
+// ==================================================
+// CATALOG MEDIA ROW (TABULAR LIST VIEW)
+// ==================================================
+@Composable
+fun CatalogMediaRow(
+    media: MediaEntity,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onToggleSelect: () -> Unit = {},
+    onEdit: () -> Unit,
+    onViewDetails: () -> Unit,
+    onRefreshInfo: () -> Unit,
+    onToggleRestricted18: () -> Unit,
+    onDelete: () -> Unit,
+    onAddToFeatured: (() -> Unit)? = null,
+    onAddToTop10: (() -> Unit)? = null
+) {
+    var isItemMenuExpanded by remember { mutableStateOf(false) }
+    var isShowRestrictedConfirmDialog by remember { mutableStateOf(false) }
+
+    if (isShowRestrictedConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { isShowRestrictedConfirmDialog = false },
+            containerColor = DarkSurface,
+            title = {
+                Text(
+                    text = if (media.restricted18) "Remover restrição +18?" else "Marcar como +18?",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = if (media.restricted18) 
+                        "Este conteúdo voltará a ser exibido normalmente para todos os usuários." 
+                        else "Este aviso será exibido antes que usuários possam assistir a este conteúdo.",
+                    color = Color.LightGray,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isShowRestrictedConfirmDialog = false
+                        onToggleRestricted18()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed)
+                ) {
+                    Text("CONFIRMAR", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { isShowRestrictedConfirmDialog = false }) {
+                    Text("CANCELAR", color = Color.Gray)
+                }
+            }
+        )
+    }
+
+    Surface(
+        color = if (isSelected) Color(0xFFE50914).copy(alpha = 0.05f) else DarkSurface,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(
+            1.dp, 
+            if (isSelected) BrandRed else CardBorder.copy(alpha = 0.4f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                if (isSelectionMode) onToggleSelect() else onViewDetails()
+            }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            if (isSelectionMode) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = { onToggleSelect() },
+                    colors = CheckboxDefaults.colors(checkedColor = BrandRed)
+                )
+            }
+
+            // Poster miniatura
+            Card(
+                shape = RoundedCornerShape(6.dp),
+                modifier = Modifier.size(width = 44.dp, height = 64.dp)
+            ) {
+                AsyncImage(
+                    model = media.posterPath,
+                    contentDescription = media.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // Info principal
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = media.title,
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    
+                    if (media.restricted18) {
+                        Surface(
+                            color = Color(0xFFEF4444),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = "+18",
+                                color = Color.White,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Surface(
+                        color = if (media.mediaType == "tv") Color(0xFF3B82F6).copy(alpha = 0.2f) else BrandRed.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            text = if (media.mediaType == "tv") "SÉRIE" else "FILME",
+                            color = if (media.mediaType == "tv") Color(0xFF60A5FA) else Color(0xFFF87171),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "•  ${media.releaseYear}  •  ★ %.1f".format(media.rating),
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
+
+                Text(
+                    text = "ID: ${media.tmdbId}",
+                    color = Color.DarkGray,
+                    fontSize = 9.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+            }
+
+            if (!isSelectionMode) {
+                Box {
+                    IconButton(onClick = { isItemMenuExpanded = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Mais opções", tint = Color.LightGray)
+                    }
+
+                    DropdownMenu(
+                        expanded = isItemMenuExpanded,
+                        onDismissRequest = { isItemMenuExpanded = false },
+                        modifier = Modifier
+                            .background(DarkSurface)
+                            .border(1.dp, CardBorder, RoundedCornerShape(8.dp))
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("✏️ Editar", color = Color.White, fontSize = 12.sp) },
+                            onClick = {
+                                isItemMenuExpanded = false
+                                onEdit()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("👁 Detalhes", color = Color.White, fontSize = 12.sp) },
+                            onClick = {
+                                isItemMenuExpanded = false
+                                onViewDetails()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🔄 Sincronizar TMDB", color = Color(0xFF3B82F6), fontSize = 12.sp) },
+                            onClick = {
+                                isItemMenuExpanded = false
+                                onRefreshInfo()
+                            }
+                        )
+                        if (onAddToFeatured != null) {
+                            DropdownMenuItem(
+                                text = { Text("⭐ Destaques", color = Color.White, fontSize = 12.sp) },
+                                onClick = {
+                                    isItemMenuExpanded = false
+                                    onAddToFeatured()
+                                }
+                            )
+                        }
+                        if (onAddToTop10 != null) {
+                            DropdownMenuItem(
+                                text = { Text("🏆 Top 10", color = Color.White, fontSize = 12.sp) },
+                                onClick = {
+                                    isItemMenuExpanded = false
+                                    onAddToTop10()
+                                }
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { 
+                                Text(
+                                    text = if (media.restricted18) "🔓 Remover Restrição" else "🔒 Restringir +18", 
+                                    color = if (media.restricted18) Color(0xFF10B981) else Color(0xFFEF4444), 
+                                    fontSize = 12.sp
+                                ) 
+                            },
+                            onClick = {
+                                isItemMenuExpanded = false
+                                isShowRestrictedConfirmDialog = true
+                            }
+                        )
+                        HorizontalDivider(color = CardBorder.copy(alpha = 0.3f))
+                        DropdownMenuItem(
+                            text = { Text("🗑 Excluir", color = Color(0xFFEF4444), fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                            onClick = {
+                                isItemMenuExpanded = false
+                                onDelete()
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================================================
 // 6. CARD DO CATÁLOGO COM MENU ⋮ INDIVIDUAL
 // ==================================================
 @Composable
@@ -1360,9 +2178,53 @@ fun CatalogMediaCard(
     onEdit: () -> Unit,
     onViewDetails: () -> Unit,
     onRefreshInfo: () -> Unit,
-    onDelete: () -> Unit
+    onToggleRestricted18: () -> Unit,
+    onDelete: () -> Unit,
+    onAddToFeatured: (() -> Unit)? = null,
+    onAddToTop10: (() -> Unit)? = null
 ) {
     var isItemMenuExpanded by remember { mutableStateOf(false) }
+    var isShowRestrictedConfirmDialog by remember { mutableStateOf(false) }
+
+    if (isShowRestrictedConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { isShowRestrictedConfirmDialog = false },
+            containerColor = DarkSurface,
+            title = {
+                Text(
+                    text = if (media.restricted18) "Remover restrição +18?" else "Marcar como +18?",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = if (media.restricted18) 
+                        "Este conteúdo voltará a ser exibido normalmente para todos os usuários." 
+                        else "Este aviso será exibido antes que usuários possam assistir a este conteúdo.",
+                    color = Color.LightGray,
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isShowRestrictedConfirmDialog = false
+                        onToggleRestricted18()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed)
+                ) {
+                    Text("CONFIRMAR", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { isShowRestrictedConfirmDialog = false }) {
+                    Text("CANCELAR", color = Color.Gray)
+                }
+            }
+        )
+    }
 
     Card(
         modifier = Modifier
@@ -1447,6 +2309,34 @@ fun CatalogMediaCard(
                                 color = Color.White,
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
+                // Badge +18 (Explicit Indicator)
+                if (media.restricted18) {
+                    Surface(
+                        color = Color(0xFFEF4444),
+                        shape = RoundedCornerShape(topEnd = 8.dp),
+                        modifier = Modifier.align(Alignment.BottomStart)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(10.dp)
+                            )
+                            Text(
+                                text = "+18",
+                                color = Color.White,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black
                             )
                         }
                     }
@@ -1548,6 +2438,38 @@ fun CatalogMediaCard(
                                         onRefreshInfo()
                                     }
                                 )
+                                DropdownMenuItem(
+                                    text = { 
+                                        Text(
+                                            text = if (media.restricted18) "🔓 Remover Restrição +18" else "🔒 Marcar como +18", 
+                                            color = if (media.restricted18) Color(0xFF10B981) else Color(0xFFEF4444), 
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        ) 
+                                    },
+                                    onClick = {
+                                        isItemMenuExpanded = false
+                                        isShowRestrictedConfirmDialog = true
+                                    }
+                                )
+                                if (onAddToFeatured != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("⭐ Adicionar aos Destaques", color = Color.White, fontSize = 13.sp) },
+                                        onClick = {
+                                            isItemMenuExpanded = false
+                                            onAddToFeatured()
+                                        }
+                                    )
+                                }
+                                if (onAddToTop10 != null) {
+                                    DropdownMenuItem(
+                                        text = { Text("🏆 Adicionar ao Top 10", color = Color.White, fontSize = 13.sp) },
+                                        onClick = {
+                                            isItemMenuExpanded = false
+                                            onAddToTop10()
+                                        }
+                                    )
+                                }
                                 HorizontalDivider(color = CardBorder.copy(alpha = 0.4f))
                                 DropdownMenuItem(
                                     text = { Text("🗑 Excluir", color = Color(0xFFEF4444), fontSize = 13.sp, fontWeight = FontWeight.Bold) },
@@ -1692,6 +2614,7 @@ fun CatalogEditDialog(
     var tmdbIdStr by remember { mutableStateOf(media.tmdbId.toString()) }
     var seasonsCountStr by remember { mutableStateOf(media.seasonsCount.toString()) }
     var episodesCountStr by remember { mutableStateOf(media.episodesCount.toString()) }
+    var restricted18 by remember { mutableStateOf(media.restricted18) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -1851,6 +2774,71 @@ fun CatalogEditDialog(
                         colors = editDialogTextFieldColors(),
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Seção de Controle de Acesso
+                    Surface(
+                        color = DarkBackground,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, CardBorder.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "CONTROLE DE ACESSO",
+                                color = Color.Gray,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 1.sp
+                            )
+                            
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { restricted18 = !restricted18 }
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        imageVector = if (restricted18) Icons.Default.Lock else Icons.Default.LockOpen,
+                                        contentDescription = null,
+                                        tint = if (restricted18) Color(0xFFEF4444) else Color.Gray,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "Conteúdo para maiores de 18 anos",
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = if (restricted18) "Aviso de idade ativado para este conteúdo" else "Livre para todas as idades",
+                                            color = Color.Gray,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+                                }
+                                Switch(
+                                    checked = restricted18,
+                                    onCheckedChange = { restricted18 = it },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = BrandRed,
+                                        uncheckedThumbColor = Color.Gray,
+                                        uncheckedTrackColor = DarkSurface
+                                    )
+                                )
+                            }
+                        }
+                    }
                 }
 
                 HorizontalDivider(color = CardBorder, modifier = Modifier.padding(vertical = 8.dp))
@@ -1878,7 +2866,10 @@ fun CatalogEditDialog(
                                 mediaType = mediaType,
                                 tmdbId = tmdbIdStr.toIntOrNull() ?: media.tmdbId,
                                 seasonsCount = seasonsCountStr.toIntOrNull() ?: media.seasonsCount,
-                                episodesCount = episodesCountStr.toIntOrNull() ?: media.episodesCount
+                                episodesCount = episodesCountStr.toIntOrNull() ?: media.episodesCount,
+                                restricted18 = restricted18,
+                                restricted18UpdatedAt = if (restricted18 != media.restricted18) System.currentTimeMillis() else media.restricted18UpdatedAt,
+                                restricted18UpdatedBy = if (restricted18 != media.restricted18) "admin@ronycine.app" else media.restricted18UpdatedBy
                             )
                             onSave(updatedEntity)
                         },
@@ -1979,6 +2970,26 @@ fun CatalogDetailDialog(
 
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 BadgeTag(if (media.mediaType == "tv") "📺 Série" else "🎬 Filme")
+                                if (media.restricted18) {
+                                    Surface(
+                                        color = Color(0xFFEF4444),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(Icons.Default.Lock, null, tint = Color.White, modifier = Modifier.size(10.dp))
+                                            Text(
+                                                text = "RESTRITO +18",
+                                                color = Color.White,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+                                    }
+                                }
                                 Surface(
                                     color = Color.Black.copy(alpha = 0.5f),
                                     shape = RoundedCornerShape(4.dp)
@@ -5820,6 +6831,7 @@ fun AdminConfiguracoesScreen(
     var selectedPlayer by remember(megaEmbedConfig) { mutableStateOf(megaEmbedConfig.defaultPlayer) }
     var selectedLanguage by remember(megaEmbedConfig) { mutableStateOf(megaEmbedConfig.defaultLanguage) }
     var autoSyncEnabled by remember(megaEmbedConfig) { mutableStateOf(megaEmbedConfig.isAutoSyncEnabled) }
+    var playerColorHex by remember(megaEmbedConfig) { mutableStateOf(megaEmbedConfig.colorHex.ifBlank { "fb542b" }) }
 
     // Share & Installation Link State
     var installUrl by remember(shareAppConfig) { mutableStateOf(shareAppConfig.installUrl) }
@@ -5961,70 +6973,152 @@ fun AdminConfiguracoesScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Column {
                         Text(
-                            text = "Player padrão",
+                            text = "Player padrão (MegaEmbed)",
                             color = Color.White,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Escolha o player utilizado para reprodução.",
+                            text = "Escolha o player do MegaEmbed utilizado para reprodução.",
                             color = Color(0xFF9CA3AF),
                             fontSize = 12.sp
                         )
                     }
 
-                    Row(
+                    // Seletor do player MegaEmbed: MegaPlay, MegaTube, Vidstack, Clappr
+                    Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf(
-                            "megaplay" to "MEGAPLAYER",
-                            "embed" to "EMBED V2"
-                        ).forEach { (code, label) ->
-                            val isSelected = selectedPlayer == code
-                            val scale by animateFloatAsState(
-                                targetValue = if (isSelected) 1.02f else 1.0f,
-                                label = "player_button_scale"
-                            )
-
-                            Button(
-                                onClick = { selectedPlayer = code },
+                        com.example.data.remote.MegaEmbedPlayerType.ALL_PLAYERS.forEach { option ->
+                            val isSelected = selectedPlayer.equals(option.code, ignoreCase = true)
+                            Surface(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .scale(scale)
-                                    .testTag("player_option_$code"),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isSelected) BrandRed else Color(0xFF1A1A1A)
-                                ),
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { selectedPlayer = option.code }
+                                    .testTag("player_option_${option.code}"),
+                                color = if (isSelected) Color(0xFFfb542b).copy(alpha = 0.12f) else Color(0xFF1A1A1A),
                                 shape = RoundedCornerShape(10.dp),
-                                border = if (isSelected) null else BorderStroke(1.dp, Color(0xFF2A2A2A)),
-                                contentPadding = PaddingValues(vertical = 11.dp)
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) Color(0xFFfb542b) else Color(0xFF2A2A2A)
+                                )
                             ) {
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (isSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(16.dp)
+                                    RadioButton(
+                                        selected = isSelected,
+                                        onClick = { selectedPlayer = option.code },
+                                        colors = RadioButtonDefaults.colors(
+                                            selectedColor = Color(0xFFfb542b),
+                                            unselectedColor = Color(0xFF9CA3AF)
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = option.displayName,
+                                            color = if (isSelected) Color.White else Color(0xFFE5E7EB),
+                                            fontSize = 14.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = option.description,
+                                            color = if (isSelected) Color(0xFFfb542b).copy(alpha = 0.9f) else Color(0xFF9CA3AF),
+                                            fontSize = 12.sp
+                                        )
                                     }
-                                    Text(
-                                        text = label,
-                                        color = if (isSelected) Color.White else Color(0xFFA1A1AA),
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                }
+                            }
+                        }
+                    }
+
+                    Divider(color = Color(0xFF222222))
+
+                    // COR DO PLAYER (HEX)
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "COR DO PLAYER (HEX)",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Personalize a cor de destaque do player (ex: #fb542b ou fb542b).",
+                            color = Color(0xFF9CA3AF),
+                            fontSize = 12.sp
+                        )
+
+                        val isValidHex = com.example.data.remote.MegaEmbedPlayerType.isValidHexColor(playerColorHex)
+                        val normalizedHex = com.example.data.remote.MegaEmbedPlayerType.normalizeColor(playerColorHex)
+                        val previewColor = if (isValidHex) {
+                            try {
+                                Color(android.graphics.Color.parseColor("#$normalizedHex"))
+                            } catch (e: Exception) {
+                                Color(0xFFfb542b)
+                            }
+                        } else {
+                            Color(0xFFfb542b)
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = playerColorHex,
+                                onValueChange = { playerColorHex = it },
+                                placeholder = { Text("#fb542b", color = Color(0xFF6B7280)) },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("input_player_color_hex"),
+                                singleLine = true,
+                                isError = !isValidHex,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = Color(0xFFfb542b),
+                                    unfocusedBorderColor = Color(0xFF374151),
+                                    errorBorderColor = Color(0xFFEF4444)
+                                )
+                            )
+
+                            // Preview visual da cor
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(previewColor)
+                                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!isValidHex) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Cor inválida",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
+                        }
+
+                        if (!isValidHex) {
+                            Text(
+                                text = "Formato de cor HEX inválido (use 3, 6 ou 8 dígitos, ex: #fb542b)",
+                                color = Color(0xFFEF4444),
+                                fontSize = 11.sp
+                            )
                         }
                     }
                 }
@@ -6349,9 +7443,11 @@ fun AdminConfiguracoesScreen(
                 onClick = {
                     if (!isSaving) {
                         isSaving = true
+                        val cleanColor = com.example.data.remote.MegaEmbedPlayerType.normalizeColor(playerColorHex)
                         adminViewModel.saveMegaEmbedConfig(
                             megaEmbedConfig.copy(
                                 defaultPlayer = selectedPlayer,
+                                colorHex = cleanColor,
                                 defaultLanguage = selectedLanguage,
                                 isAutoSyncEnabled = autoSyncEnabled
                             )

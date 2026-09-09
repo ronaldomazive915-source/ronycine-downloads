@@ -19,6 +19,24 @@ interface PlayFilmeDao {
     @Query("SELECT * FROM media_catalog WHERE mediaType = :type ORDER BY addedAt DESC")
     suspend fun getMediaByTypeSync(type: String): List<MediaEntity>
 
+    @Query("SELECT * FROM media_catalog WHERE mediaCategory = :category ORDER BY addedAt DESC")
+    fun getMediaByCategory(category: String): Flow<List<MediaEntity>>
+
+    @Query("SELECT * FROM media_catalog WHERE mediaCategory = :category ORDER BY addedAt DESC")
+    suspend fun getMediaByCategorySync(category: String): List<MediaEntity>
+
+    @Query("SELECT COUNT(*) FROM media_catalog WHERE mediaCategory = :category")
+    fun observeMediaCountByCategory(category: String): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM media_catalog WHERE mediaCategory = :category")
+    suspend fun getMediaCountByCategory(category: String): Int
+
+    @Query("UPDATE media_catalog SET mediaCategory = :category WHERE tmdbId = :tmdbId AND mediaType = :mediaType")
+    suspend fun updateMediaCategory(tmdbId: Int, mediaType: String, category: String)
+
+    @Query("UPDATE media_catalog SET mediaCategory = :category, originalLanguage = :lang, originCountry = :country WHERE tmdbId = :tmdbId AND mediaType = :mediaType")
+    suspend fun updateMediaClassification(tmdbId: Int, mediaType: String, category: String, lang: String, country: String)
+
     @Query("SELECT * FROM media_catalog WHERE tmdbId = :tmdbId AND mediaType = :type LIMIT 1")
     suspend fun getMediaByTmdbIdAndType(tmdbId: Int, type: String): MediaEntity?
 
@@ -126,11 +144,17 @@ interface PlayFilmeDao {
     @Query("DELETE FROM episodes WHERE mediaTmdbId = :tmdbId")
     suspend fun deleteEpisodesByMediaId(tmdbId: Int)
 
+    @Query("DELETE FROM my_list WHERE tmdbId = :tmdbId AND profileId = :profileId")
+    suspend fun deleteFromMyList(tmdbId: Int, profileId: String)
+
     @Query("DELETE FROM my_list WHERE tmdbId = :tmdbId")
-    suspend fun deleteFromMyList(tmdbId: Int)
+    suspend fun deleteFromMyListGlobal(tmdbId: Int)
+
+    @Query("DELETE FROM watch_history WHERE tmdbId = :tmdbId AND profileId = :profileId")
+    suspend fun deleteFromWatchHistory(tmdbId: Int, profileId: String)
 
     @Query("DELETE FROM watch_history WHERE tmdbId = :tmdbId")
-    suspend fun deleteFromWatchHistory(tmdbId: Int)
+    suspend fun deleteFromWatchHistoryGlobal(tmdbId: Int)
 
     // --- Episodes ---
     @Query("SELECT * FROM episodes WHERE mediaTmdbId = :tmdbId AND seasonNumber = :seasonNumber ORDER BY episodeNumber ASC")
@@ -174,36 +198,45 @@ interface PlayFilmeDao {
     suspend fun clearLiveChannels()
 
     // --- My List ---
-    @Query("SELECT m.* FROM media_catalog m INNER JOIN my_list l ON m.tmdbId = l.tmdbId ORDER BY l.addedAt DESC")
-    fun getMyList(): Flow<List<MediaEntity>>
+    @Query("SELECT m.* FROM media_catalog m INNER JOIN my_list l ON m.tmdbId = l.tmdbId WHERE l.profileId = :profileId ORDER BY l.addedAt DESC")
+    fun getMyList(profileId: String): Flow<List<MediaEntity>>
 
-    @Query("SELECT EXISTS(SELECT 1 FROM my_list WHERE tmdbId = :tmdbId)")
-    fun isMediaInMyList(tmdbId: Int): Flow<Boolean>
+    @Query("SELECT m.* FROM media_catalog m INNER JOIN my_list l ON m.tmdbId = l.tmdbId WHERE l.profileId = :profileId ORDER BY l.addedAt DESC")
+    suspend fun getMyListSync(profileId: String): List<MediaEntity>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM my_list WHERE tmdbId = :tmdbId AND profileId = :profileId)")
+    fun isMediaInMyList(tmdbId: Int, profileId: String): Flow<Boolean>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun addToMyList(item: MyListEntity)
 
-    @Query("DELETE FROM my_list WHERE tmdbId = :tmdbId")
-    suspend fun removeFromMyList(tmdbId: Int)
+    @Query("DELETE FROM my_list WHERE tmdbId = :tmdbId AND profileId = :profileId")
+    suspend fun removeFromMyList(tmdbId: Int, profileId: String)
 
     // --- Watch History & Continue Watching ---
-    @Query("SELECT * FROM watch_history ORDER BY watchedAt DESC")
-    fun getWatchHistory(): Flow<List<WatchHistoryEntity>>
+    @Query("SELECT * FROM watch_history WHERE profileId = :profileId ORDER BY watchedAt DESC")
+    fun getWatchHistory(profileId: String): Flow<List<WatchHistoryEntity>>
 
-    @Query("SELECT * FROM watch_history WHERE progressPercent > 0 AND progressPercent < 98 ORDER BY watchedAt DESC")
-    fun getContinueWatching(): Flow<List<WatchHistoryEntity>>
+    @Query("SELECT * FROM watch_history WHERE profileId = :profileId ORDER BY watchedAt DESC")
+    suspend fun getWatchHistorySync(profileId: String): List<WatchHistoryEntity>
+
+    @Query("SELECT * FROM watch_history WHERE profileId = :profileId AND progressPercent > 0 AND progressPercent < 98 ORDER BY watchedAt DESC")
+    fun getContinueWatching(profileId: String): Flow<List<WatchHistoryEntity>>
+
+    @Query("SELECT * FROM watch_history WHERE profileId = :profileId AND progressPercent > 0 AND progressPercent < 98 ORDER BY watchedAt DESC")
+    suspend fun getContinueWatchingSync(profileId: String): List<WatchHistoryEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveWatchProgress(history: WatchHistoryEntity)
 
-    @Query("SELECT * FROM watch_history WHERE tmdbId = :tmdbId ORDER BY watchedAt DESC LIMIT 1")
-    fun getWatchHistoryForMedia(tmdbId: Int): Flow<WatchHistoryEntity?>
+    @Query("SELECT * FROM watch_history WHERE tmdbId = :tmdbId AND profileId = :profileId ORDER BY watchedAt DESC LIMIT 1")
+    fun getWatchHistoryForMedia(tmdbId: Int, profileId: String): Flow<WatchHistoryEntity?>
 
-    @Query("SELECT * FROM watch_history WHERE tmdbId = :tmdbId LIMIT 1")
-    suspend fun getWatchHistoryItemByTmdbId(tmdbId: Int): WatchHistoryEntity?
+    @Query("SELECT * FROM watch_history WHERE tmdbId = :tmdbId AND profileId = :profileId LIMIT 1")
+    suspend fun getWatchHistoryItemByTmdbId(tmdbId: Int, profileId: String): WatchHistoryEntity?
 
-    @Query("SELECT * FROM watch_history WHERE tmdbId = :tmdbId AND mediaType = :mediaType AND (:seasonNumber IS NULL OR seasonNumber = :seasonNumber) AND (:episodeNumber IS NULL OR episodeNumber = :episodeNumber) LIMIT 1")
-    suspend fun getWatchHistoryItemByKey(tmdbId: Int, mediaType: String, seasonNumber: Int?, episodeNumber: Int?): WatchHistoryEntity?
+    @Query("SELECT * FROM watch_history WHERE tmdbId = :tmdbId AND profileId = :profileId AND mediaType = :mediaType AND (:seasonNumber IS NULL OR seasonNumber = :seasonNumber) AND (:episodeNumber IS NULL OR episodeNumber = :episodeNumber) LIMIT 1")
+    suspend fun getWatchHistoryItemByKey(tmdbId: Int, profileId: String, mediaType: String, seasonNumber: Int?, episodeNumber: Int?): WatchHistoryEntity?
 
     @Query("DELETE FROM watch_history WHERE id = :id")
     suspend fun deleteWatchHistoryById(id: Int)

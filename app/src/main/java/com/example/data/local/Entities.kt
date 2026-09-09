@@ -3,9 +3,10 @@ package com.example.data.local
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "my_list")
+@Entity(tableName = "my_list", primaryKeys = ["tmdbId", "profileId"])
 data class MyListEntity(
-    @PrimaryKey val tmdbId: Int,
+    val tmdbId: Int,
+    val profileId: String,
     val mediaType: String,
     val addedAt: Long = System.currentTimeMillis()
 )
@@ -13,6 +14,7 @@ data class MyListEntity(
 @Entity(tableName = "watch_history")
 data class WatchHistoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val profileId: String,
     val tmdbId: Int,
     val mediaType: String,
     val title: String,

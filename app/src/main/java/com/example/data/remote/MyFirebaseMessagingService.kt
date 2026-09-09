@@ -119,7 +119,9 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             .setAutoCancel(true)
             .setSound(defaultSoundUri)
             .setContentIntent(pendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
         // Optional Bitmap loading for imageUrl
         if (!imageUrl.isNullOrBlank()) {
@@ -127,8 +129,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 val url = java.net.URL(imageUrl)
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.doInput = true
-                connection.connectTimeout = 5000
-                connection.readTimeout = 5000
+                connection.connectTimeout = 10000
+                connection.readTimeout = 10000
                 connection.connect()
                 val input = connection.inputStream
                 val bitmap = android.graphics.BitmapFactory.decodeStream(input)
@@ -136,8 +138,10 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                     notificationBuilder.setStyle(
                         NotificationCompat.BigPictureStyle()
                             .bigPicture(bitmap)
-                            .bigLargeIcon(null as android.graphics.Bitmap?)
+                            .setBigContentTitle(title)
+                            .setSummaryText(messageBody)
                     )
+                    notificationBuilder.setLargeIcon(bitmap)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Could not load image for notification push: ${e.message}")
@@ -149,10 +153,15 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "RONYCINE",
-                NotificationManager.IMPORTANCE_DEFAULT
+                "Notificações RONYCINE",
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Novidades do RONYCINE"
+                description = "Novidades e avisos do RONYCINE"
+                enableLights(true)
+                lightColor = android.graphics.Color.RED
+                enableVibration(true)
+                setShowBadge(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
             notificationManager.createNotificationChannel(channel)
         }

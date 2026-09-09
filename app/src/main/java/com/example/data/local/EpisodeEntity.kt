@@ -18,5 +18,6 @@ data class EpisodeEntity(
     val overview: String,
     val duration: String = "45 min",
     val stillPath: String? = null,
-    val videoUrl: String? = null
+    val videoUrl: String? = null,
+    val restricted18: Boolean = false
 )

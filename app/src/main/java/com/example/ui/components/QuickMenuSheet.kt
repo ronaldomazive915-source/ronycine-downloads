@@ -181,42 +181,32 @@ fun QuickMenuSheet(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             // Avatar
-                            if (!activeProfile?.avatarUrl.isNullOrBlank()) {
-                                AsyncImage(
-                                    model = activeProfile?.avatarUrl,
-                                    contentDescription = "Foto de perfil",
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .border(1.2.dp, BrandRed, CircleShape)
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(BrandRed.copy(alpha = 0.2f))
-                                        .border(1.2.dp, BrandRed, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Person,
-                                        contentDescription = null,
-                                        tint = BrandRed,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
+                            ProfileAvatar(
+                                profile = activeProfile,
+                                size = 40.dp,
+                                borderWidth = 1.5.dp,
+                                borderColor = BrandRed,
+                                testTag = "quick_menu_profile_avatar"
+                            )
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = activeProfile?.name?.ifBlank { "RONYCINE" } ?: "RONYCINE",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = activeProfile?.name?.ifBlank { "RONYCINE" } ?: "RONYCINE",
+                                        color = Color.White,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    if (activeProfile?.isVerified == true) {
+                                        VerifiedBadge(size = 14.dp, showToastOnClick = false)
+                                    }
+                                }
                                 Text(
                                     text = "Meu Principal",
                                     color = TextSecondary,
@@ -280,6 +270,18 @@ fun QuickMenuSheet(
                                 onClick = {
                                     onDismiss()
                                     onNavigate(ScreenRoute.TRENDING.route)
+                                }
+                            )
+                        }
+
+                        item {
+                            DrawerMenuItem(
+                                icon = Icons.Default.VideoLibrary,
+                                title = "ANIMES & DORAMAS",
+                                isSelected = currentRoute == ScreenRoute.ANIMES_DORAMAS.route,
+                                onClick = {
+                                    onDismiss()
+                                    onNavigate(ScreenRoute.ANIMES_DORAMAS.route)
                                 }
                             )
                         }

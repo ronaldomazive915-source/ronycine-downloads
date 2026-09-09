@@ -79,7 +79,7 @@ fun MediaSectionRow(
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     Text(
-                        text = "Ver todos",
+                        text = com.example.util.stringI18n("action.view_all"),
                         color = TextSecondary,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.SemiBold
@@ -100,7 +100,11 @@ fun MediaSectionRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
         ) {
-            items(items, key = { "${it.tmdbId}_${it.mediaType}" }) { media ->
+            items(
+                items = items,
+                key = { "${it.mediaType}:${it.tmdbId}" },
+                contentType = { "media_card" }
+            ) { media ->
                 MediaCard(
                     media = media,
                     onClick = { onItemClick(media) }

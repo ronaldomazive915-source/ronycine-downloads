@@ -89,6 +89,76 @@ data class AppVersionEntity(
         }
 }
 
+data class PendingChangeEntity(
+    val id: String = "",
+    val title: String = "",
+    val description: String = "",
+    val category: String = "OUTRA", // NOVA FUNCIONALIDADE, MELHORIA VISUAL, CORREÇÃO DE BUG, etc.
+    val status: String = "PENDING", // PENDING, REVIEWING, APPROVED, PUBLISHED, REJECTED, CANCELLED
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val createdBy: String = "admin@ronycine.app",
+    val revision: String = "",
+    val relatedVersion: String = "",
+    val impact: String = "MEDIUM", // LOW, MEDIUM, HIGH, CRITICAL
+    val affectedComponents: List<String> = emptyList(),
+    val requiresApk: Boolean = false,
+    val requiresWebPublish: Boolean = true,
+    val publishedAt: Long? = null,
+    val publishedBy: String? = null
+) {
+    val statusDisplay: String
+        get() = when (status) {
+            "PENDING" -> "Pendente"
+            "REVIEWING" -> "Em revisão"
+            "APPROVED" -> "Aprovada"
+            "PUBLISHED" -> "Publicada"
+            "REJECTED" -> "Rejeitada"
+            "CANCELLED" -> "Cancelada"
+            else -> status
+        }
+
+    val dateFormatted: String
+        get() {
+            val ts = createdAt
+            val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR"))
+            return sdf.format(Date(ts))
+        }
+}
+
+data class ReleaseRevisionEntity(
+    val id: String = "",
+    val revision: String = "", // e.g., 2026.09.07-001
+    val title: String = "",
+    val description: String = "",
+    val changes: List<PendingChangeEntity> = emptyList(),
+    val status: String = "PUBLISHED",
+    val publishedBy: String = "admin@ronycine.app",
+    val publishedAt: Long = System.currentTimeMillis(),
+    val releaseType: String = "WEB", // WEB, APK, HYBRID
+    val affectedDevicesCount: Int = 0,
+    val versionId: String? = null,
+    val errors: List<String> = emptyList()
+) {
+    val dateFormatted: String
+        get() {
+            val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR"))
+            return sdf.format(Date(publishedAt))
+        }
+}
+
+data class PublicationEventEntity(
+    val id: String = "",
+    val releaseId: String = "",
+    val revision: String = "",
+    val publishedBy: String = "",
+    val publishedAt: Long = System.currentTimeMillis(),
+    val targetType: String = "WEB",
+    val status: String = "SUCCESS",
+    val affectedDevicesCount: Int = 0,
+    val errors: List<String> = emptyList()
+)
+
 data class UpdateEventEntity(
     val id: String = "",
     val deviceId: String = "",
@@ -114,6 +184,8 @@ data class RemoteConfigEntity(
     val appName: String = "RONYCINE",
     val maintenanceMode: Boolean = false,
     val maintenanceMessage: String = "Estamos realizando uma atualização no sistema. Tente novamente em breve.",
+    val maintenanceStartedAt: Long = 0L,
+    val maintenanceEndAt: Long = 0L,
     val allowedVersionsDuringMaintenance: List<Int> = emptyList(),
     val minimumVersionCode: Int = 100,
     val latestVersionCode: Int = 105,
@@ -127,6 +199,52 @@ data class RemoteConfigEntity(
     val announcement: String = "",
     val updatedAt: Long = System.currentTimeMillis()
 )
+
+data class RemoteAppConfigEntity(
+    val remoteVersion: String = "2026.09.07.01",
+    val activeRevision: String = "",
+    val build: Int = 1,
+    val cacheVersion: Int = 1,
+    val forceRefresh: Boolean = false,
+    val remoteUpdateEnabled: Boolean = true,
+    val maintenanceMode: Boolean = false,
+    val maintenanceMessage: String = "Estamos realizando melhorias no aplicativo. Tente novamente em breve.",
+    val minimumAppVersion: Int = 100,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val publishedBy: String = "admin@ronycine.app",
+    val changelog: String = "Melhorias de desempenho e atualização de conteúdos."
+) {
+    val dateFormatted: String
+        get() {
+            if (updatedAt <= 0L) return "N/A"
+            val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR"))
+            return sdf.format(Date(updatedAt))
+        }
+}
+
+data class RemoteUpdateHistoryEntity(
+    val id: String = "",
+    val remoteVersion: String = "2026.09.07.01",
+    val build: Int = 1,
+    val cacheVersion: Int = 1,
+    val changelog: String = "",
+    val publishedBy: String = "admin@ronycine.app",
+    val publishedAt: Long = System.currentTimeMillis(),
+    val forceRefresh: Boolean = false
+) {
+    val dateFormatted: String
+        get() {
+            if (publishedAt <= 0L) return "Sem data"
+            val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR"))
+            return sdf.format(Date(publishedAt))
+        }
+    val dateShortFormatted: String
+        get() {
+            if (publishedAt <= 0L) return "Sem data"
+            val sdf = SimpleDateFormat("dd/MM/yyyy", Locale("pt", "BR"))
+            return sdf.format(Date(publishedAt))
+        }
+}
 
 data class AdminAuditLogEntity(
     val id: String = "",
@@ -208,6 +326,9 @@ data class FeaturedItemConfigEntity(
     val autoPlayTrailer: Boolean = true,
     val displayOrder: Int = 0,
     val isActive: Boolean = true,
+    val restricted18: Boolean = false,
+    val restricted18UpdatedAt: Long = 0L,
+    val restricted18UpdatedBy: String = "",
     val addedAt: Long = System.currentTimeMillis()
 ) {
     val uniqueKey: String get() = "${tmdbId}_$mediaType"
@@ -232,7 +353,10 @@ data class FeaturedItemConfigEntity(
             rating = rating,
             genres = genres,
             trailerKey = cleanTrailerKey,
-            isHeroFeatured = true
+            isHeroFeatured = true,
+            restricted18 = restricted18,
+            restricted18UpdatedAt = restricted18UpdatedAt,
+            restricted18UpdatedBy = restricted18UpdatedBy
         )
     }
 }

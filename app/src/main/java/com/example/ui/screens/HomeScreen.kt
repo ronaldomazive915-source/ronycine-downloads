@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -28,10 +29,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,6 +46,7 @@ import com.example.ui.components.CircularRatingBadge
 import com.example.ui.components.HeroBanner
 import com.example.ui.components.MediaCard
 import com.example.ui.components.MediaSectionRow
+import com.example.util.MediaClassifier
 import com.example.ui.components.PlayfilmeFooter
 import com.example.ui.components.ScreenRoute
 import com.example.ui.theme.BrandRed
@@ -63,10 +67,17 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
+    val isHeroVisible by remember {
+        derivedStateOf { listState.firstVisibleItemIndex <= 1 }
+    }
 
     val allMedia by viewModel.allMedia.collectAsState()
     val movies by viewModel.movies.collectAsState()
     val series by viewModel.series.collectAsState()
+    val animes by viewModel.animes.collectAsState()
+    val doramas by viewModel.doramas.collectAsState()
+    val recentAnimes by viewModel.recentAnimes.collectAsState()
+    val recentDoramas by viewModel.recentDoramas.collectAsState()
     val myList by viewModel.myList.collectAsState()
     val continueWatching by viewModel.continueWatching.collectAsState()
     val top10Medias by viewModel.top10Medias.collectAsState()
@@ -75,46 +86,26 @@ fun HomeScreen(
     val activeFeaturedItems by viewModel.activeFeaturedItems.collectAsState()
     val recentlyAddedMedia by viewModel.recentlyAddedMedia.collectAsState()
     val heroIndex by viewModel.heroIndex.collectAsState()
+    val releases by viewModel.releases.collectAsState()
+    val topRated by viewModel.topRated.collectAsState()
+    val fallbackFeaturedList by viewModel.fallbackFeaturedList.collectAsState()
+
+    // Home Isolated Search State
+    val homeSearchQuery by viewModel.homeSearchQuery.collectAsState()
+    val homeSearchResults by viewModel.homeSearchResults.collectAsState()
+    val isHomeSearching by viewModel.isHomeSearching.collectAsState()
+
+    // BackHandler: if searching on Home, back button cleans search instead of quitting
+    BackHandler(enabled = homeSearchQuery.isNotBlank()) {
+        viewModel.clearHomeSearch()
+    }
 
     // Active Category Filter ("todos", "filmes", "series", "animes", "doramas")
     var selectedCategory by remember { mutableStateOf("todos") }
 
-    val fallbackFeaturedList = remember(activeFeaturedItems, featuredMedias) {
-        if (activeFeaturedItems.isNotEmpty()) {
-            activeFeaturedItems
-        } else if (featuredMedias.isNotEmpty()) {
-            featuredMedias.map { media ->
-                com.example.data.local.FeaturedMediaItem(
-                    featured = com.example.data.local.FeaturedMediaEntity(
-                        mediaTmdbId = media.tmdbId,
-                        mediaType = media.mediaType,
-                        trailerUrl = media.trailerKey ?: "",
-                        autoPlayTrailer = true
-                    ),
-                    media = media
-                )
-            }
-        } else {
-            emptyList()
-        }
-    }
-
-    val releases = remember(allMedia) {
-        allMedia.sortedByDescending { it.releaseYear }
-    }
-
-    val topRated = remember(allMedia) {
-        allMedia.filter { it.rating >= 7.5 }
-    }
-
-    // Specific filtered lists for category tabs
-    val animeList = remember(allMedia) {
-        allMedia.filter { it.genres.contains("Animação", ignoreCase = true) || it.genres.contains("Anime", ignoreCase = true) }
-    }
-
-    val doramaList = remember(allMedia) {
-        allMedia.filter { it.genres.contains("Drama", ignoreCase = true) || it.genres.contains("Coreano", ignoreCase = true) }
-    }
+    // Specific isolated lists for categories
+    val animeList = animes
+    val doramaList = doramas
 
     var itemToRemoveFromContinue by remember { mutableStateOf<WatchHistoryEntity?>(null) }
 
@@ -130,18 +121,94 @@ fun HomeScreen(
                 .testTag("home_screen"),
             contentPadding = PaddingValues(bottom = 32.dp)
         ) {
-            // 1. CATEGORIES BAR (Horizontal Compact Navigation)
-            item {
-                HomeCategoriesBar(
-                    selectedCategory = selectedCategory,
-                    onSelectCategory = { cat ->
-                        selectedCategory = cat
-                    },
-                    onNavigateToLiveTv = onNavigateToLiveTv
-                )
-            }
+            if (homeSearchQuery.isNotBlank()) {
+                // =========================================================================
+                // 1. HOME ISOLATED SEARCH RESULTS VIEW
+                // =========================================================================
+                item {
+                    HomeSearchResultsHeader(
+                        query = homeSearchQuery,
+                        resultCount = homeSearchResults.size,
+                        isSearching = isHomeSearching,
+                        onClearSearch = { viewModel.clearHomeSearch() }
+                    )
+                }
 
-            // If "todos" or standard view, show full structured streaming Home
+                if (isHomeSearching && homeSearchResults.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 48.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    color = BrandRed,
+                                    strokeWidth = 2.5.dp,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Text(
+                                    text = "Buscando no catálogo RONYCINE...",
+                                    color = TextSecondary,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
+                } else if (!isHomeSearching && homeSearchResults.isEmpty()) {
+                    item {
+                        HomeSearchEmptyState(
+                            query = homeSearchQuery,
+                            onClear = { viewModel.clearHomeSearch() }
+                        )
+                    }
+                } else {
+                    // Display results in 3-column rows using existing MediaCard
+                    items(homeSearchResults.chunked(3)) { rowItems ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            rowItems.forEach { media ->
+                                MediaCard(
+                                    media = media,
+                                    onClick = { onNavigateToDetail(media.tmdbId, media.mediaType) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            // Fill remaining columns in the row with empty space
+                            repeat(3 - rowItems.size) {
+                                Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            } else {
+                // =========================================================================
+                // 2. STANDARD HOME SECTIONS
+                // =========================================================================
+                // 1. CATEGORIES BAR (Horizontal Compact Navigation)
+                item {
+                    HomeCategoriesBar(
+                        selectedCategory = selectedCategory,
+                        onSelectCategory = { cat ->
+                            if (cat == "animes_doramas" || cat == "animes" || cat == "doramas") {
+                                onNavigate?.invoke(ScreenRoute.ANIMES_DORAMAS.route)
+                            } else {
+                                selectedCategory = cat
+                            }
+                        },
+                        onNavigateToLiveTv = onNavigateToLiveTv
+                    )
+                }
+
+                // If "todos" or standard view, show full structured streaming Home
             if (selectedCategory == "todos") {
                 // 2. HERO / DESTAQUE PRINCIPAL (Carousel)
                 item {
@@ -156,7 +223,8 @@ fun HomeScreen(
                             onTrailerEnded = { viewModel.nextHeroIndex() },
                             isInMyList = inList,
                             onWatchClick = { media -> onNavigateToWatch(media.tmdbId, media.mediaType, null, null) },
-                            onMyListToggle = { media -> viewModel.toggleMyList(media.tmdbId, media.mediaType) }
+                            onMyListToggle = { media -> viewModel.toggleMyList(media.tmdbId, media.mediaType) },
+                            isVisible = isHeroVisible
                         )
                     } else if (allMedia.isEmpty()) {
                         // Skeleton Shimmer for Hero
@@ -182,8 +250,8 @@ fun HomeScreen(
                         ) {
                             Row(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
@@ -194,7 +262,7 @@ fun HomeScreen(
                                         .background(BrandRed, RoundedCornerShape(2.dp))
                                 )
                                 Text(
-                                    text = "TOP 10 HOJE",
+                                    text = com.example.util.stringI18n("admin.top10").uppercase() + " HOJE",
                                     color = Color.White,
                                     fontSize = 14.5.sp,
                                     fontWeight = FontWeight.ExtraBold,
@@ -207,7 +275,11 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier.padding(top = 2.dp)
                             ) {
-                                items(top10Medias.size) { index ->
+                                items(
+                                    count = top10Medias.size,
+                                    key = { index -> "${top10Medias[index].mediaType}:${top10Medias[index].tmdbId}" },
+                                    contentType = { "top10_card" }
+                                ) { index ->
                                     val media = top10Medias[index]
                                     Top10MediaCard(
                                         media = media,
@@ -242,7 +314,7 @@ fun HomeScreen(
                                         .background(BrandRed, RoundedCornerShape(2.dp))
                                 )
                                 Text(
-                                    text = "CONTINUE ASSISTINDO",
+                                    text = com.example.util.stringI18n("home.continue_watching").uppercase(),
                                     color = Color.White,
                                     fontSize = 14.5.sp,
                                     fontWeight = FontWeight.ExtraBold,
@@ -255,7 +327,11 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                                 modifier = Modifier.padding(top = 2.dp)
                             ) {
-                                items(continueWatching, key = { it.id }) { item ->
+                                items(
+                                    items = continueWatching,
+                                    key = { it.id },
+                                    contentType = { "continue_watching_card" }
+                                ) { item ->
                                     ContinueWatchingCard(
                                         item = item,
                                         onClick = { onNavigateToWatch(item.tmdbId, item.mediaType, item.seasonNumber, item.episodeNumber) },
@@ -267,11 +343,11 @@ fun HomeScreen(
                     }
                 }
 
-                // 5. FILMES E SÉRIES RECENTES (Recém-adicionados no catálogo)
+                // 5. FILMES E SÉRIES RECENTES (Recém-adicionados no catálogo - apenas filmes e séries)
                 if (recentlyAddedMedia.isNotEmpty()) {
                     item {
                         MediaSectionRow(
-                            title = "Filmes e Séries Recentes",
+                            title = com.example.util.stringI18n("home.recently_added"),
                             items = recentlyAddedMedia,
                             onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) },
                             onViewAllClick = { onNavigate?.invoke(ScreenRoute.SEARCH.route) }
@@ -279,11 +355,37 @@ fun HomeScreen(
                     }
                 }
 
-                // 6. DESTAQUES / EM ALTA (TMDB Trending)
+                // 6. ANIMES (Exclusivo Animes)
+                val displayAnimes = if (recentAnimes.isNotEmpty()) recentAnimes else animes
+                if (displayAnimes.isNotEmpty()) {
+                    item {
+                        MediaSectionRow(
+                            title = "🎌 " + com.example.util.stringI18n("home.animes"),
+                            items = displayAnimes,
+                            onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) },
+                            onViewAllClick = { onNavigate?.invoke(ScreenRoute.ANIMES_DORAMAS.route) }
+                        )
+                    }
+                }
+
+                // 7. DORAMAS (Exclusivo Doramas)
+                val displayDoramas = if (recentDoramas.isNotEmpty()) recentDoramas else doramas
+                if (displayDoramas.isNotEmpty()) {
+                    item {
+                        MediaSectionRow(
+                            title = "🇰🇷 " + com.example.util.stringI18n("home.doramas"),
+                            items = displayDoramas,
+                            onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) },
+                            onViewAllClick = { onNavigate?.invoke(ScreenRoute.ANIMES_DORAMAS.route) }
+                        )
+                    }
+                }
+
+                // 8. DESTAQUES / EM ALTA (TMDB Trending)
                 if (trendingMedia.isNotEmpty()) {
                     item {
                         MediaSectionRow(
-                            title = "Destaques em Alta",
+                            title = com.example.util.stringI18n("nav.trending"),
                             items = trendingMedia,
                             onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) },
                             onViewAllClick = { onNavigate?.invoke(ScreenRoute.TRENDING.route) }
@@ -291,11 +393,11 @@ fun HomeScreen(
                     }
                 }
 
-                // 7. FILMES POPULARES
+                // 9. FILMES POPULARES
                 if (movies.isNotEmpty()) {
                     item {
                         MediaSectionRow(
-                            title = "Filmes Populares",
+                            title = com.example.util.stringI18n("home.featured"),
                             items = movies,
                             onItemClick = { onNavigateToDetail(it.tmdbId, "movie") },
                             onViewAllClick = { onNavigate?.invoke(ScreenRoute.SEARCH.route) }
@@ -303,11 +405,11 @@ fun HomeScreen(
                     }
                 }
 
-                // 8. SÉRIES POPULARES
+                // 10. SÉRIES POPULARES
                 if (series.isNotEmpty()) {
                     item {
                         MediaSectionRow(
-                            title = "Séries Populares",
+                            title = com.example.util.stringI18n("home.popular_series"),
                             items = series,
                             onItemClick = { onNavigateToDetail(it.tmdbId, "tv") },
                             onViewAllClick = { onNavigate?.invoke(ScreenRoute.SEARCH.route) }
@@ -330,7 +432,7 @@ fun HomeScreen(
                 if (topRated.isNotEmpty()) {
                     item {
                         MediaSectionRow(
-                            title = "Mais Bem Avaliados",
+                            title = com.example.util.stringI18n("home.top_rated"),
                             items = topRated,
                             onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) }
                         )
@@ -341,7 +443,7 @@ fun HomeScreen(
                 if (myList.isNotEmpty()) {
                     item {
                         MediaSectionRow(
-                            title = "Minha Lista",
+                            title = com.example.util.stringI18n("nav.myList"),
                             items = myList,
                             onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) },
                             onViewAllClick = { onNavigate?.invoke(ScreenRoute.MY_LIST.route) }
@@ -395,43 +497,69 @@ fun HomeScreen(
                     )
                 }
             } else if (selectedCategory == "animes") {
-                // ANIMES VIEW
+                // ANIMES VIEW (EXCLUSIVO)
                 item {
-                    CategoryHeaderBanner(title = "ANIMES", subtitle = "Animações e animes japoneses")
+                    CategoryHeaderBanner(title = "🎌 ANIMES", subtitle = "Animes japoneses exclusivos e organizados")
                 }
                 item {
                     if (animeList.isNotEmpty()) {
                         MediaSectionRow(
-                            title = "Animes Populares",
+                            title = "🎌 Animes em Destaque",
                             items = animeList,
-                            onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) }
+                            onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) },
+                            onViewAllClick = { onNavigate?.invoke(ScreenRoute.ANIMES_DORAMAS.route) }
                         )
                     } else {
-                        MediaSectionRow(
-                            title = "Em Destaque",
-                            items = allMedia.take(10),
-                            onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) }
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp, horizontal = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Nenhum anime catalogado no momento", color = Color.White, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = { onNavigate?.invoke(ScreenRoute.ANIMES_DORAMAS.route) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed)
+                                ) {
+                                    Text("🎌 Abrir Catálogo TMDB de Animes")
+                                }
+                            }
+                        }
                     }
                 }
             } else if (selectedCategory == "doramas") {
-                // DORAMAS VIEW
+                // DORAMAS VIEW (EXCLUSIVO)
                 item {
-                    CategoryHeaderBanner(title = "DORAMAS", subtitle = "Dramas asiáticos e séries românticas")
+                    CategoryHeaderBanner(title = "🇰🇷 DORAMAS", subtitle = "Dramas e séries asiáticas autênticas")
                 }
                 item {
                     if (doramaList.isNotEmpty()) {
                         MediaSectionRow(
-                            title = "Doramas Populares",
+                            title = "🇰🇷 Doramas em Destaque",
                             items = doramaList,
-                            onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) }
+                            onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) },
+                            onViewAllClick = { onNavigate?.invoke(ScreenRoute.ANIMES_DORAMAS.route) }
                         )
                     } else {
-                        MediaSectionRow(
-                            title = "Em Destaque",
-                            items = series.take(10),
-                            onItemClick = { onNavigateToDetail(it.tmdbId, it.mediaType) }
-                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 32.dp, horizontal = 24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Nenhum dorama catalogado no momento", color = Color.White, fontSize = 14.sp)
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Button(
+                                    onClick = { onNavigate?.invoke(ScreenRoute.ANIMES_DORAMAS.route) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                                ) {
+                                    Text("🇰🇷 Abrir Catálogo TMDB de Doramas")
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -441,6 +569,7 @@ fun HomeScreen(
                 Spacer(modifier = Modifier.height(20.dp))
                 PlayfilmeFooter(onNavigate = onNavigate)
             }
+            } // Close else (Standard Home Sections)
         }
     }
 
@@ -517,14 +646,20 @@ private fun HomeCategoriesBar(
     onSelectCategory: (String) -> Unit,
     onNavigateToLiveTv: () -> Unit
 ) {
-    val categories = listOf(
-        "todos" to "Todos",
-        "filmes" to "Filmes",
-        "series" to "Séries",
-        "animes" to "Animes",
-        "doramas" to "Doramas",
-        "tv" to "TV ao Vivo"
-    )
+    val labelAll = com.example.util.stringI18n("home.all")
+    val labelMovies = com.example.util.stringI18n("home.movies")
+    val labelSeries = com.example.util.stringI18n("home.series")
+    val labelLiveTv = com.example.util.stringI18n("nav.liveTV")
+
+    val categories = remember(labelAll, labelMovies, labelSeries, labelLiveTv) {
+        listOf(
+            "todos" to labelAll,
+            "filmes" to labelMovies,
+            "series" to labelSeries,
+            "animes_doramas" to "ANIMES & DORAMAS",
+            "tv" to labelLiveTv
+        )
+    }
 
     LazyRow(
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
@@ -558,7 +693,7 @@ private fun HomeCategoriesBar(
                                 .background(BrandRed)
                         )
                         Text(
-                            text = "TV ao Vivo",
+                            text = labelLiveTv,
                             color = Color.White,
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Bold
@@ -601,19 +736,50 @@ fun Top10MediaCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
-        label = "top10_scale"
-    )
 
-    val formattedRank = if (rank < 10) "0$rank" else "$rank"
+    val formattedRank = remember(rank) { if (rank < 10) "0$rank" else "$rank" }
+
+    val category = remember(media.mediaCategory, media.genres, media.title) {
+        MediaClassifier.classifyMedia(media)
+    }
+    val badgeText = remember(category) {
+        when (category) {
+            MediaClassifier.CATEGORY_ANIME -> "ANIME"
+            MediaClassifier.CATEGORY_DORAMA -> "DORAMA"
+            MediaClassifier.CATEGORY_MOVIE -> "FILME"
+            else -> "SÉRIE"
+        }
+    }
+    val badgeColor = remember(category) {
+        when (category) {
+            MediaClassifier.CATEGORY_ANIME -> Color(0xFFE11D48)
+            MediaClassifier.CATEGORY_DORAMA -> Color(0xFF7C3AED)
+            MediaClassifier.CATEGORY_MOVIE -> BrandRed
+            else -> Color(0xFF2563EB)
+        }
+    }
+
+    val context = LocalContext.current
+    val imageUrl = remember(media.posterPath, media.backdropPath) {
+        media.posterPath ?: media.backdropPath
+    }
+    val imageRequest = remember(imageUrl) {
+        ImageRequest.Builder(context)
+            .data(imageUrl)
+            .size(240, 360)
+            .crossfade(false)
+            .build()
+    }
 
     Box(
         modifier = Modifier
             .width(135.dp)
             .height(180.dp)
-            .scale(scale)
+            .graphicsLayer {
+                val s = if (isPressed) 0.96f else 1f
+                scaleX = s
+                scaleY = s
+            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -646,10 +812,7 @@ fun Top10MediaCard(
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(media.posterPath ?: media.backdropPath)
-                        .crossfade(true)
-                        .build(),
+                    model = imageRequest,
                     contentDescription = media.title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -657,12 +820,12 @@ fun Top10MediaCard(
 
                 // Type Badge
                 Surface(
-                    color = BrandRed,
+                    color = badgeColor.copy(alpha = 0.95f),
                     shape = RoundedCornerShape(bottomEnd = 6.dp),
                     modifier = Modifier.align(Alignment.TopStart)
                 ) {
                     Text(
-                        text = if (media.mediaType == "tv") "SÉRIE" else "FILME",
+                        text = badgeText,
                         color = Color.White,
                         fontSize = 7.5.sp,
                         fontWeight = FontWeight.Black,
@@ -710,6 +873,15 @@ fun ContinueWatchingCard(
 ) {
     var isMenuExpanded by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+    val imageRequest = remember(item.posterPath) {
+        ImageRequest.Builder(context)
+            .data(item.posterPath)
+            .size(360, 230)
+            .crossfade(false)
+            .build()
+    }
+
     Card(
         modifier = Modifier
             .width(180.dp)
@@ -722,10 +894,7 @@ fun ContinueWatchingCard(
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(item.posterPath)
-                    .crossfade(true)
-                    .build(),
+                model = imageRequest,
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
@@ -877,5 +1046,150 @@ private fun CategoryHeaderBanner(title: String, subtitle: String) {
             color = TextSecondary,
             fontSize = 12.sp
         )
+    }
+}
+
+/**
+ * Clean, organized header for Home search results.
+ */
+@Composable
+private fun HomeSearchResultsHeader(
+    query: String,
+    resultCount: Int,
+    isSearching: Boolean,
+    onClearSearch: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(20.dp)
+                    .background(BrandRed, RoundedCornerShape(2.dp))
+            )
+            Column {
+                Text(
+                    text = "RESULTADOS PARA \"${query.trim().uppercase()}\"",
+                    color = Color.White,
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.4.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = if (isSearching) "Buscando no catálogo..." else "$resultCount ${if (resultCount == 1) "conteúdo encontrado" else "conteúdos encontrados"}",
+                    color = TextSecondary,
+                    fontSize = 11.5.sp
+                )
+            }
+        }
+
+        TextButton(
+            onClick = onClearSearch,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.testTag("home_clear_search_btn")
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Limpar busca",
+                tint = BrandRed,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = "Limpar",
+                color = BrandRed,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+/**
+ * Professional empty state for Home search.
+ */
+@Composable
+private fun HomeSearchEmptyState(
+    query: String,
+    onClear: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 48.dp, horizontal = 24.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(68.dp)
+                    .background(DarkSurface, CircleShape)
+                    .border(1.dp, CardBorder, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SearchOff,
+                    contentDescription = null,
+                    tint = BrandRed,
+                    modifier = Modifier.size(34.dp)
+                )
+            }
+
+            Text(
+                text = "NENHUM RESULTADO ENCONTRADO",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 0.5.sp,
+                textAlign = TextAlign.Center
+            )
+
+            Text(
+                text = "Não encontramos filmes, séries, animes ou doramas para \"$query\".",
+                color = TextSecondary,
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 18.sp
+            )
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Button(
+                onClick = onClear,
+                colors = ButtonDefaults.buttonColors(containerColor = DarkSurface),
+                border = BorderStroke(1.dp, BrandRed),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.testTag("home_empty_return_btn")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ArrowBack,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "VOLTAR AO CATÁLOGO",
+                    color = Color.White,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
     }
 }

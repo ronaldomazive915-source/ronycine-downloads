@@ -4,6 +4,7 @@ import android.os.Bundle
 import android.webkit.WebStorage
 import android.webkit.WebView
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -20,6 +21,8 @@ import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -28,14 +31,17 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.ui.components.BottomNav
 import com.example.ui.components.CinematicIntro
+import com.example.ui.components.ExitConfirmationToast
 import com.example.ui.components.ScreenRoute
 import com.example.ui.components.TopBar
 import com.example.ui.screens.*
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.PlayFilmeTheme
 import com.example.ui.viewmodel.AdminViewModel
+import com.example.ui.viewmodel.AnimesDoramasViewModel
 import com.example.ui.viewmodel.MainViewModel
 import com.example.ui.viewmodel.AuthViewModel
+import com.example.ui.viewmodel.CommunityViewModel
 import com.example.data.local.NotificationEntity
 import com.example.ui.components.InAppNotificationBanner
 import com.example.ui.components.TopBar
@@ -69,6 +75,14 @@ class MainActivity : ComponentActivity() {
                 return
             }
 
+            // Emuladores em nuvem ou locais frequentemente não possuem conta Google vinculada
+            // ou portas FCM abertas, o que gera exceção fatal interna no FirebaseMessaging (FCM Registration failed).
+            if (com.example.util.WebViewUtils.isEmulator()) {
+                android.util.Log.d("MainActivity", "[FCM] Ambiente de emulador detectado, dispensando registro FCM.")
+                updatePushStatusInFirestore(null)
+                return
+            }
+
             val availability = com.google.android.gms.common.GoogleApiAvailability.getInstance()
             val resultCode = availability.isGooglePlayServicesAvailable(this)
             if (resultCode != com.google.android.gms.common.ConnectionResult.SUCCESS) {
@@ -78,25 +92,27 @@ class MainActivity : ComponentActivity() {
             }
 
             val messaging = com.google.firebase.messaging.FirebaseMessaging.getInstance()
-            try {
-                messaging.isAutoInitEnabled = false
-            } catch (_: Exception) {}
 
-            messaging.token.addOnCompleteListener { task ->
-                if (!task.isSuccessful) {
-                    val ex = task.exception
-                    android.util.Log.d("MainActivity", "[FCM] Token FCM não disponível no momento: ${ex?.message}")
-                    updatePushStatusInFirestore(null)
-                    return@addOnCompleteListener
+            try {
+                messaging.token.addOnCompleteListener { task ->
+                    if (!task.isSuccessful) {
+                        val ex = task.exception
+                        android.util.Log.d("MainActivity", "[FCM] Token FCM não disponível no momento (ignorado graciosamente): ${ex?.message}")
+                        updatePushStatusInFirestore(null)
+                        return@addOnCompleteListener
+                    }
+                    val token = task.result
+                    if (!token.isNullOrBlank()) {
+                        android.util.Log.d("MainActivity", "[FCM] Token recuperado com sucesso: $token")
+                        mainViewModel.updateFcmToken(token)
+                        updatePushStatusInFirestore(token)
+                    }
                 }
-                val token = task.result
-                if (!token.isNullOrBlank()) {
-                    android.util.Log.d("MainActivity", "[FCM] Token recuperado com sucesso: $token")
-                    mainViewModel.updateFcmToken(token)
-                    updatePushStatusInFirestore(token)
-                }
+            } catch (e: Throwable) {
+                android.util.Log.d("MainActivity", "[FCM] Exceção ao solicitar token FCM: ${e.message}")
+                updatePushStatusInFirestore(null)
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             android.util.Log.d("MainActivity", "[FCM] Inicialização de FCM ignorada ou indisponível: ${e.message}")
         }
     }
@@ -122,6 +138,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        mainViewModel.onAppForeground()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -131,7 +152,7 @@ class MainActivity : ComponentActivity() {
             pendingActionUrl.value = it
         }
 
-        // Configure WebView settings
+        // Configure WebView settings lazily
         try {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                 val processName = android.app.Application.getProcessName()
@@ -140,10 +161,7 @@ class MainActivity : ComponentActivity() {
                     WebView.setDataDirectorySuffix(suffix)
                 }
             }
-            WebView.setWebContentsDebuggingEnabled(true)
-        } catch (e: Exception) {
-            android.util.Log.e("MainActivity", "WebView static config error: ${e.message}")
-        }
+        } catch (_: Exception) {}
 
         // Inicialização automática do Device Manager e registro persistente no Firestore
         val prefs = getSharedPreferences("playfilme_prefs", android.content.Context.MODE_PRIVATE)
@@ -186,6 +204,14 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route ?: ScreenRoute.HOME.route
+
+                var isTvFullscreen by remember { mutableStateOf(false) }
+
+                LaunchedEffect(currentRoute) {
+                    if (currentRoute != ScreenRoute.TV_LIVE.route && !currentRoute.startsWith("tv/")) {
+                        isTvFullscreen = false
+                    }
+                }
 
                 val pushActionUrl by pendingActionUrl.collectAsState()
 
@@ -241,6 +267,13 @@ class MainActivity : ComponentActivity() {
                 }
                 
                 val context = LocalContext.current
+                val activity = context as? android.app.Activity
+                val coroutineScope = rememberCoroutineScope()
+
+                var showExitConfirmation by remember { mutableStateOf(false) }
+                var lastBackPressTime by remember { mutableLongStateOf(0L) }
+                var exitConfirmationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
                 val isFirstTime = remember { !prefs.getBoolean("playfilme_intro_seen", false) }
                 var showIntro by remember { mutableStateOf(true) }
 
@@ -248,11 +281,12 @@ class MainActivity : ComponentActivity() {
                 val currentUser by authViewModel.currentUser.collectAsState()
                 val activeProfile by authViewModel.activeProfile.collectAsState()
                 val userProfiles by authViewModel.userProfiles.collectAsState()
+                val profilesLoaded by authViewModel.profilesLoaded.collectAsState()
                 
                 var navigationInitiated by remember { mutableStateOf(false) }
 
-                LaunchedEffect(currentUser, activeProfile, userProfiles, navBackStackEntry?.destination?.route, isDeviceBlocked) {
-                    if (currentUser != null && !navigationInitiated && !isDeviceBlocked) {
+                LaunchedEffect(currentUser, activeProfile, userProfiles, profilesLoaded, navBackStackEntry?.destination?.route, isDeviceBlocked) {
+                    if (currentUser != null && profilesLoaded && !navigationInitiated && !isDeviceBlocked) {
                         val hasGraph = runCatching { navController.graph }.getOrNull() != null
                         if (!hasGraph) return@LaunchedEffect
 
@@ -283,6 +317,7 @@ class MainActivity : ComponentActivity() {
                 val updateOverrideVersion by mainViewModel.updateOverrideVersion.collectAsState()
                 val syncStatus by mainViewModel.syncStatus.collectAsState()
                 val unreadNotifCount by mainViewModel.unreadNotificationsCount.collectAsState()
+                val isAdminAuthorized by mainViewModel.isAdminAuthorized.collectAsState()
                 var activeInAppNotification by remember { mutableStateOf<NotificationEntity?>(null) }
                 var showUpdateDialog by remember { mutableStateOf(true) }
 
@@ -303,14 +338,24 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // REGRA FUNDAMENTAL: Atualização só existe se updateControl.enabled == true E activeAppVersion != null
+                val checkResult = remember(updateControl, activeAppVersion, currentBuildCode) {
+                    com.example.util.UpdateManager.checkForAppUpdate(
+                        context = context,
+                        updateControl = updateControl,
+                        activeAppVersion = activeAppVersion,
+                        deviceCurrentVersionCode = currentBuildCode
+                    )
+                }
+
                 val isUpdateActive = updateControl.enabled && activeAppVersion != null && activeAppVersion!!.hasConfiguredApk
                 val targetVersion = if (isUpdateActive) activeAppVersion else null
                 val effectiveTargetCode = targetVersion?.versionCode ?: currentBuildCode
                 val effectiveTargetName = targetVersion?.versionName ?: currentVersionName
                 val effectiveApkUrl = targetVersion?.apkUrl ?: ""
                 val effectiveSha256 = targetVersion?.sha256 ?: ""
-                val isUpdateAvailable = isUpdateActive && currentBuildCode < effectiveTargetCode && effectiveApkUrl.isNotBlank()
-                val isMandatoryUpdate = isUpdateActive && (targetVersion?.mandatory == true || updateControl.mandatory) && currentBuildCode < effectiveTargetCode && effectiveApkUrl.isNotBlank()
+                
+                val isUpdateAvailable = checkResult == com.example.util.AppUpdateCheckResult.UPDATE_AVAILABLE
+                val isMandatoryUpdate = isUpdateAvailable && (targetVersion?.mandatory == true || updateControl.mandatory)
 
                 LaunchedEffect(currentBuildCode, isUpdateActive, effectiveTargetCode, effectiveApkUrl) {
                     com.example.util.UpdateManager.logUpdateCheckDiagnostics(
@@ -340,7 +385,7 @@ class MainActivity : ComponentActivity() {
 
                 if (isDeviceBlocked) {
                     com.example.ui.screens.BlockedScreen()
-                } else if (remoteConfig.maintenanceMode && !remoteConfig.allowedVersionsDuringMaintenance.contains(currentBuildCode)) {
+                } else if (remoteConfig.maintenanceMode && !isAdminAuthorized && !remoteConfig.allowedVersionsDuringMaintenance.contains(currentBuildCode)) {
                     com.example.ui.screens.MaintenanceScreen(
                         remoteConfig = remoteConfig,
                         onRetry = { mainViewModel.initDeviceManager() }
@@ -393,36 +438,115 @@ class MainActivity : ComponentActivity() {
                         currentRoute == "create_profile" ||
                         currentRoute == "profile_selection"
 
-                    val hideTopAndBottomBars = isAuthOrProfileScreen ||
+                    val hideBottomBar = isAuthOrProfileScreen ||
                         currentRoute.startsWith("watch") ||
                         currentRoute.startsWith("detail") ||
                         currentRoute == "admin" ||
                         currentRoute == "notifications" ||
-                        currentRoute == "settings"
+                        currentRoute == "settings" ||
+                        currentRoute == "community" ||
+                        currentRoute == ScreenRoute.COMMUNITY.route ||
+                        isTvFullscreen
+
+                    val hideTopBar = hideBottomBar ||
+                        currentRoute == ScreenRoute.SEARCH.route ||
+                        currentRoute == "search" ||
+                        currentRoute == ScreenRoute.COMMUNITY.route ||
+                        currentRoute == "community"
 
                     var showQuickMenuSheet by remember { mutableStateOf(false) }
+                    var showWhatsAppInviteModal by remember { mutableStateOf(false) }
+                    var whatsappInviteShownThisSession by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+                    
+                    val prefs = context.getSharedPreferences("playfilme_prefs", android.content.Context.MODE_PRIVATE)
+                    val whatsappDismissed = remember { mutableStateOf(prefs.getBoolean("ronycine_whatsapp_invite_dismissed", false)) }
+                    
                     val isAdminAuthorized by mainViewModel.isAdminAuthorized.collectAsState()
+
+                    val isEligibleForWhatsAppInvite = !whatsappInviteShownThisSession &&
+                        !whatsappDismissed.value &&
+                        !isDeviceBlocked &&
+                        !remoteConfig.maintenanceMode &&
+                        !isMandatoryUpdate &&
+                        !showIntro
+
+                    LaunchedEffect(isEligibleForWhatsAppInvite) {
+                        if (isEligibleForWhatsAppInvite) {
+                            kotlinx.coroutines.delay(1200)
+                            if (!whatsappInviteShownThisSession) {
+                                whatsappInviteShownThisSession = true
+                                showWhatsAppInviteModal = true
+                            }
+                        }
+                    }
+
+                    // Reset exit confirmation immediately if route changes
+                    LaunchedEffect(currentRoute) {
+                        if (showExitConfirmation) {
+                            exitConfirmationJob?.cancel()
+                            showExitConfirmation = false
+                            lastBackPressTime = 0L
+                        }
+                    }
+
+                    // BackHandler for WhatsApp Invite Modal
+                    BackHandler(enabled = showWhatsAppInviteModal) {
+                        showWhatsAppInviteModal = false
+                    }
+
+                    // BackHandler for Exit Confirmation on Root Navigation
+                    val homeSearchQuery by mainViewModel.homeSearchQuery.collectAsState()
+                    val canNavigateBack = navController.previousBackStackEntry != null
+                    val isAtExitRoot = (currentRoute == ScreenRoute.HOME.route || currentRoute == "home") &&
+                            !canNavigateBack &&
+                            homeSearchQuery.isBlank() &&
+                            !showWhatsAppInviteModal &&
+                            !showQuickMenuSheet
+
+                    BackHandler(enabled = isAtExitRoot) {
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastBackPressTime <= 2000L) {
+                            exitConfirmationJob?.cancel()
+                            showExitConfirmation = false
+                            lastBackPressTime = 0L
+                            activity?.finish()
+                        } else {
+                            lastBackPressTime = currentTime
+                            showExitConfirmation = true
+                            exitConfirmationJob?.cancel()
+                            exitConfirmationJob = coroutineScope.launch {
+                                kotlinx.coroutines.delay(2000L)
+                                showExitConfirmation = false
+                                lastBackPressTime = 0L
+                            }
+                        }
+                    }
 
                     Box(modifier = Modifier.fillMaxSize()) {
                         Scaffold(
                             modifier = Modifier.fillMaxSize(),
                             containerColor = DarkBackground,
-                            contentWindowInsets = if (hideTopAndBottomBars) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
+                            contentWindowInsets = if (hideTopBar && hideBottomBar) WindowInsets(0, 0, 0, 0) else ScaffoldDefaults.contentWindowInsets,
                             topBar = {
-                                if (!hideTopAndBottomBars) {
+                                if (!hideTopBar) {
                                     TopBar(
-                                        onNavigateToSearch = { navController.navigate(ScreenRoute.SEARCH.route) },
+                                        searchQuery = mainViewModel.homeSearchQuery.collectAsState().value,
+                                        onSearchQueryChanged = { mainViewModel.onHomeSearchQueryChanged(it) },
+                                        onClearSearch = { mainViewModel.clearHomeSearch() },
+                                        onNavigateToSearch = { /* Home handles search locally */ },
+                                        currentRoute = currentRoute,
                                         onNavigateToProfile = { navController.navigate(ScreenRoute.PROFILE.route) },
                                         onNavigateToRequest = { navController.navigate(ScreenRoute.REQUEST.route) },
                                         onNavigateToNotifications = { navController.navigate("notifications") },
                                         onMenuClick = { showQuickMenuSheet = true },
+                                        activeProfile = activeProfile,
                                         unreadNotificationCount = unreadNotifCount,
                                         syncStatus = syncStatus
                                     )
                                 }
                             },
                             bottomBar = {
-                                if (!hideTopAndBottomBars) {
+                                if (!hideBottomBar) {
                                     BottomNav(
                                         currentRoute = currentRoute,
                                         onNavigate = { route ->
@@ -506,7 +630,8 @@ class MainActivity : ComponentActivity() {
                                 LiveTvScreen(
                                     onNavigateToChannel = { channelId ->
                                         navController.navigate("tv/$channelId")
-                                    }
+                                    },
+                                    onFullscreenChanged = { isTvFullscreen = it }
                                 )
                             }
 
@@ -521,7 +646,8 @@ class MainActivity : ComponentActivity() {
                                         navController.navigate("tv/$newChannelId") {
                                             popUpTo("tv/{channelId}") { inclusive = true }
                                         }
-                                    }
+                                    },
+                                    onFullscreenChanged = { isTvFullscreen = it }
                                 )
                             }
 
@@ -559,6 +685,42 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            composable(ScreenRoute.COMMUNITY.route) {
+                                val viewModel: CommunityViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                                    factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                                        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                                            return CommunityViewModel(application) as T
+                                        }
+                                    }
+                                )
+                                CommunityScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToDetail = { tmdbId, type ->
+                                        navController.navigate("detail/$tmdbId/$type")
+                                    },
+                                    onNavigateBack = { navController.popBackStack() }
+                                )
+                            }
+
+                            composable(ScreenRoute.ANIMES_DORAMAS.route) {
+                                val viewModel: AnimesDoramasViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                                    factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                                        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                                            return AnimesDoramasViewModel(application) as T
+                                        }
+                                    }
+                                )
+                                AnimesDoramasScreen(
+                                    viewModel = viewModel,
+                                    onNavigateToDetail = { tmdbId, type ->
+                                        navController.navigate("detail/$tmdbId/$type")
+                                    },
+                                    onNavigateBack = {
+                                        navController.popBackStack()
+                                    }
+                                )
+                            }
+
                             composable(ScreenRoute.PROFILE.route) {
                                 ProfileScreen(
                                     viewModel = mainViewModel,
@@ -568,7 +730,13 @@ class MainActivity : ComponentActivity() {
                                     onNavigateToDownloads = { navController.navigate("downloads") },
                                     onNavigateToSettings = { navController.navigate("settings") },
                                     onNavigateToAdmin = { navController.navigate("admin") },
-                                    onNavigateToLogin = { navController.navigate(ScreenRoute.LOGIN.route) }
+                                    onNavigateToLogin = { navController.navigate(ScreenRoute.LOGIN.route) },
+                                    onNavigateToProfileSelection = { navController.navigate(ScreenRoute.PROFILE_SELECTION.route) },
+                                    onNavigateToCreateProfile = {
+                                        authViewModel.setProfileToEdit(null)
+                                        navController.navigate(ScreenRoute.CREATE_PROFILE.route)
+                                    },
+                                    onNavigateToInfo = { navController.navigate("info") }
                                 )
                             }
 
@@ -862,6 +1030,31 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxSize()
                         )
                     }
+
+                    com.example.ui.components.WhatsAppGroupInviteModal(
+                        visible = showWhatsAppInviteModal,
+                        onDismiss = { shouldDismissForever ->
+                            showWhatsAppInviteModal = false
+                            if (shouldDismissForever) {
+                                prefs.edit().putBoolean("ronycine_whatsapp_invite_dismissed", true).apply()
+                                whatsappDismissed.value = true
+                            }
+                        }
+                    )
+
+                    val navBarsPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                    val exitToastBottomPadding = if (!hideBottomBar) {
+                        navBarsPadding + 84.dp
+                    } else {
+                        navBarsPadding + 20.dp
+                    }
+
+                    ExitConfirmationToast(
+                        visible = showExitConfirmation,
+                        modifier = Modifier
+                            .align(androidx.compose.ui.Alignment.BottomCenter)
+                            .padding(bottom = exitToastBottomPadding)
+                    )
                 }
             }
             }

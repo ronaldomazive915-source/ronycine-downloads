@@ -2,6 +2,7 @@ package com.example.util
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -55,10 +56,63 @@ sealed class UpdateDownloadState {
     data class Error(val message: String) : UpdateDownloadState()
 }
 
+enum class AppUpdateCheckResult {
+    UPDATE_AVAILABLE,
+    UP_TO_DATE,
+    NO_DOWNGRADE,
+    DISABLED,
+    NOT_ELIGIBLE
+}
+
 object UpdateManager {
 
     private const val TAG = "RONYCINE_UPDATE"
     const val TEMP_PART_EXT = ".ronycine.part"
+
+    /**
+     * Função Central de Verificação de Atualizações (Requisito 10).
+     * 1. Obtém versão instalada; 2. Obtém config remota; 3. Compara versionCode;
+     * 4. Valida se updateEnabled está ativo; 5. Verifica se o dispositivo é elegível;
+     * 6. Retorna um resultado consistente e impede Downgrades.
+     */
+    fun checkForAppUpdate(
+        context: Context,
+        updateControl: com.example.data.remote.UpdateControlEntity,
+        activeAppVersion: com.example.data.remote.AppVersionEntity?,
+        deviceCurrentVersionCode: Int? = null
+    ): AppUpdateCheckResult {
+        // 1. obter a versão instalada
+        val pInfo = try {
+            context.packageManager.getPackageInfo(context.packageName, 0)
+        } catch (e: Exception) { null }
+        
+        val installedVersionCode = if (pInfo != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode.toInt()
+            } else {
+                @Suppress("DEPRECATION") pInfo.versionCode
+            }
+        } else 1
+
+        // 2. obter a configuração remota
+        val targetVersionCode = activeAppVersion?.versionCode ?: updateControl.activeVersionCode ?: 0
+        val isApkConfigured = (activeAppVersion?.hasConfiguredApk == true) || (updateControl.apkUrl.isNotBlank() && updateControl.apkUrl.startsWith("https://", ignoreCase = true))
+
+        // 4. verificar se updateEnabled está ativo
+        if (!updateControl.enabled || !isApkConfigured) {
+            return AppUpdateCheckResult.DISABLED
+        }
+
+        // 5. verificar se o dispositivo é elegível (verificação seletiva se informado)
+        val targetCodeToCompare = if (deviceCurrentVersionCode != null && deviceCurrentVersionCode > 0) deviceCurrentVersionCode else installedVersionCode
+
+        // 3. comparar versionCode e retornar resultado consistente (Requisito 10 - Regras)
+        return when {
+            targetCodeToCompare < targetVersionCode -> AppUpdateCheckResult.UPDATE_AVAILABLE
+            targetCodeToCompare == targetVersionCode -> AppUpdateCheckResult.UP_TO_DATE
+            else -> AppUpdateCheckResult.NO_DOWNGRADE // NÃO oferecer downgrade
+        }
+    }
 
     private val _downloadState = MutableStateFlow<UpdateDownloadState>(UpdateDownloadState.Idle)
     val downloadState: StateFlow<UpdateDownloadState> = _downloadState.asStateFlow()
@@ -323,6 +377,53 @@ object UpdateManager {
     }
 
     /**
+     * Compara a assinatura do APK baixado com a assinatura do aplicativo atualmente instalado (Requisito 5).
+     */
+    fun verifyApkSignatureCompatibility(context: Context, apkFile: File): Boolean {
+        return try {
+            val pm = context.packageManager
+            
+            // Obter assinaturas do aplicativo atualmente em execução
+            val currentSignatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val packageInfo = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                packageInfo.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                val packageInfo = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES)
+                packageInfo.signatures
+            }
+
+            // Obter assinaturas do APK baixado
+            val archiveSignatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val packageInfo = pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
+                packageInfo?.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                val packageInfo = pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.GET_SIGNATURES)
+                packageInfo?.signatures
+            }
+
+            if (currentSignatures.isNullOrEmpty() || archiveSignatures.isNullOrEmpty()) {
+                Log.w(TAG, "[SIGNATURE] Não foi possível extrair assinaturas para comparação. Prosseguindo por segurança.")
+                return true
+            }
+
+            // Comparar conjuntos de certificados
+            val currentSet = currentSignatures.map { it.toCharsString() }.toSet()
+            val archiveSet = archiveSignatures.map { it.toCharsString() }.toSet()
+
+            val match = currentSet.intersect(archiveSet).isNotEmpty()
+            if (!match) {
+                Log.w(TAG, "[SIGNATURE] APK incompatível com a instalação atual: assinatura diferente.")
+            }
+            match
+        } catch (e: Exception) {
+            Log.e(TAG, "[SIGNATURE] Erro ao comparar assinaturas: ${e.message}")
+            true // Retorna true por resiliência caso ocorra alguma falha na leitura
+        }
+    }
+
+    /**
      * Copia um Uri vindo do SAF para a pasta temporária de trabalho do app.
      */
     fun copyUriToTempFile(context: Context, uri: Uri, fileName: String): File? {
@@ -567,9 +668,29 @@ object UpdateManager {
                 val renamed = partFile.renameTo(finalApkFile)
                 val targetFileToInstall = if (renamed) finalApkFile else partFile
 
+                // Verificação de compatibilidade de pacote (Requisito 4)
+                val apkMetadata = inspectApkFile(context, targetFileToInstall)
+                if (!apkMetadata.isValid) {
+                    targetFileToInstall.delete()
+                    val errorMsg = apkMetadata.errorMessage ?: "O APK baixado possui identificador de pacote diferente ou está corrompido."
+                    firebaseService?.updateSpecificEventStatus(eventId, "FAILED", errorMsg)
+                    _downloadState.value = UpdateDownloadState.Error(errorMsg)
+                    return@launch
+                }
+
+                // Verificação de compatibilidade de assinatura (Requisito 5)
+                val isSignatureCompatible = verifyApkSignatureCompatibility(context, targetFileToInstall)
+                if (!isSignatureCompatible) {
+                    targetFileToInstall.delete()
+                    val errorMsg = "Esta versão não pode substituir a instalação atual porque foi assinada com uma chave diferente."
+                    firebaseService?.updateSpecificEventStatus(eventId, "FAILED", errorMsg)
+                    _downloadState.value = UpdateDownloadState.Error(errorMsg)
+                    return@launch
+                }
+
                 // Pronto para instalar
                 _downloadState.value = UpdateDownloadState.ReadyToInstall(targetFileToInstall)
-                firebaseService?.updateSpecificEventStatus(eventId, "INSTALLING")
+                firebaseService?.updateSpecificEventStatus(eventId, "INSTALL_REQUESTED")
 
                 // Dispara o instalador oficial do Android
                 withContext(Dispatchers.Main) {

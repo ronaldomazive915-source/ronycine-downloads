@@ -14,6 +14,8 @@ import com.example.data.remote.ImportItem
 import com.example.data.remote.ImportJob
 import com.example.data.remote.ImportSummary
 import com.example.data.remote.MegaEmbedConfig
+import com.example.data.remote.MegaEmbedApiItem
+import com.example.data.remote.MegaEmbedService
 import com.example.data.remote.AppVersionEntity
 import com.example.data.repository.MediaRepository
 import com.example.data.repository.MegaEmbedSyncResult
@@ -53,6 +55,7 @@ enum class AdminSection(val title: String, val iconName: String) {
     TOP_10("TOP 10", "Whatshot"),
     DESTAQUES("Conteúdo em Destaque", "Star"),
     TV_AO_VIVO("TV ao Vivo", "LiveTv"),
+    SINCRONIZACAO_AUTOMATICA("Sincronização Automática", "AutoMode"),
     USUARIOS("Usuários", "Group"),
     PERFIS("Perfis", "AccountCircle"),
     DISPOSITIVOS("Dispositivos", "Smartphone"),
@@ -62,8 +65,11 @@ enum class AdminSection(val title: String, val iconName: String) {
     ATUALIZACOES_APP("Versões do Aplicativo", "Update"),
     ATUALIZACOES("Atualizações", "CloudSync"),
     CONTROLE_REMOTO("Controle por Dispositivo", "SettingsRemote"),
+    ALTERACOES_PENDENTES("Alterações Pendentes", "PendingActions"),
     SINCRONIZACAO("Status da Sincronização", "Sync"),
+    PLAYERS("Gerenciador de Players", "PlayCircleOutline"),
     CONFIGURACOES("Configurações", "Settings"),
+    CINE_CONFIG("Configurações do Cine", "SmartToy"),
     LOGS("Logs do Sistema", "History"),
     HISTORICO("Histórico", "ManageHistory"),
     STATUS_SISTEMA("Status do Sistema", "CheckCircle")
@@ -106,6 +112,40 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun toggleProfileVerification(userId: String, profileId: String, currentVerified: Boolean, onResult: (Boolean, String?) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            val targetState = !currentVerified
+            val res = firebaseService.setProfileVerification(userId, profileId, targetState)
+            if (res.isSuccess) {
+                val actionLabel = if (targetState) "Verificação de Perfil (Ativado)" else "Verificação de Perfil (Removido)"
+                addAuditLog(actionLabel, "Perfil ID: $profileId para Usuário: $userId")
+                
+                // Força refresh dos perfis para garantir sincronização imediata
+                firebaseService.startListeningAllUsers()
+                
+                onResult(true, null)
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Não foi possível confirmar a verificação no Firebase."
+                onResult(false, err)
+            }
+        }
+    }
+
+    fun toggleUserVerification(userId: String, currentVerified: Boolean, onResult: (Boolean, String?) -> Unit = { _, _ -> }) {
+        viewModelScope.launch {
+            val targetState = !currentVerified
+            val res = firebaseService.setUserVerification(userId, targetState)
+            if (res.isSuccess) {
+                val actionLabel = if (targetState) "Verificação de Conta (Ativado)" else "Verificação de Conta (Removido)"
+                addAuditLog(actionLabel, "Usuário ID: $userId")
+                onResult(true, null)
+            } else {
+                val err = res.exceptionOrNull()?.message ?: "Não foi possível confirmar a verificação da conta no Firebase."
+                onResult(false, err)
+            }
+        }
+    }
+
     init {
         viewModelScope.launch {
             firebaseService.currentUser.collect { user ->
@@ -116,6 +156,8 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
         firebaseService.startListeningAllUsers()
         firebaseService.startListeningAuditLogs()
+        firebaseService.startPlayerSourcesListener()
+        seedDefaultPlayers()
     }
 
     private val _tmdbAutoSyncConfig = MutableStateFlow(TmdbAutoSyncConfig())
@@ -138,6 +180,26 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             android.util.Log.e("AdminViewModel", "Error saving admin password: ${e.message}")
             false
+        }
+    }
+
+    fun toggleMediaRestricted18(media: MediaEntity) {
+        viewModelScope.launch {
+            val newRestricted = !media.restricted18
+            val updated = media.copy(
+                restricted18 = newRestricted,
+                restricted18UpdatedAt = System.currentTimeMillis(),
+                restricted18UpdatedBy = firebaseService.currentUser.value?.email ?: "admin@ronycine.app"
+            )
+            
+            // Update in Room first for immediate feedback
+            database.playFilmeDao().insertMedia(updated)
+            
+            // Then sync to Cloud
+            firebaseService.upsertMediaInCloud(updated)
+            
+            val action = if (newRestricted) "MARCOU CONTEÚDO COMO +18" else "REMOVEU RESTRIÇÃO +18"
+            addAuditLog("$action: ${media.title}", "Catálogo")
         }
     }
 
@@ -184,6 +246,231 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- PLAYER MANAGEMENT ---
+    val playerSources: StateFlow<List<com.example.data.remote.PlayerSource>> = firebaseService.playerSources
+    val playerConfig: StateFlow<com.example.data.remote.PlayerConfig> = firebaseService.playerConfig
+
+    private val _isSettingDefaultPlayer = MutableStateFlow<String?>(null) // playerId
+    val isSettingDefaultPlayer = _isSettingDefaultPlayer.asStateFlow()
+
+    private val _isSavingPlayerConfig = MutableStateFlow(false)
+    val isSavingPlayerConfig: StateFlow<Boolean> = _isSavingPlayerConfig.asStateFlow()
+
+    private val _playerSaveStatusMessage = MutableStateFlow<String?>(null)
+    val playerSaveStatusMessage: StateFlow<String?> = _playerSaveStatusMessage.asStateFlow()
+
+    fun clearPlayerStatusMessage() {
+        _playerSaveStatusMessage.value = null
+    }
+
+    fun saveMegaEmbedSettings(
+        player: String,
+        color: String,
+        enabled: Boolean = true,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            if (_isSavingPlayerConfig.value) return@launch
+            _isSavingPlayerConfig.value = true
+            _playerSaveStatusMessage.value = null
+
+            val cleanColor = com.example.data.remote.MegaEmbedPlayerType.normalizeColor(color)
+            val cleanPlayer = player.trim().lowercase()
+
+            val currentAdminEmail = firebaseService.currentUser.value?.email ?: "admin@ronycine.app"
+            val newMegaConfig = com.example.data.remote.MegaEmbedPlayerConfig(
+                enabled = enabled,
+                player = cleanPlayer,
+                color = cleanColor
+            )
+
+            val success = firebaseService.updateMegaEmbedConfig(newMegaConfig, currentAdminEmail)
+
+            if (success) {
+                // Update local repository and StateFlow
+                val repoConfig = mediaRepository.getMegaEmbedConfig().copy(
+                    defaultPlayer = cleanPlayer,
+                    colorHex = cleanColor
+                )
+                mediaRepository.saveMegaEmbedConfig(repoConfig)
+                _megaEmbedConfig.value = repoConfig
+
+                val displayName = com.example.data.remote.MegaEmbedPlayerType.getDisplayName(cleanPlayer)
+                addAuditLog("Atualizou MegaEmbed: Player=$displayName, Cor=#$cleanColor, Ativo=$enabled", "Gerenciador de Players")
+                firebaseService.addAuditLogRemote("MEGAEMBED_CONFIG_UPDATED", cleanPlayer)
+
+                _playerSaveStatusMessage.value = "Player atualizado com sucesso"
+                onResult(true)
+            } else {
+                _playerSaveStatusMessage.value = "Falha ao salvar configuração no Firestore"
+                onResult(false)
+            }
+            _isSavingPlayerConfig.value = false
+        }
+    }
+
+    fun saveSubtitledSettings(
+        provider: String = "vidsrc",
+        defaultLanguage: String = "pt",
+        enabled: Boolean = true,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            if (_isSavingPlayerConfig.value) return@launch
+            _isSavingPlayerConfig.value = true
+            _playerSaveStatusMessage.value = null
+
+            val currentAdminEmail = firebaseService.currentUser.value?.email ?: "admin@ronycine.app"
+            val newSubtitledConfig = com.example.data.remote.SubtitledPlayerConfig(
+                provider = provider.trim().lowercase(),
+                defaultLanguage = defaultLanguage.trim(),
+                enabled = enabled
+            )
+
+            val success = firebaseService.updateSubtitledPlayerConfig(newSubtitledConfig, currentAdminEmail)
+
+            if (success) {
+                addAuditLog("Atualizou Player Legendado: Provedor=$provider, Idioma=$defaultLanguage, Ativo=$enabled", "Gerenciador de Players")
+                firebaseService.addAuditLogRemote("SUBTITLED_CONFIG_UPDATED", provider)
+
+                _playerSaveStatusMessage.value = "Player legendado salvo com sucesso"
+                onResult(true)
+            } else {
+                _playerSaveStatusMessage.value = "Falha ao salvar configuração no Firestore"
+                onResult(false)
+            }
+            _isSavingPlayerConfig.value = false
+        }
+    }
+
+    fun savePlayerSource(source: com.example.data.remote.PlayerSource) {
+        viewModelScope.launch {
+            firebaseService.upsertPlayerSourceInCloud(source)
+            addAuditLog("Salvou player: ${source.name}", "Gerenciador de Players")
+            firebaseService.addAuditLogRemote("PLAYER_UPDATED", source.id)
+        }
+    }
+
+    fun deletePlayerSource(id: String) {
+        viewModelScope.launch {
+            firebaseService.deletePlayerSourceFromCloud(id)
+            addAuditLog("Excluiu player (ID: $id)", "Gerenciador de Players")
+            firebaseService.addAuditLogRemote("PLAYER_DELETED", id)
+        }
+    }
+
+    fun setDefaultPlayer(playerId: String) {
+        viewModelScope.launch {
+            if (_isSettingDefaultPlayer.value != null) return@launch
+            _isSettingDefaultPlayer.value = playerId
+            try {
+                firebaseService.setDefaultPlayer(playerId)
+                
+                // Allow some time for Firestore sync and local observation
+                delay(1000)
+                
+                addAuditLog("Definiu player como principal: $playerId", "Gerenciador de Players")
+                firebaseService.addAuditLogRemote("PLAYER_SET_DEFAULT", playerId)
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Error setting default player: ${e.message}")
+            } finally {
+                _isSettingDefaultPlayer.value = null
+            }
+        }
+    }
+
+    fun togglePlayerEnabled(playerId: String, enabled: Boolean) {
+        viewModelScope.launch {
+            firebaseService.togglePlayerEnabled(playerId, enabled)
+            val action = if (enabled) "Ativou" else "Desativou"
+            addAuditLog("$action player: $playerId", "Gerenciador de Players")
+            firebaseService.addAuditLogRemote(if (enabled) "PLAYER_ENABLED" else "PLAYER_DISABLED", playerId)
+        }
+    }
+
+    fun duplicatePlayerSource(source: com.example.data.remote.PlayerSource) {
+        viewModelScope.launch {
+            val newSource = source.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                name = "${source.name} (Cópia)",
+                isDefault = false,
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis()
+            )
+            firebaseService.upsertPlayerSourceInCloud(newSource)
+            addAuditLog("Duplicou player: ${source.name}", "Gerenciador de Players")
+            firebaseService.addAuditLogRemote("PLAYER_DUPLICATED", newSource.id)
+        }
+    }
+
+    fun updatePlayerConfig(config: com.example.data.remote.PlayerConfig) {
+        viewModelScope.launch {
+            firebaseService.updatePlayerConfig(config)
+            addAuditLog("Atualizou configurações globais de players", "Gerenciador de Players")
+        }
+    }
+
+    fun seedDefaultPlayers() {
+        viewModelScope.launch {
+            // Give it time for the initial listener snapshot
+            delay(1200)
+            val currentSources = playerSources.value
+            val mgebExists = currentSources.any { it.id == "mgeb" || it.name.contains("mgeb", ignoreCase = true) || it.name.contains("megaembed", ignoreCase = true) }
+            val vidsrcExists = currentSources.any { it.id == "vidsrc" || it.name.contains("vidsrc", ignoreCase = true) }
+
+            if (!mgebExists) {
+                val mgeb = com.example.data.remote.PlayerSource(
+                    id = "mgeb",
+                    name = "MegaEmbed",
+                    type = "Embed",
+                    priority = 1,
+                    language = "Dublado",
+                    movieTmdbUrl = "https://mgeb.top/embed/{tmdb_id}",
+                    tvTmdbUrl = "https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}",
+                    playerColor = "#fb542b",
+                    isDefault = true,
+                    enabled = true
+                )
+                firebaseService.upsertPlayerSourceInCloud(mgeb)
+            }
+
+            if (!vidsrcExists) {
+                val vidsrc = com.example.data.remote.PlayerSource(
+                    id = "vidsrc",
+                    name = "VidSrc",
+                    type = "Embed",
+                    priority = 2,
+                    language = "Legendado",
+                    movieTmdbUrl = "https://vidsrc.tw/embed/movie/{tmdb_id}",
+                    tvTmdbUrl = "https://vidsrc.tw/embed/tv/{tmdb_id}/{season_number}/{episode_number}",
+                    isDefault = false,
+                    enabled = true
+                )
+                firebaseService.upsertPlayerSourceInCloud(vidsrc)
+            }
+
+            // Consolidate duplicate VidSrc entries if any
+            val vidsrcSources = playerSources.value.filter { it.id == "vidsrc" || it.name.equals("VidSrc", ignoreCase = true) }
+            if (vidsrcSources.size > 1) {
+                vidsrcSources.drop(1).forEach { dup ->
+                    if (dup.id.isNotEmpty() && dup.id != "vidsrc") {
+                        firebaseService.deletePlayerSourceFromCloud(dup.id)
+                    }
+                }
+            }
+
+            // If players exist but none is default, set Mgeb as default if it exists
+            val hasDefault = playerSources.value.any { it.isDefault }
+            if (!hasDefault && playerSources.value.isNotEmpty()) {
+                val mgeb = playerSources.value.find { it.id == "mgeb" || it.name.contains("mgeb", ignoreCase = true) }
+                    ?: playerSources.value.firstOrNull()
+                if (mgeb != null) {
+                    firebaseService.setDefaultPlayer(mgeb.id)
+                }
+            }
+        }
+    }
+
     // --- Device Management & Remote Control ---
     val isAdminAuthorized: StateFlow<Boolean> = firebaseService.isAdminAuthorized
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -194,6 +481,70 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     val remoteConfig: StateFlow<com.example.data.remote.RemoteConfigEntity> = firebaseService.remoteConfig
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.remote.RemoteConfigEntity())
 
+    val remoteAppConfig: StateFlow<com.example.data.remote.RemoteAppConfigEntity> = firebaseService.remoteAppConfig
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.remote.RemoteAppConfigEntity())
+
+    val remoteUpdateHistory: StateFlow<List<com.example.data.remote.RemoteUpdateHistoryEntity>> = firebaseService.remoteUpdateHistory
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val remoteUpdateManager = com.example.data.remote.RemoteUpdateManager.getInstance(application)
+
+    fun publishRemoteUpdate(
+        changelog: String,
+        forceRefresh: Boolean,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val currentConfig = remoteAppConfig.value
+                val sdf = java.text.SimpleDateFormat("yyyy.MM.dd", java.util.Locale.US)
+                val todayPrefix = sdf.format(java.util.Date())
+
+                val newRemoteVersion = if (currentConfig.remoteVersion.startsWith(todayPrefix)) {
+                    val seq = currentConfig.remoteVersion.substringAfterLast(".").toIntOrNull() ?: 0
+                    String.format(java.util.Locale.US, "%s.%02d", todayPrefix, seq + 1)
+                } else {
+                    "$todayPrefix.01"
+                }
+
+                val newBuild = currentConfig.build + 1
+                val newCacheVersion = if (forceRefresh) currentConfig.cacheVersion + 1 else currentConfig.cacheVersion
+
+                val success = firebaseService.publishRemoteUpdateInCloud(
+                    remoteVersion = newRemoteVersion,
+                    build = newBuild,
+                    cacheVersion = newCacheVersion,
+                    changelog = changelog,
+                    forceRefresh = forceRefresh,
+                    publishedBy = "Ronaldo Mazive (Admin)"
+                )
+
+                if (success) {
+                    addAuditLog("Publicou Alterações Remotas", "Versão $newRemoteVersion")
+                    onResult(true, "✓ ALTERAÇÕES PUBLICADAS!\nVersão remota: $newRemoteVersion")
+                } else {
+                    onResult(false, "Falha ao publicar alteração no servidor.")
+                }
+            } catch (e: Exception) {
+                onResult(false, "Erro ao publicar: ${e.message}")
+            }
+        }
+    }
+
+    fun checkRemoteUpdateNow(onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val state = remoteUpdateManager.checkNow()
+            val msg = when (state) {
+                is com.example.data.remote.RemoteUpdateState.UpToDate -> "✓ Você já está na versão remota mais recente (${state.remoteVersion})."
+                is com.example.data.remote.RemoteUpdateState.Applied -> "✓ Versão remota v${state.remoteVersion} sincronizada!"
+                is com.example.data.remote.RemoteUpdateState.Offline -> "🟡 Dispositivo offline. Mantendo cache local."
+                is com.example.data.remote.RemoteUpdateState.Error -> "🔴 Erro: ${state.message}"
+                else -> "Sincronização concluída."
+            }
+            onResult(msg)
+        }
+    }
+
     val updateControl: StateFlow<com.example.data.remote.UpdateControlEntity> = firebaseService.updateControl
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.example.data.remote.UpdateControlEntity(enabled = false))
 
@@ -202,6 +553,71 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     val updateEvents: StateFlow<List<com.example.data.remote.UpdateEventEntity>> = firebaseService.updateEvents
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pendingChanges: StateFlow<List<com.example.data.remote.PendingChangeEntity>> = firebaseService.pendingChanges
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val releaseVersions: StateFlow<List<com.example.data.remote.ReleaseRevisionEntity>> = firebaseService.releaseVersions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val publicationEvents: StateFlow<List<com.example.data.remote.PublicationEventEntity>> = firebaseService.publicationEvents
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun detectRealChanges(onResult: (Int) -> Unit) {
+        viewModelScope.launch {
+            val count = firebaseService.detectRealChangesToday()
+            onResult(count)
+        }
+    }
+
+    fun createPendingChange(change: com.example.data.remote.PendingChangeEntity) {
+        viewModelScope.launch {
+            firebaseService.createPendingChangeInCloud(change)
+        }
+    }
+
+    fun updatePendingChangeStatus(changeId: String, newStatus: String) {
+        viewModelScope.launch {
+            val adminId = firebaseService.currentUser.value?.email ?: "admin@ronycine.app"
+            firebaseService.updatePendingChangeStatusInCloud(changeId, newStatus, adminId)
+        }
+    }
+
+    fun publishSelectedChanges(
+        title: String,
+        description: String,
+        selectedIds: List<String>,
+        releaseType: String,
+        onResult: (Boolean, String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val adminId = firebaseService.currentUser.value?.email ?: "admin@ronycine.app"
+            val result = firebaseService.publishSelectedChangesInCloud(
+                title = title,
+                description = description,
+                selectedChangeIds = selectedIds,
+                releaseType = releaseType,
+                adminId = adminId
+            )
+            if (result.isSuccess) {
+                onResult(true, "✓ Revisão ${result.getOrNull()} publicada com sucesso!")
+            } else {
+                onResult(false, result.exceptionOrNull()?.message ?: "Erro desconhecido ao publicar.")
+            }
+        }
+    }
+
+    fun revertToRevision(revisionId: String, onResult: (Boolean, String) -> Unit) {
+        viewModelScope.launch {
+            val adminId = firebaseService.currentUser.value?.email ?: "admin@ronycine.app"
+            val result = firebaseService.revertToRevision(revisionId, adminId)
+            if (result.isSuccess) {
+                onResult(true, "✓ Reversão concluída com sucesso.")
+            } else {
+                onResult(false, result.exceptionOrNull()?.message ?: "Erro ao reverter.")
+            }
+        }
+    }
 
     val remoteAuditLogs: StateFlow<List<com.example.data.remote.AdminAuditLogEntity>> = firebaseService.auditLogs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -507,6 +923,287 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- MGEB (MegaEmbed) Import States ---
+    private val _mgebMovies = MutableStateFlow<List<MegaEmbedApiItem>>(emptyList())
+    val mgebMovies: StateFlow<List<MegaEmbedApiItem>> = _mgebMovies.asStateFlow()
+
+    private val _mgebSeries = MutableStateFlow<List<MegaEmbedApiItem>>(emptyList())
+    val mgebSeries: StateFlow<List<MegaEmbedApiItem>> = _mgebSeries.asStateFlow()
+
+    private val _isMgebLoading = MutableStateFlow(false)
+    val isMgebLoading: StateFlow<Boolean> = _isMgebLoading.asStateFlow()
+
+    private val _mgebSearchQuery = MutableStateFlow("")
+    val mgebSearchQuery: StateFlow<String> = _mgebSearchQuery.asStateFlow()
+
+    private val _mgebCandidates = MutableStateFlow<List<TmdbSearchResultItem>>(emptyList())
+    val mgebCandidates: StateFlow<List<TmdbSearchResultItem>> = _mgebCandidates.asStateFlow()
+
+    // Advanced selection & pagination states
+    private val mgebEnrichedCache = mutableMapOf<Pair<Int, String>, MediaEntity>()
+
+    private val _mgebPage = MutableStateFlow(1)
+    val mgebPage: StateFlow<Int> = _mgebPage.asStateFlow()
+
+    private val _mgebTotalPages = MutableStateFlow(1)
+    val mgebTotalPages: StateFlow<Int> = _mgebTotalPages.asStateFlow()
+
+    private val _mgebTotalCount = MutableStateFlow(0)
+    val mgebTotalCount: StateFlow<Int> = _mgebTotalCount.asStateFlow()
+
+    private val _mgebTypeFilter = MutableStateFlow("ALL") // "ALL", "movie", "tv"
+    val mgebTypeFilter: StateFlow<String> = _mgebTypeFilter.asStateFlow()
+
+    private val _mgebSelectedIds = MutableStateFlow<Set<Pair<Int, String>>>(emptySet())
+    val mgebSelectedIds: StateFlow<Set<Pair<Int, String>>> = _mgebSelectedIds.asStateFlow()
+
+    fun loadMgebCatalog(forceRefresh: Boolean = false) {
+        viewModelScope.launch {
+            _isMgebLoading.value = true
+            try {
+                val movies = MegaEmbedService.fetchMegaEmbedMovies(forceRefresh)
+                val series = MegaEmbedService.fetchMegaEmbedSeries(forceRefresh)
+                _mgebMovies.value = movies
+                _mgebSeries.value = series
+                
+                // Initially populate candidates with first page
+                updateMgebCandidates()
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Error loading Mgeb catalog: ${e.message}")
+            } finally {
+                _isMgebLoading.value = false
+            }
+        }
+    }
+
+    fun onMgebSearchQueryChanged(query: String) {
+        _mgebSearchQuery.value = query
+        _mgebPage.value = 1
+        updateMgebCandidates()
+    }
+
+    fun setMgebTypeFilter(filter: String) {
+        _mgebTypeFilter.value = filter
+        _mgebPage.value = 1
+        updateMgebCandidates()
+    }
+
+    fun setMgebPage(page: Int) {
+        val total = _mgebTotalPages.value
+        if (page in 1..total) {
+            _mgebPage.value = page
+            updateMgebCandidates()
+        }
+    }
+
+    private fun updateMgebCandidates() {
+        viewModelScope.launch {
+            val query = _mgebSearchQuery.value.lowercase()
+            val typeFilter = _mgebTypeFilter.value
+            val allMovies = _mgebMovies.value
+            val allSeries = _mgebSeries.value
+            
+            val allCombined = (allMovies + allSeries).map { item ->
+                val type = if (item.type == "tv") "tv" else "movie"
+                Pair(item.tmdbId ?: 0, type)
+            }
+            
+            // Filter combined results
+            val filteredList = allCombined.filter { (tmdbId, type) ->
+                val matchesType = typeFilter == "ALL" || type == typeFilter
+                
+                val cached = mgebEnrichedCache[Pair(tmdbId, type)]
+                val title = cached?.title?.lowercase() ?: "tmdb #$tmdbId"
+                val matchesQuery = query.isBlank() || 
+                        tmdbId.toString().contains(query) || 
+                        title.contains(query)
+                
+                matchesType && matchesQuery
+            }
+            
+            _mgebTotalCount.value = filteredList.size
+            val pageSize = 24
+            val pages = if (filteredList.isEmpty()) 1 else (filteredList.size + pageSize - 1) / pageSize
+            _mgebTotalPages.value = pages
+            
+            // Safety adjustment
+            if (_mgebPage.value > pages) {
+                _mgebPage.value = pages
+            } else if (_mgebPage.value < 1) {
+                _mgebPage.value = 1
+            }
+            
+            val startIndex = (_mgebPage.value - 1) * pageSize
+            val pageSlice = filteredList.drop(startIndex).take(pageSize)
+            
+            val candidates = mutableListOf<TmdbSearchResultItem>()
+            for ((tmdbId, type) in pageSlice) {
+                val existing = database.playFilmeDao().getMediaByTmdbIdAndType(tmdbId, type)
+                if (existing != null) {
+                    candidates.add(TmdbSearchResultItem(existing, true))
+                } else {
+                    val cached = mgebEnrichedCache[Pair(tmdbId, type)]
+                    val placeholder = cached ?: MediaEntity(
+                        tmdbId = tmdbId,
+                        title = "TMDB #$tmdbId",
+                        mediaType = type,
+                        posterPath = "",
+                        backdropPath = "",
+                        overview = "",
+                        releaseYear = "",
+                        rating = 0.0,
+                        genres = ""
+                    )
+                    candidates.add(TmdbSearchResultItem(placeholder, false))
+                }
+            }
+            
+            _mgebCandidates.value = candidates
+            
+            // Background metadata enrichment for placeholders
+            val toEnrich = candidates.filter { !it.isAlreadyInCatalog && (it.entity.posterPath == null || it.entity.posterPath.isEmpty()) }
+            enrichMgebMetadata(toEnrich)
+        }
+    }
+
+    private fun enrichMgebMetadata(items: List<TmdbSearchResultItem>) {
+        viewModelScope.launch {
+            items.forEach { item ->
+                try {
+                    val tmdbId = item.entity.tmdbId
+                    val type = item.entity.mediaType
+                    val dto = if (type == "movie") {
+                        com.example.data.remote.TmdbNetwork.apiService.getMovieDetails(tmdbId, com.example.BuildConfig.TMDB_API_KEY)
+                    } else {
+                        com.example.data.remote.TmdbNetwork.apiService.getSeriesDetails(tmdbId, com.example.BuildConfig.TMDB_API_KEY)
+                    }
+                    
+                    val enrichedEntity = item.entity.copy(
+                        title = dto.title ?: dto.name ?: item.entity.title,
+                        posterPath = dto.posterPath ?: "",
+                        releaseYear = (dto.releaseDate ?: dto.firstAirDate ?: "").take(4),
+                        rating = dto.voteAverage ?: 0.0
+                    )
+                    
+                    mgebEnrichedCache[Pair(tmdbId, type)] = enrichedEntity
+                    
+                    val current = _mgebCandidates.value.toMutableList()
+                    val index = current.indexOfFirst { it.entity.tmdbId == tmdbId && it.entity.mediaType == type }
+                    if (index != -1) {
+                        current[index] = TmdbSearchResultItem(enrichedEntity, false)
+                        _mgebCandidates.value = current
+                    }
+                } catch (e: Exception) {
+                    // Silent fail for background enrichment
+                }
+            }
+        }
+    }
+
+    fun toggleMgebSelection(tmdbId: Int, type: String) {
+        val current = _mgebSelectedIds.value
+        val pair = Pair(tmdbId, type)
+        _mgebSelectedIds.value = if (current.contains(pair)) {
+            current - pair
+        } else {
+            current + pair
+        }
+    }
+
+    fun toggleMgebPageSelection(visibleItems: List<Pair<Int, String>>, selectAll: Boolean) {
+        val current = _mgebSelectedIds.value
+        _mgebSelectedIds.value = if (selectAll) {
+            current + visibleItems
+        } else {
+            current - visibleItems.toSet()
+        }
+    }
+
+    fun clearMgebSelection() {
+        _mgebSelectedIds.value = emptySet()
+    }
+
+    fun selectAllMgebResults() {
+        viewModelScope.launch {
+            val query = _mgebSearchQuery.value.lowercase()
+            val typeFilter = _mgebTypeFilter.value
+            val allMovies = _mgebMovies.value
+            val allSeries = _mgebSeries.value
+            
+            val allCombined = (allMovies + allSeries).map { item ->
+                val type = if (item.type == "tv") "tv" else "movie"
+                Pair(item.tmdbId ?: 0, type)
+            }
+            
+            val filtered = allCombined.filter { (tmdbId, type) ->
+                val matchesType = typeFilter == "ALL" || type == typeFilter
+                val cached = mgebEnrichedCache[Pair(tmdbId, type)]
+                val title = cached?.title?.lowercase() ?: "tmdb #$tmdbId"
+                val matchesQuery = query.isBlank() || 
+                        tmdbId.toString().contains(query) || 
+                        title.contains(query)
+                matchesType && matchesQuery
+            }
+            
+            _mgebSelectedIds.value = _mgebSelectedIds.value + filtered
+        }
+    }
+
+    fun getMgebSelectionSummary(onResult: (total: Int, novos: Int, existentes: Int) -> Unit) {
+        viewModelScope.launch {
+            val selected = _mgebSelectedIds.value
+            var existentesCount = 0
+            for ((tmdbId, type) in selected) {
+                val exists = database.playFilmeDao().getMediaByTmdbIdAndType(tmdbId, type) != null
+                if (exists) {
+                    existentesCount++
+                }
+            }
+            val novosCount = selected.size - existentesCount
+            onResult(selected.size, novosCount, existentesCount)
+        }
+    }
+
+    fun startMgebSelectedImport(onComplete: () -> Unit) {
+        viewModelScope.launch {
+            val selected = _mgebSelectedIds.value
+            val idsToImport = mutableListOf<Pair<Int, String>>()
+            
+            for ((tmdbId, type) in selected) {
+                val exists = database.playFilmeDao().getMediaByTmdbIdAndType(tmdbId, type) != null
+                if (!exists) {
+                    idsToImport.add(Pair(tmdbId, type))
+                }
+            }
+            
+            if (idsToImport.isNotEmpty()) {
+                startMgebMassImport(idsToImport)
+            }
+            clearMgebSelection()
+            onComplete()
+        }
+    }
+
+    fun startMgebMassImport(ids: List<Pair<Int, String>>) {
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            try {
+                val config = ImportConfig(concurrentWorkers = 2, retryErrors = true, updateExisting = false)
+                val jobId = mediaRepository.createMassImportJob(
+                    type = "mgeb_batch",
+                    source = "MGEB API",
+                    ids = ids,
+                    config = config
+                )
+                _importMessage.value = "🚀 Importação em massa da Mgeb iniciada para ${ids.size} itens!"
+                selectSection(AdminSection.IMPORTACAO_MASSA)
+                selectJob(jobId)
+            } catch (e: Exception) {
+                _importMessage.value = "❌ Erro ao iniciar importação: ${e.localizedMessage}"
+            }
+        }
+    }
+
     // --- Active Admin Section ---
     private val _currentSection = MutableStateFlow(AdminSection.ESTATISTICAS)
     val currentSection: StateFlow<AdminSection> = _currentSection.asStateFlow()
@@ -518,6 +1215,8 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     // --- Sync & Count Flows ---
     val movieCount: Flow<Int> = mediaRepository.movieCount
     val seriesCount: Flow<Int> = mediaRepository.seriesCount
+    val animeCount: Flow<Int> = mediaRepository.animeCount
+    val doramaCount: Flow<Int> = mediaRepository.doramaCount
     val allChannels: Flow<List<com.example.data.local.ChannelEntity>> = mediaRepository.allLiveChannels
 
     // --- Catalog Management States ---
@@ -527,7 +1226,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _catalogSearchQuery = MutableStateFlow("")
     val catalogSearchQuery: StateFlow<String> = _catalogSearchQuery.asStateFlow()
 
-    private val _catalogFilter = MutableStateFlow("all") // "all", "movie", "tv"
+    private val _catalogFilter = MutableStateFlow("all") // "all", "movie", "tv", "anime", "dorama"
     val catalogFilter: StateFlow<String> = _catalogFilter.asStateFlow()
 
     private val _catalogDisplayLimit = MutableStateFlow(30)
@@ -833,6 +1532,8 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     // Dashboard stats & Reactive Flows
     val movieCountState = mediaRepository.movieCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val seriesCountState = mediaRepository.seriesCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val animeCountState = mediaRepository.animeCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val doramaCountState = mediaRepository.doramaCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val episodeCountState = mediaRepository.episodeCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val myListCountState = mediaRepository.myListCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val watchHistoryCountState = mediaRepository.watchHistoryCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
@@ -981,54 +1682,64 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _isLoadingRecentCandidates.value = true
             try {
-                val movies = mediaRepository.fetchPopularMoviesFromTmdb(1)
-                val series = mediaRepository.fetchPopularSeriesFromTmdb(1)
-
                 val candidates = mutableListOf<MassCandidateItem>()
 
-                for (m in movies) {
-                    val exists = mediaRepository.getMediaByTmdbId(m.id, "movie") != null
-                    if (!exists) {
-                        candidates.add(
-                            MassCandidateItem(
-                                tmdbId = m.id,
-                                mediaType = "movie",
-                                title = m.title ?: m.name ?: "Sem título",
-                                originalTitle = m.originalTitle ?: "",
-                                year = m.releaseDate?.take(4) ?: "",
-                                rating = m.voteAverage ?: 0.0,
-                                posterPath = m.posterPath,
-                                overview = m.overview ?: "Sem sinopse disponível.",
-                                isAlreadyInCatalog = false,
-                                selected = false
+                // 1. Fetch Movies independently
+                try {
+                    val movies = mediaRepository.fetchPopularMoviesFromTmdb(1)
+                    for (m in movies) {
+                        val exists = mediaRepository.getMediaByTmdbId(m.id, "movie") != null
+                        if (!exists) {
+                            candidates.add(
+                                MassCandidateItem(
+                                    tmdbId = m.id,
+                                    mediaType = "movie",
+                                    title = m.title ?: m.name ?: "Sem título",
+                                    originalTitle = m.originalTitle ?: "",
+                                    year = m.releaseDate?.take(4) ?: "",
+                                    rating = m.voteAverage ?: 0.0,
+                                    posterPath = m.posterPath,
+                                    overview = m.overview ?: "Sem sinopse disponível.",
+                                    isAlreadyInCatalog = false,
+                                    selected = false
+                                )
                             )
-                        )
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.e("AdminViewModel", "Error fetching popular movies for recent candidates: ${e.message}")
                 }
 
-                for (s in series) {
-                    val exists = mediaRepository.getMediaByTmdbId(s.id, "tv") != null
-                    if (!exists) {
-                        candidates.add(
-                            MassCandidateItem(
-                                tmdbId = s.id,
-                                mediaType = "tv",
-                                title = s.name ?: s.title ?: "Sem título",
-                                originalTitle = s.originalName ?: "",
-                                year = s.firstAirDate?.take(4) ?: "",
-                                rating = s.voteAverage ?: 0.0,
-                                posterPath = s.posterPath,
-                                overview = s.overview ?: "Sem sinopse disponível.",
-                                isAlreadyInCatalog = false,
-                                selected = false
+                // 2. Fetch Series independently
+                try {
+                    val series = mediaRepository.fetchPopularSeriesFromTmdb(1)
+                    for (s in series) {
+                        val exists = mediaRepository.getMediaByTmdbId(s.id, "tv") != null
+                        if (!exists) {
+                            candidates.add(
+                                MassCandidateItem(
+                                    tmdbId = s.id,
+                                    mediaType = "tv",
+                                    title = s.name ?: s.title ?: "Sem título",
+                                    originalTitle = s.originalName ?: "",
+                                    year = s.firstAirDate?.take(4) ?: "",
+                                    rating = s.voteAverage ?: 0.0,
+                                    posterPath = s.posterPath,
+                                    overview = s.overview ?: "Sem sinopse disponível.",
+                                    isAlreadyInCatalog = false,
+                                    selected = false
+                                )
                             )
-                        )
+                        }
                     }
+                } catch (e: Exception) {
+                    Log.e("AdminViewModel", "Error fetching popular series for recent candidates: ${e.message}")
                 }
 
                 _recentCandidates.value = candidates
+                Log.d("AdminViewModel", "[RECENT] Carregadas ${candidates.size} novidades válidas do TMDB.")
             } catch (e: Exception) {
-                Log.e("AdminViewModel", "Error loading recent candidates from TMDB: ${e.message}")
+                Log.e("AdminViewModel", "Error loading recent candidates from TMDB: ${e.message}", e)
             } finally {
                 _isLoadingRecentCandidates.value = false
             }
@@ -1212,6 +1923,17 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             mediaRepository.saveMegaEmbedConfig(config)
             _megaEmbedConfig.value = config
+
+            val currentAdminEmail = firebaseService.currentUser.value?.email ?: "admin@ronycine.app"
+            firebaseService.updateMegaEmbedConfig(
+                com.example.data.remote.MegaEmbedPlayerConfig(
+                    enabled = true,
+                    player = config.defaultPlayer,
+                    color = com.example.data.remote.MegaEmbedPlayerType.normalizeColor(config.colorHex)
+                ),
+                currentAdminEmail
+            )
+
             _importMessage.value = "Configuração do MegaEmbed salva com sucesso!"
         }
     }
@@ -1308,29 +2030,33 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _isImportingSingle.value = true
+            _importStepMessage.value = "🚀 Iniciando processo de importação..."
             try {
-                // Double check in database before proceeding
+                // 1. Verificando duplicidade
+                _importStepMessage.value = "🔍 Verificando duplicidade no catálogo..."
+                delay(300)
                 val existsInDb = mediaRepository.getMediaByTmdbId(entity.tmdbId, entity.mediaType) != null
                 if (existsInDb) {
                     _importMessage.value = "⚠️ Este conteúdo já existe no catálogo do RONYCINE."
                     _selectedPreviewExists.value = true
+                    _importStepMessage.value = null
                     return@launch
                 }
 
-                _importStepMessage.value = "✓ Consultando informações do TMDB..."
+                // 2. Preparando Metadados
+                _importStepMessage.value = "📦 Mapeando metadados e posters..."
+                delay(400)
+                
+                // 3. Salvando no Banco
+                _importStepMessage.value = "💾 Salvando no banco de dados do RONYCINE..."
                 delay(300)
-                _importStepMessage.value = "✓ Mapeando poster, backdrop e gêneros..."
-                delay(300)
-                _importStepMessage.value = "✓ Carregando elenco e metadados oficiais..."
-                delay(300)
-                _importStepMessage.value = "✓ Processando episódios e temporadas..."
-                delay(300)
-                _importStepMessage.value = "✓ Salvando no banco de dados do RONYCINE..."
-                delay(200)
 
                 val (success, msg) = mediaRepository.importMediaEntity(entity)
 
                 if (success) {
+                    _importStepMessage.value = "✅ Importação confirmada e finalizada!"
+                    delay(500)
+                    
                     // Update all pending requests for this TMDB ID
                     val allReqs = allMediaRequests.value
                     allReqs.filter { it.tmdbId == entity.tmdbId && it.mediaType == entity.mediaType && (it.status.uppercase() == "PENDENTE" || it.status == "pending") }
@@ -1343,12 +2069,13 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     
                     // Automatic push notifications if enabled
                     if (_autoNotificationsEnabled.value && msg?.contains("atualizado") != true) {
+                        _importStepMessage.value = "🔔 Disparando notificações push..."
                         try {
-                            val notifId = "auto_${entity.mediaType}_${entity.tmdbId}"
+                            val notifId = "NEW_PUBLICATION:${entity.mediaType}:${entity.tmdbId}"
                             val isMovie = entity.mediaType.lowercase() == "movie"
-                            val notifTitle = entity.title
-                            val notifMessage = if (isMovie) "Acabou de chegar ao catálogo" else "Nova série disponível no catálogo"
-                            val notifType = if (isMovie) "NOVO_FILME" else "NOVA_SERIE"
+                            val notifTitle = if (isMovie) "🎬 Nova publicação no RONYCINE" else "📺 Nova série no RONYCINE"
+                            val notifMessage = if (isMovie) "“${entity.title}” Já está disponível para assistir." else "“${entity.title}” Já está disponível."
+                            val notifType = "NEW_PUBLICATION"
                             val actionUrl = if (isMovie) "movie/${entity.tmdbId}" else "tv/${entity.tmdbId}"
 
                             val localNotif = NotificationEntity(
@@ -1394,9 +2121,10 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
             } catch (e: Exception) {
                 Log.e("AdminViewModel", "[IMPORT ERROR] ${e.message}", e)
-                _importMessage.value = "Não foi possível importar. Tente novamente."
+                _importMessage.value = "Não foi possível concluir a importação: ${e.localizedMessage}"
             } finally {
                 _isImportingSingle.value = false
+                _importStepMessage.value = null
             }
         }
     }

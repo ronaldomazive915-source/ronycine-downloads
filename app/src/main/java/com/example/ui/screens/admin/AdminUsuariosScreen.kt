@@ -1,5 +1,6 @@
 package com.example.ui.screens.admin
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -18,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -28,6 +30,7 @@ import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
+import com.example.ui.components.VerifiedBadge
 import com.example.ui.viewmodel.AdminViewModel
 import java.text.SimpleDateFormat
 import java.util.*
@@ -45,6 +48,8 @@ fun AdminUsuariosScreen(
     var selectedFilter by remember { mutableStateOf("TODOS") } // "TODOS", "ATIVO", "SUSPENSO", "ADMIN"
     var selectedUserForDetails by remember { mutableStateOf<UserEntity?>(null) }
     var userToChangeStatus by remember { mutableStateOf<Pair<UserEntity, String>?>(null) } // user to target status
+    var verifyingUserId by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
     // Metrics calculation
     val totalUsers = users.size
@@ -235,6 +240,43 @@ fun AdminUsuariosScreen(
                     DetailField("UID:", user.uid)
                     DetailField("Função / Role:", user.role)
                     DetailField("Status:", user.accessStatus)
+
+                    // Toggle switch for Verification Status
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable(enabled = verifyingUserId != user.uid) {
+                            verifyingUserId = user.uid
+                            adminViewModel.toggleUserVerification(user.uid, user.isVerified) { success, errorMsg ->
+                                verifyingUserId = null
+                                if (success) {
+                                    val msg = if (user.isVerified) "Verificação removida com sucesso." else "Usuário verificado com sucesso."
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    selectedUserForDetails = user.copy(isVerified = !user.isVerified)
+                                } else {
+                                    val err = errorMsg ?: "Não foi possível verificar este usuário. Tente novamente."
+                                    Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Selo de Verificação:", color = Color.Gray, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (verifyingUserId == user.uid) {
+                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color(0xFF0095F6), strokeWidth = 2.dp)
+                                Text("Salvando...", color = Color(0xFF0095F6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            } else if (user.isVerified) {
+                                VerifiedBadge(size = 14.dp, showToastOnClick = false)
+                                Text("VERIFICADO (Mudar)", color = Color(0xFF0095F6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Text("NÃO VERIFICADO (Mudar)", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Normal)
+                            }
+                        }
+                    }
+
                     DetailField("Criado em:", formatDate(user.createdAt))
                     DetailField("Último Acesso:", formatDate(user.lastLoginAt))
                     DetailField("Perfis Cadastrados:", "${userProfiles.size} perfis (${userProfiles.joinToString { it.name }})")
@@ -358,8 +400,13 @@ fun UserRowCard(
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
                             )
+
+                            if (user.isVerified) {
+                                VerifiedBadge(size = 13.dp, showToastOnClick = false)
+                            }
 
                             if (isFounder) {
                                 Surface(

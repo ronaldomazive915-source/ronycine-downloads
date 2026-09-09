@@ -1,7 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,8 +8,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Movie
-import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,9 +16,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -30,23 +27,24 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.local.MediaEntity
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.TextSecondary
+import com.example.util.MediaClassifier
 
 /**
  * Modern compact Media Card for movies and TV series.
  * Features:
- * - 2:3 aspect ratio poster.
+ * - 2:3 aspect ratio poster with downsampled memory-safe cache.
  * - Circular percentage rating badge positioned in the top-right corner.
  * - Discreet type badge (FILME / SÉRIE) in the top-left corner.
  * - Uniform 2-line title layout with ellipsis.
  * - Year and media type / genre subtitle (e.g. "2026 • Filme").
- * - Fluid touch scale feedback.
+ * - Fluid touch scale feedback using zero-cost graphicsLayer.
  */
 @Composable
 fun MediaCard(
@@ -57,15 +55,46 @@ fun MediaCard(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.96f else 1f,
-        animationSpec = spring(dampingRatio = 0.8f, stiffness = 400f),
-        label = "media_card_press_scale"
-    )
+
+    val category = remember(media.mediaCategory, media.genres, media.title) {
+        MediaClassifier.classifyMedia(media)
+    }
+    val badgeText = remember(category) {
+        when (category) {
+            MediaClassifier.CATEGORY_ANIME -> "ANIME"
+            MediaClassifier.CATEGORY_DORAMA -> "DORAMA"
+            MediaClassifier.CATEGORY_MOVIE -> "FILME"
+            else -> "SÉRIE"
+        }
+    }
+    val badgeColor = remember(category) {
+        when (category) {
+            MediaClassifier.CATEGORY_ANIME -> Color(0xFFE11D48)
+            MediaClassifier.CATEGORY_DORAMA -> Color(0xFF7C3AED)
+            MediaClassifier.CATEGORY_MOVIE -> BrandRed
+            else -> Color(0xFF2563EB)
+        }
+    }
+
+    val context = LocalContext.current
+    val imageUrl = remember(media.posterPath, media.backdropPath) {
+        media.posterPath?.ifBlank { null } ?: media.backdropPath
+    }
+    val imageRequest = remember(imageUrl) {
+        ImageRequest.Builder(context)
+            .data(imageUrl)
+            .size(340, 510)
+            .crossfade(false)
+            .build()
+    }
 
     Column(
         modifier = modifier
-            .scale(scale)
+            .graphicsLayer {
+                val s = if (isPressed) 0.96f else 1f
+                scaleX = s
+                scaleY = s
+            }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -84,45 +113,13 @@ fun MediaCard(
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                val imageUrl = media.posterPath?.ifBlank { null } ?: media.backdropPath
-
-                SubcomposeAsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(imageUrl)
-                        .crossfade(true)
-                        .build(),
+                AsyncImage(
+                    model = imageRequest,
                     contentDescription = media.title,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    loading = {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(DarkSurface),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = BrandRed,
-                                strokeWidth = 1.5.dp,
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    },
-                    error = {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color(0xFF18181B)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (media.mediaType == "tv") Icons.Default.Tv else Icons.Default.Movie,
-                                contentDescription = null,
-                                tint = Color.DarkGray,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(DarkSurface)
                 )
 
                 // Dark Bottom Gradient for Poster Depth
@@ -140,12 +137,12 @@ fun MediaCard(
 
                 // Type Badge (Top Left)
                 Surface(
-                    color = BrandRed.copy(alpha = 0.92f),
+                    color = badgeColor.copy(alpha = 0.92f),
                     shape = RoundedCornerShape(bottomEnd = 6.dp),
                     modifier = Modifier.align(Alignment.TopStart)
                 ) {
                     Text(
-                        text = if (media.mediaType == "tv") "SÉRIE" else "FILME",
+                        text = badgeText,
                         color = Color.White,
                         fontSize = 7.5.sp,
                         fontWeight = FontWeight.Black,
@@ -165,6 +162,34 @@ fun MediaCard(
                             .padding(4.dp)
                     )
                 }
+
+                // Restricted +18 Badge (Bottom Left)
+                if (media.restricted18) {
+                    Surface(
+                        color = Color(0xFFEF4444).copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(topEnd = 6.dp),
+                        modifier = Modifier.align(Alignment.BottomStart)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(9.dp)
+                            )
+                            Text(
+                                text = "+18",
+                                color = Color.White,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -183,10 +208,19 @@ fun MediaCard(
         )
 
         // Subtitle: Year & Media Type / Genre
-        val mediaTypeLabel = if (media.mediaType == "tv") "Série" else "Filme"
-        val subtitle = when {
-            media.releaseYear.isNotBlank() -> "${media.releaseYear} • $mediaTypeLabel"
-            else -> mediaTypeLabel
+        val categoryLabel = remember(category) {
+            when (category) {
+                MediaClassifier.CATEGORY_ANIME -> "Anime"
+                MediaClassifier.CATEGORY_DORAMA -> "Dorama"
+                MediaClassifier.CATEGORY_MOVIE -> "Filme"
+                else -> "Série"
+            }
+        }
+        val subtitle = remember(media.releaseYear, categoryLabel) {
+            when {
+                media.releaseYear.isNotBlank() -> "${media.releaseYear} • $categoryLabel"
+                else -> categoryLabel
+            }
         }
 
         Text(

@@ -48,6 +48,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     val currentUser = firebaseService.currentUser
     val activeProfile = firebaseService.activeProfile
     val userProfiles = firebaseService.userProfiles
+    val profilesLoaded = firebaseService.profilesLoaded
 
     private val _profileOpState = MutableStateFlow<ProfileOpState>(ProfileOpState.Idle)
     val profileOpState: StateFlow<ProfileOpState> = _profileOpState.asStateFlow()
@@ -127,7 +128,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         firebaseService.selectProfile(profile)
     }
 
-    fun createProfile(name: String, image: ByteArray? = null) {
+    fun createProfile(name: String, presetUrl: String? = null, image: ByteArray? = null) {
         viewModelScope.launch {
             val trimmedName = name.trim()
             val currentProfiles = userProfiles.value
@@ -160,42 +161,65 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
             _profileOpState.value = ProfileOpState.Loading
 
-            var avatarUrl: String? = null
-            var avatarType = "DEFAULT"
+            android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Iniciando criação de perfil: $trimmedName")
+            var avatarUrl: String? = presetUrl
+            var photoUrl: String? = null
+            var avatarType = if (presetUrl != null) "PRESET" else "DEFAULT"
+            var avatarId = ""
 
-            firebaseService.createProfile(trimmedName, null, "DEFAULT")
+            firebaseService.createProfile(trimmedName, avatarUrl, avatarType, photoUrl, avatarId)
                 .onSuccess { profile ->
+                    android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Perfil criado no Firestore: ${profile.id}")
                     if (image != null) {
+                        android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Enviando foto para Firebase Storage...")
                         firebaseService.uploadProfileAvatar(profile.id, image)
                             .onSuccess { url ->
+                                android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Upload concluído. URL: $url")
                                 avatarUrl = url
+                                photoUrl = url
                                 avatarType = "CUSTOM"
-                                val finalProfile = profile.copy(avatarUrl = avatarUrl, avatarType = avatarType)
+                                val finalProfile = profile.copy(
+                                    avatarUrl = avatarUrl,
+                                    photoUrl = photoUrl,
+                                    avatarType = avatarType,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                                android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Salvando URL no Firestore...")
                                 firebaseService.updateProfile(finalProfile)
                                     .onSuccess {
+                                        android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] ✓ Perfil atualizado com foto.")
                                         firebaseService.selectProfile(finalProfile)
                                         _profileOpState.value = ProfileOpState.Success("Perfil criado com sucesso!", finalProfile)
                                     }
-                                    .onFailure {
+                                    .onFailure { error ->
+                                        android.util.Log.e("PROFILE_PHOTO", "[PROFILE PHOTO ERROR] stage: FIRESTORE_UPDATE, code: ${error.hashCode()}, message: ${error.message}")
                                         firebaseService.selectProfile(profile)
-                                        _profileOpState.value = ProfileOpState.Success("Perfil criado com sucesso!", profile)
+                                        _profileOpState.value = ProfileOpState.Error("Foto enviada, mas não foi possível atualizar o perfil. Tente novamente.")
                                     }
                             }
-                            .onFailure {
-                                _profileOpState.value = ProfileOpState.Error("Não foi possível salvar a foto. Tente novamente.")
+                            .onFailure { error ->
+                                android.util.Log.e("PROFILE_PHOTO", "[PROFILE PHOTO ERROR] stage: STORAGE_UPLOAD, code: ${error.hashCode()}, message: ${error.message}")
+                                _profileOpState.value = ProfileOpState.Error("Não foi possível enviar a foto. Verifique sua conexão e tente novamente.")
                             }
                     } else {
+                        android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] ✓ Perfil criado (sem foto customizada).")
                         firebaseService.selectProfile(profile)
                         _profileOpState.value = ProfileOpState.Success("Perfil criado com sucesso!", profile)
                     }
                 }
                 .onFailure { error ->
+                    android.util.Log.e("PROFILE_PHOTO", "[PROFILE PHOTO ERROR] stage: CREATE_PROFILE_FIRESTORE, message: ${error.message}")
                     _profileOpState.value = ProfileOpState.Error(error.message ?: "Não foi possível criar o perfil. Tente novamente.")
                 }
         }
     }
 
-    fun updateProfile(profile: UserProfile, newName: String, newImage: ByteArray? = null) {
+    fun updateProfile(
+        profile: UserProfile,
+        newName: String,
+        presetUrl: String? = null,
+        newImage: ByteArray? = null
+    ) {
         viewModelScope.launch {
             val trimmedName = newName.trim()
             val currentProfiles = userProfiles.value
@@ -216,17 +240,23 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             _profileOpState.value = ProfileOpState.Loading
+            android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Atualizando perfil: ${profile.id}")
 
-            var finalAvatarUrl = profile.avatarUrl
-            var finalAvatarType = profile.avatarType
+            var finalAvatarUrl = presetUrl ?: profile.avatarUrl
+            var finalPhotoUrl = if (presetUrl != null) null else profile.photoUrl
+            var finalAvatarType = if (presetUrl != null) "PRESET" else profile.avatarType
 
             if (newImage != null) {
+                android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Enviando foto para Firebase Storage...")
                 val uploadRes = firebaseService.uploadProfileAvatar(profile.id, newImage)
                 uploadRes.onSuccess { url ->
+                    android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Upload concluído. URL: $url")
                     finalAvatarUrl = url
+                    finalPhotoUrl = url
                     finalAvatarType = "CUSTOM"
-                }.onFailure {
-                    _profileOpState.value = ProfileOpState.Error("Não foi possível salvar a foto. Tente novamente.")
+                }.onFailure { error ->
+                    android.util.Log.e("PROFILE_PHOTO", "[PROFILE PHOTO ERROR] stage: STORAGE_UPLOAD, message: ${error.message}")
+                    _profileOpState.value = ProfileOpState.Error("Não foi possível enviar a foto. Verifique sua conexão e tente novamente.")
                     return@launch
                 }
             }
@@ -234,18 +264,114 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             val updated = profile.copy(
                 name = trimmedName,
                 avatarUrl = finalAvatarUrl,
+                photoUrl = finalPhotoUrl,
                 avatarType = finalAvatarType,
                 updatedAt = System.currentTimeMillis()
             )
 
+            android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Salvando URL no Firestore...")
             firebaseService.updateProfile(updated)
                 .onSuccess {
+                    android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] ✓ Perfil atualizado.")
                     firebaseService.selectProfile(updated)
                     _profileOpState.value = ProfileOpState.Success("Perfil atualizado com sucesso!", updated)
                 }
                 .onFailure { error ->
-                    _profileOpState.value = ProfileOpState.Error(error.message ?: "Não foi possível atualizar o perfil. Tente novamente.")
+                    android.util.Log.e("PROFILE_PHOTO", "[PROFILE PHOTO ERROR] stage: FIRESTORE_UPDATE, message: ${error.message}")
+                    _profileOpState.value = ProfileOpState.Error("Não foi possível salvar os dados do perfil. Tente novamente.")
                 }
+        }
+    }
+
+    fun updateActiveProfileAvatar(presetUrl: String?, imageBytes: ByteArray?, avatarId: String = "") {
+        val active = activeProfile.value ?: return
+        viewModelScope.launch {
+            _profileOpState.value = ProfileOpState.Loading
+            android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Atualizando avatar do perfil ativo: ${active.id}")
+            
+            var finalAvatarUrl = presetUrl ?: active.avatarUrl
+            var finalPhotoUrl = if (presetUrl != null) null else active.photoUrl
+            var finalAvatarType = if (presetUrl != null) "PRESET" else active.avatarType
+
+            if (imageBytes != null) {
+                android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Enviando foto para Firebase Storage...")
+                val uploadRes = firebaseService.uploadProfileAvatar(active.id, imageBytes)
+                uploadRes.onSuccess { url ->
+                    android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Upload concluído. URL: $url")
+                    finalAvatarUrl = url
+                    finalPhotoUrl = url
+                    finalAvatarType = "CUSTOM"
+                }.onFailure { error ->
+                    android.util.Log.e("PROFILE_PHOTO", "[PROFILE PHOTO ERROR] stage: STORAGE_UPLOAD, message: ${error.message}")
+                    _profileOpState.value = ProfileOpState.Error("Não foi possível enviar a foto. Verifique sua conexão e tente novamente.")
+                    return@launch
+                }
+            }
+
+            val updated = active.copy(
+                avatarUrl = finalAvatarUrl,
+                photoUrl = finalPhotoUrl,
+                avatarType = finalAvatarType,
+                avatarId = if (presetUrl != null) avatarId else active.avatarId,
+                updatedAt = System.currentTimeMillis()
+            )
+
+            android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Salvando URL no Firestore...")
+            firebaseService.updateProfile(updated)
+                .onSuccess {
+                    android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] ✓ Perfil atualizado.")
+                    firebaseService.selectProfile(updated)
+                    _profileOpState.value = ProfileOpState.Success("Foto salva com sucesso!", updated)
+                }
+                .onFailure { error ->
+                    android.util.Log.e("PROFILE_PHOTO", "[PROFILE PHOTO ERROR] stage: FIRESTORE_UPDATE, message: ${error.message}")
+                    _profileOpState.value = ProfileOpState.Error("Foto enviada, mas não foi possível atualizar o perfil. Tente novamente.")
+                }
+        }
+    }
+
+    fun removeActiveProfilePhoto() {
+        val active = activeProfile.value ?: return
+        viewModelScope.launch {
+            _profileOpState.value = ProfileOpState.Loading
+            android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Removendo foto do perfil ativo: ${active.id}")
+            firebaseService.removeProfilePhoto(active)
+                .onSuccess { updated ->
+                    _profileOpState.value = ProfileOpState.Success("Foto de perfil removida com sucesso!", updated)
+                }
+                .onFailure { error ->
+                    _profileOpState.value = ProfileOpState.Error(error.message ?: "Não foi possível remover a foto.")
+                }
+        }
+    }
+
+    fun removeProfilePhoto(profile: UserProfile) {
+        viewModelScope.launch {
+            _profileOpState.value = ProfileOpState.Loading
+            android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Removendo foto do perfil: ${profile.id}")
+            firebaseService.removeProfilePhoto(profile)
+                .onSuccess { updated ->
+                    _profileOpState.value = ProfileOpState.Success("Foto de perfil removida com sucesso!", updated)
+                }
+                .onFailure { error ->
+                    _profileOpState.value = ProfileOpState.Error(error.message ?: "Não foi possível remover a foto.")
+                }
+        }
+    }
+
+    fun downloadProfilePhoto(context: android.content.Context, profile: UserProfile, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val result = com.example.util.ProfilePhotoUtils.savePhotoToDeviceGallery(
+                context = context,
+                imageUrl = profile.photoUrl ?: profile.avatarUrl,
+                imageBytes = null,
+                profileName = profile.name
+            )
+            result.onSuccess { msg ->
+                onResult(msg)
+            }.onFailure { err ->
+                onResult("Erro: ${err.message ?: "Não foi possível baixar a foto."}")
+            }
         }
     }
 

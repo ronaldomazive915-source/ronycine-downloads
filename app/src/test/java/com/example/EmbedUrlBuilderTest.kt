@@ -30,7 +30,7 @@ class EmbedUrlBuilderTest {
             audioSource = EmbedAudioSource.LEGENDADO
         )
         assertEquals(
-            "https://nhdapi.com/embed/movie/1439930",
+            "https://vidsrc.tw/embed/movie/1439930",
             url
         )
     }
@@ -60,7 +60,7 @@ class EmbedUrlBuilderTest {
             audioSource = EmbedAudioSource.LEGENDADO
         )
         assertEquals(
-            "https://nhdapi.com/embed/tv/1399/1/1",
+            "https://vidsrc.tw/embed/tv/1399/1/1",
             url
         )
     }

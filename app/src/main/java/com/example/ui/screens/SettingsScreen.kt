@@ -72,12 +72,14 @@ fun SettingsScreen(
     val newEpisodesEnabled by viewModel.newEpisodesEnabled.collectAsState()
     val autoplayEnabled by viewModel.autoplayEnabled.collectAsState()
     val preferredQuality by viewModel.preferredQuality.collectAsState()
-    val preferredLanguage by viewModel.preferredLanguage.collectAsState()
+    val appLanguage by viewModel.appLanguage.collectAsState()
+    val preferredPlayerLanguage by viewModel.preferredPlayerLanguage.collectAsState()
     val dataSaverEnabled by viewModel.dataSaverEnabled.collectAsState()
 
     // Dialog States
     var showQualityDialog by remember { mutableStateOf(false) }
-    var showLanguageDialog by remember { mutableStateOf(false) }
+    var showAppLanguageDialog by remember { mutableStateOf(false) }
+    var showPlayerLanguageDialog by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showPermissionRationaleDialog by remember { mutableStateOf(false) }
     var showAboutDialog by remember { mutableStateOf(false) }
@@ -154,43 +156,48 @@ fun SettingsScreen(
         )
     }
 
-    // Language Dialog
-    if (showLanguageDialog) {
-        val languages = listOf("Português", "Português (Brasil)", "Automático")
+    // App Language Dialog
+    if (showAppLanguageDialog) {
         AlertDialog(
-            onDismissRequest = { showLanguageDialog = false },
+            onDismissRequest = { showAppLanguageDialog = false },
             containerColor = DarkSurface,
             title = {
-                Text("🌐 Idioma Preferido", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("🌐 " + com.example.util.LanguageManager.t("settings.app_language"), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "Selecione o idioma preferido para áudio/legenda no aplicativo.",
+                        text = com.example.util.LanguageManager.t("settings.lang_auto_note"),
                         color = TextSecondary,
                         fontSize = 12.sp
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    languages.forEach { lang ->
+                    com.example.util.LanguageManager.SUPPORTED_LANGUAGES.forEach { lang ->
+                        val isSelected = appLanguage.equals(lang.code, ignoreCase = true)
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) BrandRed.copy(alpha = 0.15f) else Color.Transparent)
                                 .clickable {
-                                    viewModel.setPreferredLanguage(lang)
-                                    showLanguageDialog = false
+                                    viewModel.setAppLanguage(lang.code)
+                                    showAppLanguageDialog = false
                                 }
-                                .padding(vertical = 10.dp, horizontal = 12.dp),
+                                .padding(vertical = 12.dp, horizontal = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = lang,
-                                color = if (preferredLanguage == lang) BrandRed else Color.White,
-                                fontWeight = if (preferredLanguage == lang) FontWeight.Bold else FontWeight.Medium,
-                                fontSize = 14.sp
-                            )
-                            if (preferredLanguage == lang) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(text = lang.flagEmoji, fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = lang.displayName,
+                                    color = if (isSelected) BrandRed else Color.White,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 14.sp
+                                )
+                            }
+                            if (isSelected) {
                                 Icon(
                                     imageVector = Icons.Default.Check,
                                     contentDescription = null,
@@ -203,8 +210,78 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showLanguageDialog = false }) {
-                    Text("Fechar", color = Color.White)
+                TextButton(onClick = { showAppLanguageDialog = false }) {
+                    Text(com.example.util.LanguageManager.t("action.close"), color = Color.White)
+                }
+            }
+        )
+    }
+
+    // Player Language Dialog
+    if (showPlayerLanguageDialog) {
+        val options = listOf(
+            Triple("auto", com.example.util.LanguageManager.t("settings.player_auto"), com.example.util.LanguageManager.t("settings.player_auto_desc")),
+            Triple("dublado", com.example.util.LanguageManager.t("settings.player_dubbed"), com.example.util.LanguageManager.t("settings.player_dubbed_desc")),
+            Triple("legendado", com.example.util.LanguageManager.t("settings.player_subtitled"), com.example.util.LanguageManager.t("settings.player_subtitled_desc"))
+        )
+
+        AlertDialog(
+            onDismissRequest = { showPlayerLanguageDialog = false },
+            containerColor = DarkSurface,
+            title = {
+                Text("🎬 " + com.example.util.LanguageManager.t("settings.player_language"), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = com.example.util.LanguageManager.t("settings.player_auto_note"),
+                        color = TextSecondary,
+                        fontSize = 12.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    options.forEach { (mode, label, desc) ->
+                        val isSelected = preferredPlayerLanguage.equals(mode, ignoreCase = true)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) BrandRed.copy(alpha = 0.15f) else Color.Transparent)
+                                .clickable {
+                                    viewModel.setPreferredPlayerLanguage(mode)
+                                    showPlayerLanguageDialog = false
+                                }
+                                .padding(vertical = 10.dp, horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = label,
+                                    color = if (isSelected) BrandRed else Color.White,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    fontSize = 14.sp
+                                )
+                                Text(
+                                    text = desc,
+                                    color = TextSecondary,
+                                    fontSize = 11.5.sp
+                                )
+                            }
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Default.Check,
+                                    contentDescription = null,
+                                    tint = BrandRed,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPlayerLanguageDialog = false }) {
+                    Text(com.example.util.LanguageManager.t("action.close"), color = Color.White)
                 }
             }
         )
@@ -858,15 +935,37 @@ fun SettingsScreen(
 
                     HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
 
-                    // 7. Idioma
+                    // 7. Idioma do Aplicativo
+                    val currentLangObj = com.example.util.LanguageManager.SUPPORTED_LANGUAGES.find { it.code.equals(appLanguage, ignoreCase = true) }
+                    val currentLangDisplay = if (currentLangObj != null) "${currentLangObj.flagEmoji} ${currentLangObj.displayName}" else "🇧🇷 Português (Brasil)"
+
                     SettingsValueRow(
                         icon = Icons.Default.Language,
                         iconTint = Color(0xFF38BDF8),
-                        title = "Idioma",
-                        description = "Idioma preferido no aplicativo.",
-                        valueText = preferredLanguage,
-                        onClick = { showLanguageDialog = true },
-                        testTag = "row_language"
+                        title = com.example.util.LanguageManager.t("settings.app_language"),
+                        description = com.example.util.LanguageManager.t("settings.lang_auto_note"),
+                        valueText = currentLangDisplay,
+                        onClick = { showAppLanguageDialog = true },
+                        testTag = "row_app_language"
+                    )
+
+                    HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
+
+                    // 8. Idioma do Player
+                    val playerLangDisplay = when (preferredPlayerLanguage.lowercase()) {
+                        "dublado" -> com.example.util.LanguageManager.t("settings.player_dubbed")
+                        "legendado" -> com.example.util.LanguageManager.t("settings.player_subtitled")
+                        else -> com.example.util.LanguageManager.t("settings.player_auto")
+                    }
+
+                    SettingsValueRow(
+                        icon = Icons.Default.Subtitles,
+                        iconTint = Color(0xFF38BDF8),
+                        title = com.example.util.LanguageManager.t("settings.player_language"),
+                        description = com.example.util.LanguageManager.t("settings.player_auto_note"),
+                        valueText = playerLangDisplay,
+                        onClick = { showPlayerLanguageDialog = true },
+                        testTag = "row_player_language"
                     )
 
                     HorizontalDivider(color = CardBorder, thickness = 0.5.dp)

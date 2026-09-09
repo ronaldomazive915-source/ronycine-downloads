@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -42,6 +43,7 @@ import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.TextSecondary
 import com.example.ui.viewmodel.AuthViewModel
+import kotlinx.coroutines.launch
 import com.example.ui.viewmodel.ProfileOpState
 import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
@@ -56,11 +58,15 @@ fun CreateProfileScreen(
 ) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val coroutineScope = rememberCoroutineScope()
 
     var name by remember { mutableStateOf(profileToEdit?.name ?: "") }
     var localErrorMsg by remember { mutableStateOf<String?>(null) }
+    var selectedPresetUrl by remember { mutableStateOf<String?>(profileToEdit?.avatarUrl) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var selectedImageBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var showActionSheet by remember { mutableStateOf(false) }
+    var showAvatarCatalogSheet by remember { mutableStateOf(false) }
 
     val profileOpState by authViewModel.profileOpState.collectAsState()
 
@@ -80,24 +86,61 @@ fun CreateProfileScreen(
         }
     }
 
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let {
-            selectedImageUri = it
-            try {
-                val inputStream = context.contentResolver.openInputStream(it)
-                val bitmap = BitmapFactory.decodeStream(inputStream)
-                if (bitmap != null) {
-                    val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 512, 512, true)
-                    val outputStream = ByteArrayOutputStream()
-                    scaledBitmap.compress(Bitmap.CompressFormat.WEBP, 80, outputStream)
-                    selectedImageBytes = outputStream.toByteArray()
+    // Main Profile Photo Action Sheet (Camera, Gallery, Catalog, Download, Remove)
+    if (showActionSheet) {
+        com.example.ui.components.ProfilePhotoActionSheet(
+            profile = profileToEdit,
+            currentPreviewBytes = selectedImageBytes,
+            currentPresetUrl = selectedPresetUrl,
+            onDismissRequest = { showActionSheet = false },
+            onPhotoSelected = { bytes ->
+                selectedImageBytes = bytes
+                selectedPresetUrl = null
+                selectedImageUri = null
+            },
+            onOpenPresetCatalog = {
+                showAvatarCatalogSheet = true
+            },
+            onRemovePhoto = {
+                selectedImageBytes = null
+                selectedPresetUrl = null
+                selectedImageUri = null
+                if (isEditing && profileToEdit != null) {
+                    authViewModel.removeProfilePhoto(profileToEdit)
                 }
-            } catch (e: Exception) {
-                localErrorMsg = "Erro ao processar imagem selecionada."
+            },
+            onDownloadPhoto = {
+                val urlToDownload = selectedPresetUrl ?: profileToEdit?.photoUrl ?: profileToEdit?.avatarUrl
+                coroutineScope.launch {
+                    val res = com.example.util.ProfilePhotoUtils.savePhotoToDeviceGallery(
+                        context = context,
+                        imageUrl = urlToDownload,
+                        imageBytes = selectedImageBytes,
+                        profileName = name.ifBlank { "perfil" }
+                    )
+                    res.onSuccess { msg ->
+                        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                    }.onFailure { err ->
+                        android.widget.Toast.makeText(context, err.message ?: "Erro ao salvar foto.", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
-        }
+        )
+    }
+
+    // Preset Avatar Catalog Sheet
+    if (showAvatarCatalogSheet) {
+        com.example.ui.components.AvatarSelectionSheet(
+            currentAvatarUrl = selectedPresetUrl ?: profileToEdit?.avatarUrl,
+            onDismissRequest = { showAvatarCatalogSheet = false },
+            onAvatarSelected = { presetUrl, imageBytes ->
+                selectedPresetUrl = presetUrl
+                selectedImageBytes = imageBytes
+                if (imageBytes != null) {
+                    selectedImageUri = null
+                }
+            }
+        )
     }
 
     Scaffold(
@@ -161,24 +204,40 @@ fun CreateProfileScreen(
                         .border(2.5.dp, BrandRed, CircleShape)
                         .clickable(enabled = profileOpState !is ProfileOpState.Loading) {
                             localErrorMsg = null
-                            launcher.launch("image/*")
+                            showActionSheet = true
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (selectedImageUri != null) {
+                    val displayAvatarUrl = selectedPresetUrl ?: profileToEdit?.avatarUrl
+                    if (displayAvatarUrl != null && selectedImageBytes == null) {
                         AsyncImage(
-                            model = selectedImageUri,
-                            contentDescription = "Foto do perfil selecionada",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop
-                        )
-                    } else if (!profileToEdit?.avatarUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = profileToEdit?.avatarUrl,
+                            model = displayAvatarUrl,
                             contentDescription = "Foto do perfil",
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
                         )
+                    } else if (selectedImageBytes != null) {
+                        // Display the processed byte image
+                        val previewBitmap = remember(selectedImageBytes) {
+                            selectedImageBytes?.let { bytes ->
+                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            }
+                        }
+                        if (previewBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = previewBitmap.asImageBitmap(),
+                                contentDescription = "Foto selecionada",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = null,
+                                tint = Color.Gray,
+                                modifier = Modifier.size(60.dp)
+                            )
+                        }
                     } else {
                         Icon(
                             imageVector = Icons.Default.Person,
@@ -206,13 +265,13 @@ fun CreateProfileScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = if (selectedImageUri != null || !profileToEdit?.avatarUrl.isNullOrBlank()) "Alterar Foto" else "Adicionar Foto",
+                    text = if (selectedPresetUrl != null || selectedImageBytes != null || !profileToEdit?.avatarUrl.isNullOrBlank()) "Alterar Avatar / Foto" else "Escolher Avatar / Foto",
                     color = BrandRed,
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable(enabled = profileOpState !is ProfileOpState.Loading) {
                         localErrorMsg = null
-                        launcher.launch("image/*")
+                        showActionSheet = true
                     }
                 )
 
@@ -319,11 +378,13 @@ fun CreateProfileScreen(
                             authViewModel.updateProfile(
                                 profile = profileToEdit,
                                 newName = trimmed,
+                                presetUrl = selectedPresetUrl,
                                 newImage = selectedImageBytes
                             )
                         } else {
                             authViewModel.createProfile(
                                 name = trimmed,
+                                presetUrl = selectedPresetUrl,
                                 image = selectedImageBytes
                             )
                         }

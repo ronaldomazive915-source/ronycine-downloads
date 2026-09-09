@@ -1,10 +1,13 @@
 package com.example.ui.components
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.*
+import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
@@ -25,20 +28,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkSurface
+import com.example.util.WebViewUtils
 import kotlinx.coroutines.delay
 import java.io.ByteArrayInputStream
 
 /**
  * Audio Source specification:
  * - DUBLADO (Default): mgeb.top
- * - LEGENDADO: nhdapi.com
+ * - LEGENDADO: vidsrc.tw
  */
 enum class EmbedAudioSource(val label: String, val providerDomain: String) {
     DUBLADO("Dublado", "mgeb.top"),
-    LEGENDADO("Legendado", "nhdapi.com")
+    LEGENDADO("Legendado", "vidsrc.tw")
 }
 
 /**
@@ -46,11 +53,11 @@ enum class EmbedAudioSource(val label: String, val providerDomain: String) {
  *
  * Movies:
  *   Dublado:   https://mgeb.top/embed/{tmdb_id}?player=vidstack#color:E50914
- *   Legendado: https://nhdapi.com/embed/movie/{tmdbId}
+ *   Legendado: https://vidsrc.tw/embed/movie/{tmdbId}
  *
  * Series:
  *   Dublado:   https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}?player=vidstack#color:E50914
- *   Legendado: https://nhdapi.com/embed/tv/{tmdbId}/{season}/{episode}
+ *   Legendado: https://vidsrc.tw/embed/tv/{tmdbId}/{season}/{episode}
  *
  * IMDb fallback when tmdbId is not available:
  *   Movie:     https://mgeb.top/embed/{imdb_id}?player=vidstack#color:E50914
@@ -70,40 +77,27 @@ object EmbedUrlBuilder {
         season: Int? = null,
         episode: Int? = null,
         imdbId: String? = null,
-        audioSource: EmbedAudioSource = EmbedAudioSource.DUBLADO
+        audioSource: EmbedAudioSource = EmbedAudioSource.DUBLADO,
+        player: String? = null,
+        color: String? = null,
+        dsLang: String? = null
     ): String {
-        val isMovie = mediaType.equals("movie", ignoreCase = true) || mediaType.equals("filme", ignoreCase = true)
+        val audioLabel = if (audioSource == EmbedAudioSource.DUBLADO) "Dublado" else "Legendado"
+        val effectivePlayer = player ?: DEFAULT_PLAYER
+        val effectiveColor = color ?: RONYCINE_COLOR
 
-        // Rule: Only use IMDb when TMDB ID is not available (> 0) and IMDb ID exists
-        val idSegment = if (tmdbId > 0) {
-            tmdbId.toString()
-        } else if (!imdbId.isNullOrBlank()) {
-            imdbId.trim()
-        } else {
-            return ""
-        }
-
-        return if (isMovie) {
-            when (audioSource) {
-                EmbedAudioSource.DUBLADO -> {
-                    "https://mgeb.top/embed/$idSegment?player=$DEFAULT_PLAYER#color:$RONYCINE_COLOR"
-                }
-                EmbedAudioSource.LEGENDADO -> {
-                    "https://nhdapi.com/embed/movie/$idSegment"
-                }
-            }
-        } else {
-            val s = if (season != null && season > 0) season else 1
-            val e = if (episode != null && episode > 0) episode else 1
-            when (audioSource) {
-                EmbedAudioSource.DUBLADO -> {
-                    "https://mgeb.top/embed/$idSegment/$s/$e?player=$DEFAULT_PLAYER#color:$RONYCINE_COLOR"
-                }
-                EmbedAudioSource.LEGENDADO -> {
-                    "https://nhdapi.com/embed/tv/$idSegment/$s/$e"
-                }
-            }
-        }
+        return com.example.util.PlayerUtils.buildPlayerUrl(
+            provider = if (audioSource == EmbedAudioSource.DUBLADO) "MegaEmbed" else "vidsrc",
+            mediaType = mediaType,
+            tmdbId = if (tmdbId > 0) tmdbId else null,
+            imdbId = imdbId,
+            season = season,
+            episode = episode,
+            audio = audioLabel,
+            player = effectivePlayer,
+            color = effectiveColor,
+            dsLang = dsLang
+        )
     }
 }
 
@@ -127,11 +121,14 @@ fun EmbedPlayer(
     customUrl: String? = null,
     title: String = "RONYCINE",
     isFullscreen: Boolean = false,
+    autoplayEnabled: Boolean = true,
     onToggleFullscreen: (() -> Unit)? = null,
     onAudioSourceChange: ((EmbedAudioSource) -> Unit)? = null,
+    onPlaybackProgress: ((currentTime: Double, duration: Double, event: String) -> Unit)? = null,
     onTryAgain: (() -> Unit)? = null,
     onWebViewCreated: ((WebView?) -> Unit)? = null,
-    onUrlChanged: ((String) -> Unit)? = null
+    onUrlChanged: ((String) -> Unit)? = null,
+    playerLoadId: Int = 0
 ) {
     val context = LocalContext.current
 
@@ -168,8 +165,96 @@ fun EmbedPlayer(
     var retryCount by remember(embedUrl) { mutableIntStateOf(0) }
 
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
-    var customView by remember { mutableStateOf<View?>(null) }
-    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+    var isCustomViewShowing by remember { mutableStateOf(false) }
+    var customViewContainerRef by remember { mutableStateOf<FrameLayout?>(null) }
+    var customViewCallbackRef by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+
+    val showCustomView: (View?, WebChromeClient.CustomViewCallback?) -> Unit = remember(context, embedUrl) {
+        { view, callback ->
+            android.util.Log.i("RONYCINE_FULLSCREEN", "FULLSCREEN_REQUEST: HTML5 custom view requested. Source=$embedUrl")
+            val activity = context as? Activity
+            if (activity != null && view != null) {
+                val decorView = activity.window?.decorView as? ViewGroup
+                if (decorView != null) {
+                    customViewContainerRef?.let { oldContainer ->
+                        try { decorView.removeView(oldContainer) } catch (_: Exception) {}
+                    }
+                    val container = FrameLayout(context).apply {
+                        setBackgroundColor(android.graphics.Color.BLACK)
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        addView(view, ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        ))
+                    }
+                    customViewContainerRef = container
+                    customViewCallbackRef = callback
+                    isCustomViewShowing = true
+
+                    decorView.addView(container)
+                    activeWebView?.visibility = View.INVISIBLE
+
+                    try {
+                        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                        val window = activity.window
+                        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                        insetsController.hide(WindowInsetsCompat.Type.systemBars())
+                        insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    } catch (_: Exception) {}
+
+                    android.util.Log.i("RONYCINE_FULLSCREEN", "FULLSCREEN_ENTER: HTML5 custom view mounted in decorView. isFullscreen=true")
+                    if (!isFullscreen) {
+                        onToggleFullscreen?.invoke()
+                    }
+                }
+            }
+        }
+    }
+
+    val hideCustomView: () -> Unit = remember(context) {
+        {
+            android.util.Log.i("RONYCINE_FULLSCREEN", "FULLSCREEN_EXIT: Hiding HTML5 custom view")
+            val activity = context as? Activity
+            val decorView = activity?.window?.decorView as? ViewGroup
+
+            customViewContainerRef?.let { container ->
+                try {
+                    container.removeAllViews()
+                    decorView?.removeView(container)
+                } catch (_: Exception) {}
+            }
+            customViewContainerRef = null
+
+            try {
+                customViewCallbackRef?.onCustomViewHidden()
+            } catch (_: Exception) {}
+            customViewCallbackRef = null
+            isCustomViewShowing = false
+
+            activeWebView?.visibility = View.VISIBLE
+
+            if (activity != null) {
+                try {
+                    val window = activity.window
+                    val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+                    insetsController.show(WindowInsetsCompat.Type.systemBars())
+                } catch (_: Exception) {}
+            }
+
+            if (isFullscreen) {
+                onToggleFullscreen?.invoke()
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            hideCustomView()
+        }
+    }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
@@ -205,7 +290,7 @@ fun EmbedPlayer(
         }
     }
 
-    // Timeout guard: 20 seconds maximum to prevent endless spinning
+    // Timeout guard and loading dismiss guard: ensures overlay never gets stuck over video
     LaunchedEffect(embedUrl, retryCount, isValidTarget) {
         if (!isValidTarget) {
             isLoading = false
@@ -219,29 +304,44 @@ fun EmbedPlayer(
         errorMessage = null
         loadProgress = 0
 
-        delay(20000L)
+        // Auto-dismiss loading overlay after 3 seconds so the video canvas is never covered
+        delay(3000L)
         if (isLoading && !hasError) {
             isLoading = false
-            hasError = true
-            errorMessage = "O servidor de vídeo demorou para responder. Verifique sua conexão ou tente a outra fonte de áudio."
         }
     }
 
-    // Back handler for fullscreen HTML5 custom video views
-    BackHandler(enabled = customView != null || isFullscreen) {
-        if (customView != null) {
-            customViewCallback?.onCustomViewHidden()
-            customView = null
+    // Back handler for fullscreen HTML5 custom video views or player fullscreen mode
+    BackHandler(enabled = isCustomViewShowing || isFullscreen) {
+        if (isCustomViewShowing) {
+            hideCustomView()
         } else if (isFullscreen) {
+            android.util.Log.i("RONYCINE_FULLSCREEN", "FULLSCREEN_EXIT: Exit triggered by BackHandler")
             onToggleFullscreen?.invoke()
         }
     }
 
     // Keep playback seamlessly running during fullscreen enter/exit
     LaunchedEffect(isFullscreen) {
+        val stateLog = if (isFullscreen) "FULLSCREEN_ENTER" else "FULLSCREEN_EXIT"
+        android.util.Log.i("RONYCINE_FULLSCREEN", "$stateLog: isFullscreen changed to $isFullscreen for url=$embedUrl")
         try {
             activeWebView?.evaluateJavascript(
-                "if (window.__ronycine_notify_transition) { window.__ronycine_notify_transition(); }",
+                """
+                if (window.__ronycine_notify_transition) { window.__ronycine_notify_transition($isFullscreen); }
+                (function() {
+                    var docEl = document.documentElement;
+                    var bodyEl = document.body;
+                    if (docEl) {
+                        if ($isFullscreen) { docEl.classList.add('ronycine-player-fullscreen'); }
+                        else { docEl.classList.remove('ronycine-player-fullscreen'); }
+                    }
+                    if (bodyEl) {
+                        if ($isFullscreen) { bodyEl.classList.add('ronycine-player-fullscreen'); }
+                        else { bodyEl.classList.remove('ronycine-player-fullscreen'); }
+                    }
+                })();
+                """.trimIndent(),
                 null
             )
         } catch (_: Exception) {}
@@ -257,7 +357,7 @@ fun EmbedPlayer(
         // --- ACTIVE WEBVIEW INSTANCE ---
         // key ensures previous WebView is cleanly released and destroyed before new one mounts
         if (!hasError && embedUrl.isNotBlank()) {
-            key(embedUrl, retryCount) {
+            key(embedUrl, retryCount, playerLoadId) {
                 AndroidView(
                     factory = { ctx ->
                         WebView(ctx).apply {
@@ -265,6 +365,10 @@ fun EmbedPlayer(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT
                             )
+
+                            // Mitigation for MESA / RenderNode errors: 
+                            // Software layer on emulators or after crash, avoiding forced LAYER_TYPE_HARDWARE.
+                            WebViewUtils.applySafeLayerType(this, forceSoftware = (retryCount > 0))
 
                             // Third party cookies required for embeds
                             try {
@@ -275,6 +379,7 @@ fun EmbedPlayer(
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
+                                databaseEnabled = true
                                 mediaPlaybackRequiresUserGesture = false
                                 loadsImagesAutomatically = true
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
@@ -293,6 +398,49 @@ fun EmbedPlayer(
                                 setGeolocationEnabled(false)
                                 userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
                             }
+
+                            addJavascriptInterface(object {
+                                @android.webkit.JavascriptInterface
+                                fun onPlayerEvent(event: String, currentTime: Double, duration: Double) {
+                                    android.util.Log.d("RONYCINE_PLAYER", "VIDSRC_EVENT: event=$event, time=$currentTime, dur=$duration")
+                                    onPlaybackProgress?.invoke(currentTime, duration, event)
+                                }
+
+                                @android.webkit.JavascriptInterface
+                                fun onFullscreenStateChanged(isJsFullscreen: Boolean) {
+                                    android.util.Log.i("RONYCINE_FULLSCREEN", "PLAYER_STATE: JS fullscreen change event. isJsFullscreen=$isJsFullscreen")
+                                    if (isJsFullscreen && !isFullscreen) {
+                                        onToggleFullscreen?.invoke()
+                                    }
+                                }
+
+                                @android.webkit.JavascriptInterface
+                                fun requestOrientation(orientationMode: String?) {
+                                    android.util.Log.i("RONYCINE_FULLSCREEN", "JS_ORIENTATION_REQUEST: mode=$orientationMode")
+                                    val activity = context as? Activity ?: return
+                                    activity.runOnUiThread {
+                                        try {
+                                            val mode = orientationMode?.lowercase() ?: ""
+                                            when {
+                                                mode.contains("landscape") -> {
+                                                    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                                }
+                                                mode.contains("portrait") -> {
+                                                    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                                                }
+                                                mode == "toggle" || mode == "rotate" || mode == "change" || mode == "flip" || mode.isEmpty() -> {
+                                                    val currentOrient = activity.resources.configuration.orientation
+                                                    if (currentOrient == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+                                                        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                                                    } else {
+                                                        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                                    }
+                                                }
+                                            }
+                                        } catch (_: Exception) {}
+                                    }
+                                }
+                            }, "RonycineBridge")
 
                             webViewClient = object : WebViewClient() {
                                 private val blockedAdKeywords = listOf(
@@ -376,6 +524,107 @@ fun EmbedPlayer(
                                             (function() {
                                                 if (window.__ronycine_guard) return;
                                                 window.__ronycine_guard = true;
+
+                                                function safeReqOrient(mode) {
+                                                    try {
+                                                        if (window.RonycineBridge && window.RonycineBridge.requestOrientation) {
+                                                            window.RonycineBridge.requestOrientation(String(mode || ''));
+                                                        }
+                                                    } catch(e) {}
+                                                }
+
+                                                if (window.screen && window.screen.orientation) {
+                                                    try {
+                                                        var origLock = window.screen.orientation.lock;
+                                                        window.screen.orientation.lock = function(orient) {
+                                                            safeReqOrient(orient);
+                                                            return Promise.resolve();
+                                                        };
+                                                        if (window.ScreenOrientation && window.ScreenOrientation.prototype) {
+                                                            window.ScreenOrientation.prototype.lock = function(orient) {
+                                                                safeReqOrient(orient);
+                                                                return Promise.resolve();
+                                                            };
+                                                            window.ScreenOrientation.prototype.unlock = function() {
+                                                                return;
+                                                            };
+                                                        }
+                                                        window.screen.orientation.unlock = function() {
+                                                            return;
+                                                        };
+                                                    } catch(e) {}
+                                                }
+
+                                                if (window.screen) {
+                                                    try {
+                                                        window.screen.lockOrientation = function(orient) {
+                                                            safeReqOrient(orient);
+                                                            return true;
+                                                        };
+                                                        window.screen.unlockOrientation = function() { return true; };
+                                                        if (window.screen.webkitLockOrientation) {
+                                                            window.screen.webkitLockOrientation = window.screen.lockOrientation;
+                                                            window.screen.webkitUnlockOrientation = window.screen.unlockOrientation;
+                                                        }
+                                                    } catch(e) {}
+                                                }
+                                                
+                                                try {
+                                                    var style = document.createElement('style');
+                                                    style.id = 'ronycine-fullscreen-style';
+                                                    style.innerHTML = `
+                                                        html, body {
+                                                            width: 100% !important;
+                                                            height: 100% !important;
+                                                            margin: 0 !important;
+                                                            padding: 0 !important;
+                                                            background: #000000 !important;
+                                                            transition: none !important;
+                                                            animation: none !important;
+                                                            transform: none !important;
+                                                        }
+                                                        iframe, video {
+                                                            width: 100% !important;
+                                                            height: 100% !important;
+                                                            border: none !important;
+                                                            margin: 0 !important;
+                                                            padding: 0 !important;
+                                                            display: block !important;
+                                                            box-sizing: border-box !important;
+                                                            transition: none !important;
+                                                            animation: none !important;
+                                                            transform: none !important;
+                                                        }
+                                                        .ronycine-player-fullscreen {
+                                                            width: 100vw !important;
+                                                            height: 100dvh !important;
+                                                            min-width: 100vw !important;
+                                                            min-height: 100dvh !important;
+                                                            max-width: 100vw !important;
+                                                            max-height: 100dvh !important;
+                                                            background: #000000 !important;
+                                                            position: relative !important;
+                                                            overflow: hidden !important;
+                                                            transition: none !important;
+                                                            animation: none !important;
+                                                            transform: none !important;
+                                                        }
+                                                        .ronycine-player-fullscreen video,
+                                                        .ronycine-player-fullscreen iframe {
+                                                            width: 100% !important;
+                                                            height: 100% !important;
+                                                            border: none !important;
+                                                            margin: 0 !important;
+                                                            padding: 0 !important;
+                                                            display: block !important;
+                                                            transition: none !important;
+                                                            animation: none !important;
+                                                            transform: none !important;
+                                                        }
+                                                    `;
+                                                    document.head.appendChild(style);
+                                                } catch(e) {}
+
                                                 var lastState = false;
                                                 var isResizing = false;
                                                 var resizeTimer = null;
@@ -411,7 +660,7 @@ fun EmbedPlayer(
                                                     });
                                                 }
                                                 
-                                                window.__ronycine_notify_transition = function() {
+                                                window.__ronycine_notify_transition = function(isFS) {
                                                     isResizing = true;
                                                     getVideos().forEach(function(v) {
                                                         if (!v.paused) lastState = true;
@@ -424,18 +673,65 @@ fun EmbedPlayer(
                                                                 if (v.paused) v.play().catch(function() {});
                                                             });
                                                         }
-                                                    }, 1500);
+                                                    }, 300);
                                                 };
                                                 
                                                 setInterval(function() {
                                                     getVideos().forEach(setupVideo);
                                                 }, 1000);
                                                 
+                                                function handleFsChange() {
+                                                    var isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+                                                    if (window.RonycineBridge && window.RonycineBridge.onFullscreenStateChanged) {
+                                                        window.RonycineBridge.onFullscreenStateChanged(isFs);
+                                                    }
+                                                }
+                                                document.addEventListener('fullscreenchange', handleFsChange);
+                                                document.addEventListener('webkitfullscreenchange', handleFsChange);
+
                                                 window.addEventListener('resize', function() {
                                                     window.__ronycine_notify_transition();
                                                 });
                                                 window.addEventListener('orientationchange', function() {
                                                     window.__ronycine_notify_transition();
+                                                });
+                                                
+                                                // Autoplay trigger if enabled
+                                                if ($autoplayEnabled) {
+                                                    setTimeout(function() {
+                                                        getVideos().forEach(function(v) {
+                                                            if (v.paused) {
+                                                                var p = v.play();
+                                                                if (p && p.catch) p.catch(function(err) {});
+                                                            }
+                                                        });
+                                                        var playBtn = document.querySelector('.vds-play-button, .play-button, .vjs-play-control, button[aria-label*="Play"], button[aria-label*="play"]');
+                                                        if (playBtn) { try { playBtn.click(); } catch(e) {} }
+                                                    }, 800);
+                                                }
+
+                                                // VidSrc Player Events Listener (window.postMessage)
+                                                window.addEventListener('message', function(event) {
+                                                    try {
+                                                        var msg = event.data;
+                                                        if (typeof msg === 'string') {
+                                                            try { msg = JSON.parse(msg); } catch(e) {}
+                                                        }
+                                                        if (msg) {
+                                                            var type = msg.type || msg.event || msg.action || '';
+                                                            var time = Number(msg.currentTime || msg.time || msg.progress || msg.position || 0);
+                                                            var dur = Number(msg.duration || msg.total || 0);
+                                                            if (typeof type === 'string') {
+                                                                var evLower = type.toLowerCase();
+                                                                if (evLower === 'playing' || evLower === 'paused' || evLower === 'completed' || evLower === 'seeked' || evLower === 'player_event') {
+                                                                    var subEvent = (evLower === 'player_event' && msg.event) ? String(msg.event).toLowerCase() : evLower;
+                                                                    if (window.RonycineBridge && window.RonycineBridge.onPlayerEvent) {
+                                                                        window.RonycineBridge.onPlayerEvent(subEvent, time, dur);
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    } catch(e) {}
                                                 });
                                             })();
                                             """.trimIndent(),
@@ -474,24 +770,39 @@ fun EmbedPlayer(
                                     view: WebView?,
                                     detail: RenderProcessGoneDetail?
                                 ): Boolean {
-                                    android.util.Log.w("RONYCINE_PLAYER", "PLAYER_CRASH: WebView render process crashed, safely recovering...")
-                                    try {
-                                        view?.stopLoading()
-                                        (view?.parent as? ViewGroup)?.removeView(view)
-                                        view?.destroy()
-                                    } catch (_: Exception) {}
+                                    android.util.Log.w(
+                                        "RONYCINE_PLAYER",
+                                        "PLAYER_CRASH: WebView render process crashed (didCrash=${detail?.didCrash()}), recovering safely..."
+                                    )
+                                    WebViewUtils.safeDestroy(view)
 
                                     if (activeWebView == view) {
                                         activeWebView = null
                                     }
-                                    isLoading = false
-                                    hasError = true
-                                    errorMessage = "O reprodutor encerrou inesperadamente. Clique em Recarregar ou tente outro servidor."
+                                    
+                                    // Automatic recovery: reload if crash count is low
+                                    if (retryCount < 2) {
+                                        retryCount++
+                                    } else {
+                                        isLoading = false
+                                        hasError = true
+                                        errorMessage = "O reprodutor encerrou inesperadamente. Clique em Recarregar ou tente outro servidor."
+                                    }
                                     return true
                                 }
                             }
 
                             webChromeClient = object : WebChromeClient() {
+                                override fun getDefaultVideoPoster(): Bitmap? {
+                                    return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                                }
+
+                                override fun onPermissionRequest(request: PermissionRequest?) {
+                                    try {
+                                        request?.grant(request.resources)
+                                    } catch (_: Exception) {}
+                                }
+
                                 override fun onCreateWindow(
                                     view: WebView?,
                                     isDialog: Boolean,
@@ -505,28 +816,19 @@ fun EmbedPlayer(
                                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                     super.onProgressChanged(view, newProgress)
                                     loadProgress = newProgress
-                                    if (newProgress >= 85) {
+                                    if (newProgress >= 40) {
                                         isLoading = false
                                     }
                                 }
 
                                 override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
                                     super.onShowCustomView(view, callback)
-                                    customView = view
-                                    customViewCallback = callback
-                                    if (!isFullscreen) {
-                                        onToggleFullscreen?.invoke()
-                                    }
+                                    showCustomView(view, callback)
                                 }
 
                                 override fun onHideCustomView() {
                                     super.onHideCustomView()
-                                    customView = null
-                                    customViewCallback?.onCustomViewHidden()
-                                    customViewCallback = null
-                                    if (isFullscreen) {
-                                        onToggleFullscreen?.invoke()
-                                    }
+                                    hideCustomView()
                                 }
                             }
 
@@ -541,18 +843,7 @@ fun EmbedPlayer(
                     },
                     onRelease = { webView ->
                         onWebViewCreated?.invoke(null)
-                        try {
-                            webView.stopLoading()
-                            webView.webChromeClient = null
-                            webView.webViewClient = object : WebViewClient() {
-                                override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean = true
-                            }
-                            webView.loadUrl("about:blank")
-                            webView.onPause()
-                            webView.pauseTimers()
-                            webView.removeAllViews()
-                            webView.destroy()
-                        } catch (_: Exception) {}
+                        WebViewUtils.safeDestroy(webView)
                         if (activeWebView == webView) {
                             activeWebView = null
                         }
@@ -560,18 +851,6 @@ fun EmbedPlayer(
                     modifier = Modifier.fillMaxSize()
                 )
             }
-        }
-
-        // --- FULLSCREEN HTML5 CUSTOM VIEW OVERLAY ---
-        if (customView != null) {
-            AndroidView(
-                factory = { ctx ->
-                    val cv = customView
-                    (cv?.parent as? ViewGroup)?.removeView(cv)
-                    cv ?: View(ctx)
-                },
-                modifier = Modifier.fillMaxSize()
-            )
         }
 
         // --- PROFESSIONAL COMPACT LOADING STATE ---

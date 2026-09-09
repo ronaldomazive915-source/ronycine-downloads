@@ -12,6 +12,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.example.util.WebViewUtils
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -447,12 +448,29 @@ fun HeroTrailerPlayer(
         androidx.compose.runtime.key(activeYoutubeId, rendererCrashCount) {
             AndroidView(
                 factory = { ctx ->
+                    // Pre-create WebView Code Cache directories to prevent Chromium opendir errors
+                    try {
+                        val basePaths = listOf(
+                            "WebView/Default/HTTP Cache/Code Cache",
+                            "webview/Default/HTTP Cache/Code Cache",
+                            "WebView/Default/HTTP Cache/Code Cache/js",
+                            "WebView/Default/HTTP Cache/Code Cache/wasm",
+                            "webview/Default/HTTP Cache/Code Cache/js",
+                            "webview/Default/HTTP Cache/Code Cache/wasm"
+                        )
+                        basePaths.forEach { p ->
+                            val dir = java.io.File(ctx.cacheDir, p)
+                            if (!dir.exists()) dir.mkdirs()
+                        }
+                    } catch (_: Exception) {}
+
                     WebView(ctx).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                         setBackgroundColor(android.graphics.Color.BLACK)
+                        WebViewUtils.applySafeLayerType(this)
 
                         settings.apply {
                             javaScriptEnabled = true
@@ -592,11 +610,7 @@ fun HeroTrailerPlayer(
                                 detail: android.webkit.RenderProcessGoneDetail?
                             ): Boolean {
                                 Log.w("TRAILER", "[TRAILER] WebView render process crash detected, recovering safely...")
-                                try {
-                                    view?.stopLoading()
-                                    (view?.parent as? ViewGroup)?.removeView(view)
-                                    view?.destroy()
-                                } catch (_: Exception) {}
+                                WebViewUtils.safeDestroy(view)
                                 webViewRef = null
                                 playbackState = TrailerPlaybackState.ERROR
                                 val errInfo = TrailerErrorInfo(
@@ -623,17 +637,7 @@ fun HeroTrailerPlayer(
                     webViewRef = wv
                 },
                 onRelease = { wv ->
-                    try {
-                        wv.stopLoading()
-                        wv.webChromeClient = null
-                        wv.webViewClient = object : WebViewClient() {
-                            override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean = true
-                        }
-                        wv.loadUrl("about:blank")
-                        wv.onPause()
-                        wv.removeAllViews()
-                        wv.destroy()
-                    } catch (_: Exception) {}
+                    WebViewUtils.safeDestroy(wv)
                     webViewRef = null
                 },
                 modifier = Modifier.fillMaxSize()

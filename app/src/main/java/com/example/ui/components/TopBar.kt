@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
@@ -28,16 +29,21 @@ import com.example.ui.theme.TextSecondary
 
 /**
  * Modern, clean, professional streaming TopBar for RONYCINE.
- * Structure: ☰   [ 🔍 Pesquisar... ]   🔔   👤
+ * Structure: ☰   [ 🔍 Pesquisar... ✕ ]   🔔   👤
  * Removed all title/logo text to keep a clean, modern streaming header.
  */
 @Composable
 fun TopBar(
-    onNavigateToSearch: () -> Unit,
+    searchQuery: String,
+    onSearchQueryChanged: (String) -> Unit,
+    onNavigateToSearch: () -> Unit = {},
+    currentRoute: String,
     onNavigateToProfile: () -> Unit,
     onNavigateToRequest: () -> Unit,
+    activeProfile: com.example.data.remote.UserProfile? = null,
     onNavigateToNotifications: () -> Unit = {},
     onMenuClick: (() -> Unit)? = null,
+    onClearSearch: (() -> Unit)? = null,
     unreadNotificationCount: Int = 0,
     syncStatus: com.example.data.remote.SyncStatus? = null,
     modifier: Modifier = Modifier
@@ -66,40 +72,64 @@ fun TopBar(
             )
         }
 
-        // 2. Center: Compact, Sleek, Rounded Search Bar [ 🔍 Pesquisar ]
-        Surface(
-            onClick = onNavigateToSearch,
-            shape = RoundedCornerShape(20.dp),
-            color = DarkSurface,
-            border = BorderStroke(0.8.dp, CardBorder.copy(alpha = 0.8f)),
-            modifier = Modifier
-                .weight(1f)
-                .padding(horizontal = 8.dp)
-                .height(38.dp)
-                .testTag("topbar_search_button")
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+        // 2. Center: Search Input
+        TextField(
+            value = searchQuery,
+            onValueChange = { newQuery ->
+                onSearchQueryChanged(newQuery)
+            },
+            placeholder = {
+                Text(
+                    text = com.example.util.stringI18n("search.placeholder"),
+                    color = TextSecondary,
+                    fontSize = 12.5.sp
+                )
+            },
+            leadingIcon = {
                 Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = "Pesquisar",
                     tint = TextSecondary,
                     modifier = Modifier.size(17.dp)
                 )
-                Text(
-                    text = "Pesquisar filmes, séries...",
-                    color = TextSecondary,
-                    fontSize = 12.5.sp,
-                    maxLines = 1,
-                    fontWeight = FontWeight.Normal
-                )
-            }
-        }
+            },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(
+                        onClick = {
+                            if (onClearSearch != null) {
+                                onClearSearch()
+                            } else {
+                                onSearchQueryChanged("")
+                            }
+                        },
+                        modifier = Modifier.size(28.dp).testTag("topbar_clear_search_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Limpar Pesquisa",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            },
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = DarkSurface,
+                unfocusedContainerColor = DarkSurface,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            shape = RoundedCornerShape(20.dp),
+            singleLine = true,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 8.dp)
+                .height(48.dp)
+                .testTag("topbar_search_input")
+        )
 
         // 3. Right Actions: Notifications (🔔) + Profile (👤)
         Row(
@@ -139,22 +169,15 @@ fun TopBar(
                 }
             }
 
-            // Profile Button (👤)
-            IconButton(
-                onClick = onNavigateToProfile,
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(DarkSurface)
-                    .testTag("topbar_profile_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Person,
-                    contentDescription = "Perfil",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+            // Profile Button (Avatar / 👤)
+            ProfileAvatar(
+                profile = activeProfile,
+                size = 34.dp,
+                borderWidth = 1.5.dp,
+                borderColor = BrandRed,
+                testTag = "topbar_profile_button",
+                onClick = onNavigateToProfile
+            )
         }
     }
 }

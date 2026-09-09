@@ -19,6 +19,8 @@ data class TmdbMediaDto(
     @Json(name = "original_title") val originalTitle: String? = null,
     @Json(name = "original_name") val originalName: String? = null,
     @Json(name = "media_type") val mediaType: String? = null,
+    @Json(name = "original_language") val originalLanguage: String? = null,
+    @Json(name = "origin_country") val originCountry: List<String>? = emptyList(),
     @Json(name = "poster_path") val posterPath: String? = null,
     @Json(name = "backdrop_path") val backdropPath: String? = null,
     @Json(name = "overview") val overview: String? = "",
@@ -26,6 +28,7 @@ data class TmdbMediaDto(
     @Json(name = "first_air_date") val firstAirDate: String? = null,
     @Json(name = "vote_average") val voteAverage: Double? = 0.0,
     @Json(name = "genre_ids") val genreIds: List<Int>? = emptyList(),
+    @Json(name = "genres") val genres: List<TmdbGenreDto>? = emptyList(),
     @Json(name = "runtime") val runtime: Int? = null,
     @Json(name = "number_of_seasons") val numberOfSeasons: Int? = null,
     @Json(name = "number_of_episodes") val numberOfEpisodes: Int? = null,
@@ -85,3 +88,10 @@ data class TmdbEpisodeDto(
     @Json(name = "still_path") val stillPath: String? = null,
     @Json(name = "runtime") val runtime: Int? = 45
 )
+
+@JsonClass(generateAdapter = true)
+data class TmdbGenreDto(
+    @Json(name = "id") val id: Int,
+    @Json(name = "name") val name: String
+)
+

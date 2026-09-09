@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.remote.UserProfile
+import com.example.ui.components.ProfileAvatar
+import com.example.ui.components.VerifiedBadge
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
@@ -450,51 +452,14 @@ private fun CompactProfileCard(
             contentAlignment = Alignment.Center
         ) {
             // Profile Avatar Container
-            Surface(
-                modifier = Modifier
-                    .size(82.dp)
-                    .shadow(
-                        elevation = if (isSelected) 12.dp else 4.dp,
-                        shape = RoundedCornerShape(14.dp),
-                        ambientColor = if (isSelected) BrandRed else Color.Black,
-                        spotColor = if (isSelected) BrandRed else Color.Black
-                    ),
-                shape = RoundedCornerShape(14.dp),
-                color = DarkSurface,
-                border = BorderStroke(2.dp, if (isSelected || isEditMode) borderColor else CardBorder)
-            ) {
-                if (!profile.avatarUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = profile.avatarUrl,
-                        contentDescription = profile.name,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(14.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.linearGradient(
-                                    colors = listOf(
-                                        BrandRed.copy(alpha = 0.35f),
-                                        DarkSurface
-                                    )
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = BrandRed,
-                            modifier = Modifier.size(42.dp)
-                        )
-                    }
-                }
-            }
+            ProfileAvatar(
+                profile = profile,
+                size = 82.dp,
+                borderWidth = 2.dp,
+                borderColor = if (isSelected || isEditMode) borderColor else CardBorder,
+                showCameraBadge = false,
+                testTag = "profile_avatar_img_${profile.id}"
+            )
 
             // Edit Mode Overlay Icon
             if (isEditMode) {
@@ -543,15 +508,26 @@ private fun CompactProfileCard(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Text(
-            text = profile.name,
-            color = if (isSelected) BrandRed else Color.White,
-            fontSize = 13.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+        ) {
+            Text(
+                text = profile.name,
+                color = if (isSelected) BrandRed else Color.White,
+                fontSize = 13.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            if (profile.isVerified) {
+                Spacer(modifier = Modifier.width(3.dp))
+                VerifiedBadge(size = 14.dp, showToastOnClick = false)
+            }
+        }
     }
 }
 

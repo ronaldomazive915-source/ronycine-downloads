@@ -96,6 +96,21 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == uid;
       allow read: if isFounder(); // Founder can see all profiles
       allow update: if isFounder(); // Founder can update any profile (e.g. roles)
+
+      match /profiles/{profileId} {
+        allow read: if request.auth != null;
+        
+        // Prevent ordinary users from setting isVerified to true on creation
+        allow create: if request.auth != null && request.auth.uid == uid 
+                      && (!request.resource.data.keys().contains('isVerified') || request.resource.data.isVerified == false);
+                      
+        // Prevent ordinary users from tampering with isVerified on update
+        allow update: if request.auth != null && request.auth.uid == uid 
+                      && (!request.resource.data.keys().contains('isVerified') || request.resource.data.isVerified == resource.data.isVerified);
+                      
+        // Founder override
+        allow write: if isFounder();
+      }
     }
 
     // Audit logs
@@ -103,6 +118,22 @@ service cloud.firestore {
       allow read: if isFounder();
       allow create: if request.auth != null; // Any logged user can create logs if needed, but usually it's admin
       allow update, delete: if isFounder();
+    }
+
+    // Community Messages rules
+    match /community_messages/{messageId} {
+      allow read: if true; // anyone can read public messages
+      allow create: if request.auth != null 
+                    && request.resource.data.userId == request.auth.uid
+                    && (!request.resource.data.keys().contains('isVerified') || request.resource.data.isVerified == false || isFounder());
+      allow update: if isFounder(); // only founder can moderate/delete
+      allow delete: if isFounder();
+    }
+
+    // Community Moderation rules (Bans, Mutes)
+    match /community_moderation/{document=**} {
+      allow read: if true; // anyone can check their ban/mute status
+      allow write: if isFounder(); // only founder can write (ban/mute/unban/unmute)
     }
 
     // Default deny all other collections

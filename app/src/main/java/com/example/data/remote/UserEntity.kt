@@ -8,6 +8,7 @@ data class UserEntity(
     val usernameNormalized: String = "", // Formato para índice e busca, ex: "ronaldo"
     val photoUrl: String? = null,
     val role: String = "USER", // USER, ADMIN, FOUNDER
+    val isVerified: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val lastLoginAt: Long = System.currentTimeMillis(),

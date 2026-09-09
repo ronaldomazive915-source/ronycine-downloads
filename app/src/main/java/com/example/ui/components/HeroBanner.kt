@@ -46,7 +46,8 @@ fun HeroBanner(
     isInMyList: Boolean,
     onWatchClick: (MediaEntity) -> Unit,
     onMyListToggle: (MediaEntity) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isVisible: Boolean = true
 ) {
     if (featuredList.isEmpty()) return
 
@@ -55,10 +56,10 @@ fun HeroBanner(
     val media = currentItem.media
     val featured = currentItem.featured
 
-    // Auto-advance carousel every 7 seconds if more than 1 item and no active video interaction
+    // Auto-advance carousel every 7 seconds if more than 1 item, visible, and no active video interaction
     var isUserInteracting by remember { mutableStateOf(false) }
-    LaunchedEffect(validIndex, featuredList.size, isUserInteracting) {
-        if (featuredList.size > 1 && !isUserInteracting) {
+    LaunchedEffect(validIndex, featuredList.size, isUserInteracting, isVisible) {
+        if (isVisible && featuredList.size > 1 && !isUserInteracting) {
             delay(7000)
             val next = (validIndex + 1) % featuredList.size
             onSelectIndex(next)
@@ -137,7 +138,7 @@ fun HeroBanner(
         }
 
         // Embedded Trailer Video Layer (auto-play disabled on emulators to prevent crashes)
-        val shouldPlayTrailer = if (forcePlayTrailer) true else (featured.autoPlayTrailer && !isRunningOnEmulator)
+        val shouldPlayTrailer = isVisible && (if (forcePlayTrailer) true else (featured.autoPlayTrailer && !isRunningOnEmulator))
         if (youtubeId != null && shouldPlayTrailer && !isTrailerError && showTrailerByDelay) {
             val playerAlpha by animateFloatAsState(
                 targetValue = if (isTrailerReady) 1f else 0f,
@@ -248,7 +249,7 @@ fun HeroBanner(
                     shape = RoundedCornerShape(4.dp)
                 ) {
                     Text(
-                        text = "DESTAQUE",
+                        text = com.example.util.stringI18n("admin.highlights").uppercase(),
                         color = Color.White,
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.Black,
@@ -262,7 +263,7 @@ fun HeroBanner(
                     shape = RoundedCornerShape(4.dp)
                 ) {
                     Text(
-                        text = if (media.mediaType == "tv") "SÉRIE" else "FILME",
+                        text = if (media.mediaType == "tv") com.example.util.stringI18n("home.series").uppercase() else com.example.util.stringI18n("home.movies").uppercase(),
                         color = Color.White,
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.Bold,
@@ -361,7 +362,7 @@ fun HeroBanner(
                                 modifier = Modifier.size(18.dp)
                             )
                             Text(
-                                text = "Assistir",
+                                text = com.example.util.stringI18n("action.watch"),
                                 color = Color.White,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold

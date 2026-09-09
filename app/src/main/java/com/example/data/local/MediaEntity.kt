@@ -17,6 +17,9 @@ data class MediaEntity(
     val title: String,
     val originalTitle: String = "",
     val mediaType: String, // "movie" or "tv"
+    val mediaCategory: String = "", // "anime", "dorama", "movie", "series", "live_tv"
+    val originalLanguage: String = "",
+    val originCountry: String = "",
     val posterPath: String?,
     val backdropPath: String?,
     val overview: String,
@@ -30,6 +33,9 @@ data class MediaEntity(
     val episodesCount: Int = 1,
     val trailerKey: String? = null,
     val isHeroFeatured: Boolean = false,
+    val restricted18: Boolean = false,
+    val restricted18UpdatedAt: Long = 0L,
+    val restricted18UpdatedBy: String = "",
     val addedAt: Long = System.currentTimeMillis()
 )
 

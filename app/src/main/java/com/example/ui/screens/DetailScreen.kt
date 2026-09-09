@@ -2,8 +2,7 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -116,19 +115,11 @@ fun DetailScreen(
         else if (showFullCastModal) showFullCastModal = false
     }
 
-    if (media == null) {
-        Box(
+    if (media == null || media?.title.isNullOrBlank()) {
+        DetailScreenSkeleton(
+            onNavigateBack = onNavigateBack,
             modifier = modifier
-                .fillMaxSize()
-                .background(DarkBackground),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator(color = BrandRed, strokeWidth = 3.dp, modifier = Modifier.size(36.dp))
-                Spacer(modifier = Modifier.height(12.dp))
-                Text("Carregando detalhes...", color = TextSecondary, fontSize = 13.sp)
-            }
-        }
+        )
         return
     }
 
@@ -534,6 +525,28 @@ fun DetailScreen(
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
+                            }
+
+                            if (item.restricted18) {
+                                Surface(
+                                    color = Color(0xFFEF4444).copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(4.dp),
+                                    border = BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f))
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Lock, null, tint = Color(0xFFEF4444), modifier = Modifier.size(10.dp))
+                                        Text(
+                                            text = "18+",
+                                            color = Color(0xFFEF4444),
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -1627,6 +1640,182 @@ fun ModernEpisodeCard(
                             .fillMaxWidth(fraction = ((epDownload?.progress ?: 0) / 100f).coerceIn(0f, 1f))
                             .fillMaxHeight()
                             .background(Color(0xFF38BDF8))
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DetailScreenSkeleton(
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "skeleton_transition")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.55f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "skeleton_alpha"
+    )
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+    ) {
+        // 1. Backdrop Skeleton Header
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(230.dp)
+                    .background(Color(0xFF1E1E24).copy(alpha = alpha))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.5f),
+                                    Color.Transparent,
+                                    DarkBackground
+                                )
+                            )
+                        )
+                )
+
+                // Functional Back Arrow Button
+                IconButton(
+                    onClick = onNavigateBack,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .statusBarsPadding()
+                        .padding(12.dp)
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.65f))
+                        .border(1.dp, CardBorder.copy(alpha = 0.5f), CircleShape)
+                        .testTag("detail_skeleton_back_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Voltar",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+
+        // 2. Poster & Meta Skeleton Block
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Poster Box Skeleton
+                    Box(
+                        modifier = Modifier
+                            .width(115.dp)
+                            .height(165.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF22222A).copy(alpha = alpha))
+                    )
+
+                    // Title + Badges Skeleton
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.85f)
+                                .height(22.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF282832).copy(alpha = alpha))
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.5f)
+                                .height(16.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(Color(0xFF22222A).copy(alpha = alpha))
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp, 20.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF22222A).copy(alpha = alpha))
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(50.dp, 20.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFF22222A).copy(alpha = alpha))
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Action Buttons Skeleton
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(BrandRed.copy(alpha = 0.7f))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF22222A).copy(alpha = alpha))
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Synopsis Lines Skeleton
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Color(0xFF22222A).copy(alpha = alpha))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.92f)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Color(0xFF22222A).copy(alpha = alpha))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.7f)
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(3.dp))
+                            .background(Color(0xFF22222A).copy(alpha = alpha))
                     )
                 }
             }

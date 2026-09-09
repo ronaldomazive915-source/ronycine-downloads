@@ -1,10 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -12,7 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,69 +52,54 @@ fun CircularRatingBadge(
     val percentage = remember(rating) { convertRatingToPercentage(rating) }
     if (percentage <= 0) return
 
-    val progress = (percentage / 100f).coerceIn(0f, 1f)
+    val progress = remember(percentage) { (percentage / 100f).coerceIn(0f, 1f) }
 
-    var isVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(rating) {
-        isVisible = true
+    val ratingColor = remember(percentage) {
+        when {
+            percentage >= 75 -> Color(0xFF10B981) // Green (Alta)
+            percentage >= 60 -> Color(0xFFF59E0B) // Amber/Yellow (Média)
+            else -> Color(0xFFEF4444)             // Red (Baixa)
+        }
     }
 
-    val animatedProgress by animateFloatAsState(
-        targetValue = if (isVisible) progress else 0f,
-        animationSpec = tween(durationMillis = 500),
-        label = "rating_progress_anim"
-    )
+    val trackColor = remember(ratingColor) { ratingColor.copy(alpha = 0.22f) }
 
-    val ratingColor = when {
-        percentage >= 75 -> Color(0xFF10B981) // Green (Alta)
-        percentage >= 60 -> Color(0xFFF59E0B) // Amber/Yellow (Média)
-        else -> Color(0xFFEF4444)             // Red (Baixa)
-    }
-
-    val trackColor = ratingColor.copy(alpha = 0.22f)
-
-    AnimatedVisibility(
-        visible = isVisible,
-        enter = fadeIn(tween(350)) + scaleIn(tween(350), initialScale = 0.85f),
+    Box(
         modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(Color(0xE608080C)),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .size(size)
-                .clip(CircleShape)
-                .background(Color(0xE608080C)),
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(modifier = Modifier.size(size - 2.dp)) {
-                val strokePx = strokeWidth.toPx()
-                val canvasSize = this.size.minDimension
-                val radius = (canvasSize - strokePx) / 2f
+        Canvas(modifier = Modifier.size(size - 2.dp)) {
+            val strokePx = strokeWidth.toPx()
+            val canvasSize = this.size.minDimension
+            val radius = (canvasSize - strokePx) / 2f
 
-                // Background Track Circle
-                drawCircle(
-                    color = trackColor,
-                    radius = radius,
-                    style = Stroke(width = strokePx)
-                )
+            // Background Track Circle
+            drawCircle(
+                color = trackColor,
+                radius = radius,
+                style = Stroke(width = strokePx)
+            )
 
-                // Progress Arc
-                drawArc(
-                    color = ratingColor,
-                    startAngle = -90f,
-                    sweepAngle = 360f * animatedProgress,
-                    useCenter = false,
-                    style = Stroke(width = strokePx, cap = StrokeCap.Round)
-                )
-            }
-
-            Text(
-                text = if (showPercentSign) "$percentage%" else "$percentage",
-                color = Color.White,
-                fontSize = textSize.sp,
-                fontWeight = FontWeight.Black,
-                letterSpacing = (-0.5).sp
+            // Progress Arc
+            drawArc(
+                color = ratingColor,
+                startAngle = -90f,
+                sweepAngle = 360f * progress,
+                useCenter = false,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round)
             )
         }
+
+        Text(
+            text = if (showPercentSign) "$percentage%" else "$percentage",
+            color = Color.White,
+            fontSize = textSize.sp,
+            fontWeight = FontWeight.Black,
+            letterSpacing = (-0.5).sp
+        )
     }
 }
 
