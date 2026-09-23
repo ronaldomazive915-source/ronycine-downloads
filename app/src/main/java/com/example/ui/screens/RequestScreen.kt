@@ -29,6 +29,7 @@ import com.example.data.local.MediaEntity
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.viewmodel.MainViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -115,7 +116,7 @@ fun RequestScreen(
 
             if (isSearching) {
                 Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = BrandRed)
+                    RonycineSmileLoader(color = BrandRed, size = 32.dp)
                 }
             }
 
@@ -296,10 +297,9 @@ fun RequestCard(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    color = Color.White,
-                                    strokeWidth = 2.dp
+                                RonycineSmileLoader(
+                                    size = 14.dp,
+                                    color = Color.White
                                 )
                                 Text(
                                     "ENVIANDO...",

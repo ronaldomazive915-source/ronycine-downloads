@@ -27,6 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.RonycineSmileLoader
 import com.example.data.remote.UserProfile
 import com.example.ui.components.ProfileAvatar
 import com.example.ui.components.VerifiedBadge
@@ -39,6 +40,12 @@ import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.ceil
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+
+import com.example.ui.theme.RatingYellow
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminPerfisScreen(
@@ -48,6 +55,7 @@ fun AdminPerfisScreen(
     val context = LocalContext.current
     val profiles by adminViewModel.allGlobalProfiles.collectAsState()
     val users by adminViewModel.allUsers.collectAsState()
+    val currentUser by adminViewModel.currentUser.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("TODOS") } // TODOS, VERIFICADOS, NAO_VERIFICADOS
@@ -536,7 +544,10 @@ fun AdminPerfisScreen(
                 ) {
                     if (verifyingProfileId == profile.id) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
+                            RonycineSmileLoader(
+                                color = Color.White,
+                                size = 14.dp
+                            )
                             Text("Salvando...", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     } else {

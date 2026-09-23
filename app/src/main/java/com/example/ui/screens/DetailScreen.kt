@@ -43,21 +43,29 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.data.local.DownloadEntity
 import com.example.data.local.EpisodeEntity
 import com.example.data.local.MediaEntity
 import com.example.data.local.WatchHistoryEntity
 import com.example.ui.components.CircularRatingBadge
 import com.example.ui.components.DownloadOptionsBottomSheet
+import com.example.ui.viewmodel.DownloadState
 import com.example.ui.components.HeroTrailerPlayer
 import com.example.ui.components.TmdbCircularBadge
 import com.example.ui.components.openYouTubeExternal
+import com.example.ui.components.RonycineSmileLoader
+import com.example.ui.components.CompactDownloadButton
+import com.example.ui.components.ContentShareBottomSheet
+import com.example.ui.components.SeriesEpisodeDownloadBottomSheet
+import com.example.ui.components.MediaReleaseBadge
+import com.example.data.remote.MediaReleaseInfo
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.TextSecondary
 import com.example.ui.viewmodel.MainViewModel
+import com.example.ui.viewmodel.AuthViewModel
+import com.example.ui.viewmodel.PendingDownloadIntent
 
 
 
@@ -78,9 +86,12 @@ fun DetailScreen(
     tmdbId: Int,
     mediaType: String,
     viewModel: MainViewModel,
+    authViewModel: AuthViewModel,
     onNavigateBack: () -> Unit,
     onNavigateToWatch: (Int, String, Int?, Int?) -> Unit,
     onNavigateToDetail: ((Int, String) -> Unit)? = null,
+    onNavigateToDownloads: (() -> Unit)? = null,
+    onNavigateToLogin: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -90,6 +101,7 @@ fun DetailScreen(
     }
 
     val media by viewModel.selectedMedia.collectAsState()
+    val releaseInfo by viewModel.selectedMediaReleaseInfo.collectAsState()
     val episodes by viewModel.episodes.collectAsState()
     val selectedSeason by viewModel.selectedSeason.collectAsState()
     val myList by viewModel.myList.collectAsState()
@@ -102,8 +114,6 @@ fun DetailScreen(
     var isSynopsisExpanded by remember { mutableStateOf(false) }
     var showFullCastModal by remember { mutableStateOf(false) }
     var infoMessage by remember { mutableStateOf<String?>(null) }
-    var showMovieDownloadSheet by remember { mutableStateOf(false) }
-    var episodeToDownload by remember { mutableStateOf<EpisodeEntity?>(null) }
 
     // RONYCINE Community Interactive Rating State
     var userRating by remember(tmdbId) { mutableStateOf(0) }
@@ -115,6 +125,14 @@ fun DetailScreen(
         else if (showFullCastModal) showFullCastModal = false
     }
 
+    val isAccessRestricted by viewModel.isAccessRestricted.collectAsState()
+    val activeProfile by viewModel.activeProfile.collectAsState()
+
+    if (isAccessRestricted || (activeProfile != null && activeProfile!!.isKidsProfile && media != null && !media?.title.isNullOrBlank() && !com.example.util.ContentAccessManager.canProfileAccessContent(activeProfile, media!!))) {
+        RestrictedAccessScreen(onNavigateBack = onNavigateBack)
+        return
+    }
+
     if (media == null || media?.title.isNullOrBlank()) {
         DetailScreenSkeleton(
             onNavigateBack = onNavigateBack,
@@ -123,9 +141,147 @@ fun DetailScreen(
         return
     }
 
+    val downloadState by viewModel.downloadState.collectAsState()
+    val currentUser by authViewModel.currentUser.collectAsState()
+    val pendingDownloadIntent by viewModel.pendingDownloadIntent.collectAsState()
+
+    var showDownloadSheet by remember { mutableStateOf(false) }
+    var showSeriesDownloadSheet by remember { mutableStateOf(false) }
+    var downloadTargetUrl by remember { mutableStateOf("") }
+    var downloadTargetFileName by remember { mutableStateOf("") }
+
+    // Download Metadata States
+    var currentDownloadMediaType by remember { mutableStateOf("movie") }
+    var currentDownloadTmdbId by remember { mutableStateOf("") }
+    var currentDownloadTitle by remember { mutableStateOf("") }
+    var currentDownloadSubtitle by remember { mutableStateOf<String?>(null) }
+    var currentDownloadPoster by remember { mutableStateOf<String?>(null) }
+    var currentDownloadSeason by remember { mutableStateOf<Int?>(null) }
+    var currentDownloadEpisode by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(pendingDownloadIntent, media, currentUser) {
+        val intent = pendingDownloadIntent
+        if (intent != null && media != null && intent.tmdbId == media?.tmdbId && !intent.isPlayer) {
+            if (currentUser != null) {
+                // Real auth verified: proceed with download resolution
+                if (intent.isSeriesDownloadSheet) {
+                    showSeriesDownloadSheet = true
+                } else if (intent.season != null && intent.episode != null) {
+                    currentDownloadMediaType = "tv"
+                    currentDownloadTmdbId = media!!.tmdbId.toString()
+                    currentDownloadTitle = media!!.title
+                    currentDownloadSubtitle = "S${intent.season}E${intent.episode}"
+                    currentDownloadPoster = media!!.posterPath
+                    currentDownloadSeason = intent.season
+                    currentDownloadEpisode = intent.episode
+
+                    viewModel.resolveDownload(
+                        type = "tv",
+                        tmdbId = media!!.tmdbId,
+                        season = intent.season,
+                        episode = intent.episode,
+                        mediaTitle = "${media!!.title} S${intent.season}E${intent.episode}"
+                    )
+                } else {
+                    currentDownloadMediaType = "movie"
+                    currentDownloadTmdbId = media!!.tmdbId.toString()
+                    currentDownloadTitle = media!!.title
+                    currentDownloadSubtitle = media!!.releaseYear
+                    currentDownloadPoster = media!!.posterPath
+                    currentDownloadSeason = null
+                    currentDownloadEpisode = null
+
+                    viewModel.resolveDownload("movie", media!!.tmdbId, mediaTitle = media!!.title)
+                }
+                viewModel.clearPendingDownloadIntent()
+            }
+        }
+    }
+
+    LaunchedEffect(currentUser) {
+        if (currentUser == null) {
+            showSeriesDownloadSheet = false
+            showDownloadSheet = false
+            viewModel.resetDownloadState()
+        }
+    }
+    var showShareSheet by remember { mutableStateOf(false) }
+    var shareEpisodeTarget by remember { mutableStateOf<EpisodeEntity?>(null) }
+
+    if (showShareSheet && media != null) {
+        ContentShareBottomSheet(
+            media = media!!,
+            onDismiss = { showShareSheet = false }
+        )
+    }
+
+    if (shareEpisodeTarget != null && media != null) {
+        ContentShareBottomSheet(
+            media = media!!,
+            seasonNumber = shareEpisodeTarget!!.seasonNumber,
+            episodeNumber = shareEpisodeTarget!!.episodeNumber,
+            episodeTitle = shareEpisodeTarget!!.title,
+            onDismiss = { shareEpisodeTarget = null }
+        )
+    }
+
+    if (showSeriesDownloadSheet && media != null) {
+        SeriesEpisodeDownloadBottomSheet(
+            media = media!!,
+            viewModel = viewModel,
+            initialSeason = selectedSeason,
+            onDismiss = { showSeriesDownloadSheet = false },
+            onNavigateToDownloads = {
+                showSeriesDownloadSheet = false
+                onNavigateToDownloads?.invoke()
+            },
+            onNavigateToLogin = onNavigateToLogin
+        )
+    }
+
+    if (showDownloadSheet) {
+        DownloadOptionsBottomSheet(
+            url = downloadTargetUrl,
+            fileName = downloadTargetFileName,
+            tmdbId = currentDownloadTmdbId,
+            title = currentDownloadTitle,
+            subTitle = currentDownloadSubtitle,
+            posterPath = currentDownloadPoster,
+            mediaType = currentDownloadMediaType,
+            seasonNumber = currentDownloadSeason,
+            episodeNumber = currentDownloadEpisode,
+            viewModel = viewModel,
+            onDismiss = { 
+                showDownloadSheet = false
+                viewModel.resetDownloadState()
+            },
+            onNavigateToDownloads = {
+                showDownloadSheet = false
+                viewModel.resetDownloadState()
+                onNavigateToDownloads?.invoke()
+            },
+            onNavigateToLogin = onNavigateToLogin
+        )
+    }
+
+    LaunchedEffect(downloadState) {
+        if (downloadState is DownloadState.Ready) {
+            downloadTargetUrl = (downloadState as DownloadState.Ready).url
+            downloadTargetFileName = (downloadState as DownloadState.Ready).fileName
+            showDownloadSheet = true
+        } else if (downloadState is DownloadState.Error) {
+            infoMessage = (downloadState as DownloadState.Error).message
+            viewModel.resetDownloadState()
+        }
+    }
+
     val item = media!!
     val isInMyList = myList.any { it.tmdbId == item.tmdbId }
-    val movieDownload by viewModel.observeDownloadForEpisode(item.tmdbId, null, null).collectAsState(initial = null)
+
+    val watchHistoryMap = remember(watchHistory, item.tmdbId) {
+        watchHistory.filter { it.tmdbId == item.tmdbId && it.mediaType == "tv" }
+            .associateBy { "${it.seasonNumber}_${it.episodeNumber}" }
+    }
 
     val movieHistory = remember(watchHistory, item.tmdbId) {
         watchHistory.firstOrNull { it.tmdbId == item.tmdbId && (it.mediaType == "movie" || it.mediaType.isBlank()) }
@@ -595,125 +751,159 @@ fun DetailScreen(
                     }
                 }
 
+                // COMPACT PROFESSIONAL RELEASE INFO BADGE (Calendário)
+                if (releaseInfo != null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    MediaReleaseBadge(
+                        releaseInfo = releaseInfo,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 3. ACTION BUTTONS (Assistir, Baixar, Minha Lista, Trailer - Audited Single Set)
+                // 3. ACTION BUTTONS (Assistir, Minha Lista, Trailer - Audited Single Set)
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 18.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    val isMovieDownloaded = movieDownload?.status == DownloadEntity.STATUS_COMPLETED
                     val watchProgress = movieHistory?.progressPercent ?: 0f
                     val hasPartialProgress = item.mediaType == "movie" && watchProgress > 5f && watchProgress < 90f
+                    val isUnreleasedMovie = releaseInfo?.isMovie == true && releaseInfo?.isUnreleasedContent == true
 
                     val playButtonText = when {
-                        isMovieDownloaded -> "Assistir Offline"
                         hasPartialProgress -> "Continuar (${watchProgress.toInt()}%)"
+                        isUnreleasedMovie -> "Em Breve"
                         else -> "Assistir"
                     }
 
-                    // Primary Play Button
-                    Button(
-                        onClick = {
-                            onNavigateToWatch(
-                                item.tmdbId,
-                                item.mediaType,
-                                if (item.mediaType == "tv") selectedSeason else null,
-                                if (item.mediaType == "tv") 1 else null
-                            )
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed, contentColor = Color.White),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp)
-                            .testTag("detail_play_button")
-                    ) {
-                        Icon(
-                            imageVector = if (isMovieDownloaded) Icons.Default.PlayCircle else Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = playButtonText,
-                            color = Color.White,
-                            fontSize = 14.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Secondary Action Buttons Row
+                    // Primary Action Row: [ ▶ Assistir ] [ ↓ Baixar ]
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // [ ↓ Baixar ]
-                        OutlinedButton(
+                        // Primary Play Button
+                        Button(
                             onClick = {
-                                if (item.mediaType == "tv") {
-                                    val firstEp = episodes.firstOrNull()
-                                    if (firstEp != null) {
-                                        episodeToDownload = firstEp
-                                    } else {
-                                        showMovieDownloadSheet = true
-                                    }
-                                } else {
-                                    when (movieDownload?.status) {
-                                        DownloadEntity.STATUS_DOWNLOADING -> viewModel.pauseDownload(movieDownload!!.id)
-                                        DownloadEntity.STATUS_PAUSED -> viewModel.resumeDownload(movieDownload!!.id)
-                                        DownloadEntity.STATUS_COMPLETED -> {
-                                            infoMessage = "Este filme já está salvo no seu dispositivo para assistir offline!"
-                                        }
-                                        DownloadEntity.STATUS_NOT_SUPPORTED -> {
-                                            infoMessage = movieDownload?.errorMessage ?: "Download indisponível para este conteúdo."
-                                        }
-                                        else -> {
-                                            showMovieDownloadSheet = true
-                                        }
-                                    }
-                                }
+                                android.util.Log.i("RONYCINE_DIAG", "[PLAYER_CLICK] Usuário clicou em Assistir no Detalhe. tmdbId=${item.tmdbId}")
+                                onNavigateToWatch(
+                                    item.tmdbId,
+                                    item.mediaType,
+                                    if (item.mediaType == "tv") selectedSeason else null,
+                                    if (item.mediaType == "tv") 1 else null
+                                )
                             },
+                            colors = ButtonDefaults.buttonColors(containerColor = BrandRed, contentColor = Color.White),
                             shape = RoundedCornerShape(10.dp),
-                            border = BorderStroke(1.dp, CardBorder),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = DarkSurface, contentColor = Color.White),
-                            contentPadding = PaddingValues(horizontal = 12.dp),
                             modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp)
-                                .testTag("detail_download_button")
+                                .weight(1.2f)
+                                .height(44.dp)
+                                .testTag("detail_play_button")
                         ) {
-                            if (item.mediaType == "movie" && movieDownload?.status == DownloadEntity.STATUS_DOWNLOADING) {
-                                CircularProgressIndicator(color = Color(0xFF38BDF8), strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(text = "${movieDownload?.progress}%", color = Color(0xFF38BDF8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            } else if (item.mediaType == "movie" && movieDownload?.status == DownloadEntity.STATUS_COMPLETED) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF34D399), modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(text = "Baixado", color = Color(0xFF34D399), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            } else {
-                                Icon(Icons.Default.FileDownload, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(5.dp))
-                                Text(text = "Baixar", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = playButtonText,
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
 
+                        // [ ↓ Baixar ] (Filmes e Séries)
+                        if (item.mediaType == "movie") {
+                            val isResolvingThis = downloadState is DownloadState.Resolving && 
+                                    (downloadState as DownloadState.Resolving).tmdbId == item.tmdbId && 
+                                    (downloadState as DownloadState.Resolving).season == null
+
+                            CompactDownloadButton(
+                                isResolving = isResolvingThis,
+                                onClick = { 
+                                    viewModel.requireAuthenticationForDownload(
+                                        isAuthenticated = currentUser != null,
+                                        pendingIntent = PendingDownloadIntent(
+                                            type = "movie",
+                                            tmdbId = item.tmdbId,
+                                            mediaTitle = item.title
+                                        ),
+                                        onNavigateToLogin = onNavigateToLogin,
+                                        onAlreadyAuthenticated = {
+                                            currentDownloadMediaType = "movie"
+                                            currentDownloadTmdbId = item.tmdbId.toString()
+                                            currentDownloadTitle = item.title
+                                            currentDownloadSubtitle = (item as? MediaEntity)?.releaseYear
+                                            currentDownloadPoster = item.posterPath
+                                            currentDownloadSeason = null
+                                            currentDownloadEpisode = null
+
+                                            viewModel.resolveDownload("movie", item.tmdbId, mediaTitle = item.title) 
+                                        }
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .testTag("detail_download_button")
+                            )
+                        } else {
+                            CompactDownloadButton(
+                                isResolving = false,
+                                onClick = { 
+                                    viewModel.requireAuthenticationForDownload(
+                                        isAuthenticated = currentUser != null,
+                                        pendingIntent = PendingDownloadIntent(
+                                            type = "tv",
+                                            tmdbId = item.tmdbId,
+                                            isSeriesDownloadSheet = true
+                                        ),
+                                        onNavigateToLogin = onNavigateToLogin,
+                                        onAlreadyAuthenticated = {
+                                            showSeriesDownloadSheet = true
+                                        }
+                                    )
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(44.dp)
+                                    .testTag("detail_series_download_button")
+                            )
+                        }
+                    }
+
+                    // Secondary Action Buttons Row: [ ＋ Minha Lista ] [ ▶ Trailer ] [ 🔗 Partilhar ]
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         // [ ＋ Minha Lista ]
                         OutlinedButton(
-                            onClick = { viewModel.toggleMyList(item.tmdbId, item.mediaType) },
+                            onClick = { 
+                                viewModel.requireAuthentication(
+                                    isAuthenticated = currentUser != null,
+                                    onNavigateToLogin = onNavigateToLogin,
+                                    pendingAction = com.example.ui.viewmodel.PendingAction.ToggleMyList(item.tmdbId, item.mediaType),
+                                    onAlreadyAuthenticated = {
+                                        viewModel.toggleMyList(item.tmdbId, item.mediaType)
+                                    }
+                                )
+                            },
                             shape = RoundedCornerShape(10.dp),
                             border = BorderStroke(1.dp, if (isInMyList) BrandRed.copy(alpha = 0.6f) else CardBorder),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 containerColor = if (isInMyList) BrandRed.copy(alpha = 0.12f) else DarkSurface,
                                 contentColor = Color.White
                             ),
-                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(42.dp)
+                                .height(40.dp)
                                 .testTag("detail_my_list_toggle")
                         ) {
                             Icon(
@@ -722,12 +912,13 @@ fun DetailScreen(
                                 tint = if (isInMyList) BrandRed else Color.White,
                                 modifier = Modifier.size(16.dp)
                             )
-                            Spacer(modifier = Modifier.width(5.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = if (isInMyList) "Na Lista" else "Minha Lista",
                                 color = if (isInMyList) BrandRed else Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
                             )
                         }
 
@@ -738,16 +929,33 @@ fun DetailScreen(
                                 shape = RoundedCornerShape(10.dp),
                                 border = BorderStroke(1.dp, CardBorder),
                                 colors = ButtonDefaults.outlinedButtonColors(containerColor = DarkSurface, contentColor = Color.White),
-                                contentPadding = PaddingValues(horizontal = 10.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp),
                                 modifier = Modifier
-                                    .weight(0.9f)
-                                    .height(42.dp)
+                                    .weight(1f)
+                                    .height(40.dp)
                                     .testTag("detail_trailer_button")
                             ) {
                                 Icon(Icons.Default.PlayCircleOutline, contentDescription = null, tint = Color.LightGray, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(text = "Trailer", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text(text = "Trailer", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                             }
+                        }
+
+                        // [ 🔗 Partilhar ]
+                        OutlinedButton(
+                            onClick = { showShareSheet = true },
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, CardBorder),
+                            colors = ButtonDefaults.outlinedButtonColors(containerColor = DarkSurface, contentColor = Color.White),
+                            contentPadding = PaddingValues(horizontal = 8.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(40.dp)
+                                .testTag("detail_share_button")
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = "Partilhar", tint = Color.LightGray, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = "Partilhar", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                         }
                     }
                 }
@@ -1203,11 +1411,19 @@ fun DetailScreen(
                             .padding(24.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        CircularProgressIndicator(color = BrandRed, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+                        RonycineSmileLoader(color = BrandRed, size = 32.dp)
                     }
                 }
             } else {
                 items(episodes, key = { "${it.seasonNumber}_${it.episodeNumber}" }) { ep ->
+                    val epKey = "${ep.seasonNumber}_${ep.episodeNumber}"
+                    val epHistory = watchHistoryMap[epKey]
+                    
+                    val isResolvingThis = downloadState is DownloadState.Resolving && 
+                        (downloadState as DownloadState.Resolving).tmdbId == item.tmdbId && 
+                        (downloadState as DownloadState.Resolving).season == ep.seasonNumber && 
+                        (downloadState as DownloadState.Resolving).episode == ep.episodeNumber
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1217,12 +1433,24 @@ fun DetailScreen(
                             media = item,
                             episode = ep,
                             viewModel = viewModel,
-                            watchHistory = watchHistory,
+                            epHistory = epHistory,
+                            isResolvingDownload = isResolvingThis,
+                            isAuthenticated = currentUser != null,
                             onPlayClick = {
                                 onNavigateToWatch(item.tmdbId, "tv", ep.seasonNumber, ep.episodeNumber)
                             },
                             onShowInfo = { msg -> infoMessage = msg },
-                            onRequestDownload = { targetEp -> episodeToDownload = targetEp }
+                            onShareClick = { shareEpisodeTarget = ep },
+                            onSetDownloadMetadata = { mType, tId, title, sub, poster, sNum, eNum ->
+                                currentDownloadMediaType = mType
+                                currentDownloadTmdbId = tId
+                                currentDownloadTitle = title
+                                currentDownloadSubtitle = sub
+                                currentDownloadPoster = poster
+                                currentDownloadSeason = sNum
+                                currentDownloadEpisode = eNum
+                            },
+                            onNavigateToLogin = onNavigateToLogin
                         )
                     }
                 }
@@ -1328,33 +1556,6 @@ fun DetailScreen(
         }
     }
 
-    // Modal de opções de download para filmes
-    if (showMovieDownloadSheet) {
-        DownloadOptionsBottomSheet(
-            media = item,
-            episode = null,
-            customUrl = null,
-            onDismiss = { showMovieDownloadSheet = false },
-            onStartInternalDownload = { m, _, url ->
-                viewModel.startMovieDownload(m, url)
-            }
-        )
-    }
-
-    // Modal de opções de download individual para episódios de séries
-    if (episodeToDownload != null) {
-        DownloadOptionsBottomSheet(
-            media = item,
-            episode = episodeToDownload,
-            customUrl = episodeToDownload?.videoUrl,
-            onDismiss = { episodeToDownload = null },
-            onStartInternalDownload = { m, ep, url ->
-                if (ep != null) {
-                    viewModel.startEpisodeDownload(m, ep, url)
-                }
-            }
-        )
-    }
 }
 
 /**
@@ -1365,24 +1566,15 @@ fun ModernEpisodeCard(
     media: MediaEntity,
     episode: EpisodeEntity,
     viewModel: MainViewModel,
-    watchHistory: List<WatchHistoryEntity> = emptyList(),
+    epHistory: WatchHistoryEntity? = null,
+    isResolvingDownload: Boolean = false,
+    isAuthenticated: Boolean,
     onPlayClick: () -> Unit,
     onShowInfo: (String) -> Unit,
-    onRequestDownload: (EpisodeEntity) -> Unit
+    onShareClick: (EpisodeEntity) -> Unit = {},
+    onSetDownloadMetadata: (String, String, String, String, String?, Int?, Int?) -> Unit,
+    onNavigateToLogin: () -> Unit
 ) {
-    val epDownload by viewModel.observeDownloadForEpisode(
-        media.tmdbId,
-        episode.seasonNumber,
-        episode.episodeNumber
-    ).collectAsState(initial = null)
-
-    val epHistory = remember(watchHistory, episode.seasonNumber, episode.episodeNumber) {
-        watchHistory.firstOrNull {
-            it.tmdbId == media.tmdbId &&
-            it.seasonNumber == episode.seasonNumber &&
-            it.episodeNumber == episode.episodeNumber
-        }
-    }
     val watchProgress = epHistory?.progressPercent ?: 0f
     val isWatched = watchProgress >= 90f
     val epNumberFormatted = remember(episode.episodeNumber) {
@@ -1404,7 +1596,10 @@ fun ModernEpisodeCard(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onPlayClick
+                onClick = {
+                    android.util.Log.i("RONYCINE_DIAG", "[PLAYER_CLICK] Usuário clicou em Assistir no Episódio ${episode.episodeNumber}. tmdbId=${media.tmdbId}")
+                    onPlayClick()
+                }
             )
             .testTag("episode_item_${episode.episodeNumber}"),
         colors = CardDefaults.cardColors(
@@ -1523,93 +1718,93 @@ fun ModernEpisodeCard(
                 }
 
                 Spacer(modifier = Modifier.width(6.dp))
+                
+                // Download Button (Mini)
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable { 
+                            viewModel.requireAuthenticationForDownload(
+                                isAuthenticated = isAuthenticated,
+                                pendingIntent = PendingDownloadIntent(
+                                    type = "tv",
+                                    tmdbId = media.tmdbId,
+                                    season = episode.seasonNumber,
+                                    episode = episode.episodeNumber,
+                                    mediaTitle = "${media.title} S${episode.seasonNumber}E${episode.episodeNumber}"
+                                ),
+                                onNavigateToLogin = onNavigateToLogin,
+                                onAlreadyAuthenticated = {
+                                    onSetDownloadMetadata(
+                                        "tv",
+                                        media.tmdbId.toString(),
+                                        media.title,
+                                        "S${episode.seasonNumber}E${episode.episodeNumber}",
+                                        media.posterPath,
+                                        episode.seasonNumber,
+                                        episode.episodeNumber
+                                    )
 
-                // Actions: Download Button & Mini Play Button
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (epDownload?.status in listOf(
-                            DownloadEntity.STATUS_DOWNLOADING,
-                            DownloadEntity.STATUS_PREPARING,
-                            DownloadEntity.STATUS_PAUSED,
-                            DownloadEntity.STATUS_COMPLETED,
-                            DownloadEntity.STATUS_ERROR
-                        )
-                    ) {
-                        IconButton(
-                            onClick = {
-                                when (epDownload?.status) {
-                                    DownloadEntity.STATUS_DOWNLOADING -> viewModel.pauseDownload(epDownload!!.id)
-                                    DownloadEntity.STATUS_PAUSED -> viewModel.resumeDownload(epDownload!!.id)
-                                    DownloadEntity.STATUS_COMPLETED -> onShowInfo("Episódio salvo no aparelho (offline).")
-                                    else -> onRequestDownload(episode)
+                                    viewModel.resolveDownload(
+                                        type = "tv",
+                                        tmdbId = media.tmdbId,
+                                        season = episode.seasonNumber,
+                                        episode = episode.episodeNumber,
+                                        mediaTitle = "${media.title} S${episode.seasonNumber}E${episode.episodeNumber}"
+                                    )
                                 }
-                            },
-                            modifier = Modifier.size(26.dp)
-                        ) {
-                            when (epDownload?.status) {
-                                DownloadEntity.STATUS_DOWNLOADING -> CircularProgressIndicator(
-                                    color = Color(0xFF38BDF8),
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                DownloadEntity.STATUS_PREPARING -> CircularProgressIndicator(
-                                    color = BrandRed,
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                                DownloadEntity.STATUS_PAUSED -> Icon(
-                                    Icons.Default.Pause,
-                                    contentDescription = "Pausado",
-                                    tint = Color(0xFFFBBF24),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                DownloadEntity.STATUS_COMPLETED -> Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = "Baixado",
-                                    tint = Color(0xFF34D399),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                DownloadEntity.STATUS_ERROR -> Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Tentar novamente",
-                                    tint = Color(0xFFF87171),
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                else -> {}
-                            }
-                        }
-                    } else {
-                        IconButton(
-                            onClick = { onRequestDownload(episode) },
-                            modifier = Modifier.size(26.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.FileDownload,
-                                contentDescription = "Baixar",
-                                tint = Color.Gray.copy(alpha = 0.5f),
-                                modifier = Modifier.size(14.dp)
                             )
-                        }
-                    }
-
-                    // Mini Play Button
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (isWatched) Color(0xFF222226) else BrandRed.copy(alpha = 0.18f))
-                            .clickable { onPlayClick() },
-                        contentAlignment = Alignment.Center
-                    ) {
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isResolvingDownload) {
+                        RonycineSmileLoader(color = Color(0xFF38BDF8), size = 14.dp)
+                    } else {
                         Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = "Assistir",
-                            tint = if (isWatched) Color.LightGray else BrandRed,
+                            imageVector = Icons.Default.FileDownload,
+                            contentDescription = "Baixar",
+                            tint = Color.LightGray,
                             modifier = Modifier.size(16.dp)
                         )
                     }
+                }
+
+                // Share Episode Button (Mini)
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable { onShareClick(episode) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Share,
+                        contentDescription = "Partilhar Episódio",
+                        tint = Color.LightGray,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Actions: Mini Play Button
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isWatched) Color(0xFF222226) else BrandRed.copy(alpha = 0.18f))
+                        .clickable { onPlayClick() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Assistir",
+                        tint = if (isWatched) Color.LightGray else BrandRed,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
 
@@ -1628,20 +1823,73 @@ fun ModernEpisodeCard(
                             .background(if (isWatched) Color(0xFF34D399) else BrandRed)
                     )
                 }
-            } else if (epDownload?.status == DownloadEntity.STATUS_DOWNLOADING) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(2.dp)
-                        .background(Color(0xFF222222))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(fraction = ((epDownload?.progress ?: 0) / 100f).coerceIn(0f, 1f))
-                            .fillMaxHeight()
-                            .background(Color(0xFF38BDF8))
+            }
+        }
+    }
+}
+
+@Composable
+private fun RestrictedAccessScreen(
+    onNavigateBack: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBackground),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = BrandRed.copy(alpha = 0.1f),
+                modifier = Modifier.size(100.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = BrandRed,
+                        modifier = Modifier.size(48.dp)
                     )
                 }
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Text(
+                text = "CONTEÚDO RESTRITO",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            Text(
+                text = "Este conteúdo não é permitido para o Perfil Infantil ativado.",
+                color = TextSecondary,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center
+            )
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            Button(
+                onClick = onNavigateBack,
+                colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text(
+                    text = "VOLTAR",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }

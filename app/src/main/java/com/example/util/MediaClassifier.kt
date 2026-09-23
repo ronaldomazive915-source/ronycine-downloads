@@ -74,8 +74,11 @@ object MediaClassifier {
     }
 
     fun isAnime(entity: MediaEntity): Boolean {
-        if (entity.mediaCategory == CATEGORY_ANIME) return true
-        val countries = entity.originCountry.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (entity.mediaCategory.equals(CATEGORY_ANIME, ignoreCase = true)) return true
+        if (entity.genres.contains("Anime", ignoreCase = true) ||
+            entity.genres.contains("Animação Japonesa", ignoreCase = true) ||
+            entity.genres.contains("Japanese Animation", ignoreCase = true)) return true
+        val countries = entity.originCountry.split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
         return isAnime(
             mediaType = entity.mediaType,
             genreIds = emptyList(),
@@ -131,7 +134,9 @@ object MediaClassifier {
                 genreNames?.contains("Romance", ignoreCase = true) == true ||
                 genreNames?.contains("Dorama", ignoreCase = true) == true ||
                 genreNames?.contains("Coreano", ignoreCase = true) == true ||
-                genreNames?.contains("K-Drama", ignoreCase = true) == true
+                genreNames?.contains("K-Drama", ignoreCase = true) == true ||
+                genreNames?.contains("KDrama", ignoreCase = true) == true ||
+                genreNames?.contains("C-Drama", ignoreCase = true) == true
 
         return (isKorean || isOtherAsianDrama) && hasDramaOrRomance
     }
@@ -151,7 +156,14 @@ object MediaClassifier {
     }
 
     fun isDorama(entity: MediaEntity): Boolean {
-        val countries = entity.originCountry.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (isAnime(entity)) return false
+        if (entity.mediaCategory.equals(CATEGORY_DORAMA, ignoreCase = true)) return true
+        if (entity.genres.contains("Dorama", ignoreCase = true) ||
+            entity.genres.contains("K-Drama", ignoreCase = true) ||
+            entity.genres.contains("KDrama", ignoreCase = true) ||
+            entity.genres.contains("C-Drama", ignoreCase = true) ||
+            entity.genres.contains("J-Drama", ignoreCase = true)) return true
+        val countries = entity.originCountry.split(",").map { it.trim().uppercase() }.filter { it.isNotEmpty() }
         val detected = isDorama(
             mediaType = entity.mediaType,
             genreIds = emptyList(),
@@ -160,8 +172,31 @@ object MediaClassifier {
             originCountry = countries,
             title = entity.title
         )
-        if (detected) return true
-        return entity.mediaCategory.equals(CATEGORY_DORAMA, ignoreCase = true)
+        return detected
+    }
+
+    fun isMovieOrSeries(entity: MediaEntity): Boolean {
+        val cat = classifyMedia(entity)
+        return cat == CATEGORY_MOVIE || cat == CATEGORY_SERIES
+    }
+
+    fun isMovie(entity: MediaEntity): Boolean {
+        if (isAnime(entity) || isDorama(entity)) return false
+        val cat = entity.mediaCategory.trim().lowercase()
+        if (cat == CATEGORY_ANIME || cat == CATEGORY_DORAMA || cat == CATEGORY_LIVE_TV || cat == CATEGORY_SERIES) return false
+        return entity.mediaType.trim().lowercase() == "movie"
+    }
+
+    fun isSeries(entity: MediaEntity): Boolean {
+        if (isAnime(entity) || isDorama(entity)) return false
+        val cat = entity.mediaCategory.trim().lowercase()
+        if (cat == CATEGORY_ANIME || cat == CATEGORY_DORAMA || cat == CATEGORY_LIVE_TV || cat == CATEGORY_MOVIE) return false
+        val type = entity.mediaType.trim().lowercase()
+        return type == "tv" || type == "serie" || type == "series"
+    }
+
+    fun isAnimeOrDorama(entity: MediaEntity): Boolean {
+        return isAnime(entity) || isDorama(entity)
     }
 
     /**
@@ -218,46 +253,27 @@ object MediaClassifier {
         val key = "${entity.tmdbId}_${entity.mediaType}"
         classificationCache[key]?.let { return it }
 
-        // Fast path: se já possuía uma categoria explícita válida salva
         val cat = entity.mediaCategory.trim().lowercase()
-        if (cat == CATEGORY_ANIME) { classificationCache[key] = CATEGORY_ANIME; return CATEGORY_ANIME }
-        if (cat == CATEGORY_DORAMA) { classificationCache[key] = CATEGORY_DORAMA; return CATEGORY_DORAMA }
-        if (cat == CATEGORY_LIVE_TV) { classificationCache[key] = CATEGORY_LIVE_TV; return CATEGORY_LIVE_TV }
-        if (cat == CATEGORY_MOVIE) { classificationCache[key] = CATEGORY_MOVIE; return CATEGORY_MOVIE }
-        if (cat == CATEGORY_SERIES) { classificationCache[key] = CATEGORY_SERIES; return CATEGORY_SERIES }
+        if (cat == CATEGORY_LIVE_TV || entity.mediaType.trim().lowercase() in listOf("live_tv", "channel", "tv_channel")) {
+            classificationCache[key] = CATEGORY_LIVE_TV
+            return CATEGORY_LIVE_TV
+        }
 
-        val countries = entity.originCountry.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-
-        // Primeiro analisa sinais reais de Anime (gênero Animação + idioma/país japonês ou tag Anime)
-        if (isAnime(
-                mediaType = entity.mediaType,
-                genreIds = emptyList(),
-                genreNames = entity.genres,
-                originalLanguage = entity.originalLanguage,
-                originCountry = countries,
-                title = entity.title
-            )
-        ) {
+        // 1. Prioridade absoluta para detecção de Anime
+        if (isAnime(entity)) {
             classificationCache[key] = CATEGORY_ANIME
             return CATEGORY_ANIME
         }
 
-        // Segundo analisa sinais reais de Dorama (série/drama + Coreia/Ásia e Romance/Drama)
-        if (isDorama(
-                mediaType = entity.mediaType,
-                genreIds = emptyList(),
-                genreNames = entity.genres,
-                originalLanguage = entity.originalLanguage,
-                originCountry = countries,
-                title = entity.title
-            )
-        ) {
+        // 2. Prioridade absoluta para detecção de Dorama
+        if (isDorama(entity)) {
             classificationCache[key] = CATEGORY_DORAMA
             return CATEGORY_DORAMA
         }
 
+        // 3. Demais conteúdos são Filmes ou Séries
         val type = entity.mediaType.trim().lowercase()
-        val result = if (type == "movie") CATEGORY_MOVIE else CATEGORY_SERIES
+        val result = if (cat == CATEGORY_MOVIE || type == "movie") CATEGORY_MOVIE else CATEGORY_SERIES
         classificationCache[key] = result
         return result
     }

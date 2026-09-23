@@ -52,6 +52,7 @@ import com.example.ui.components.AdminTrailerTestData
 import com.example.ui.components.TrailerPlaybackState
 import com.example.ui.components.TrailerErrorInfo
 import com.example.ui.components.openYouTubeExternal
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.theme.TextSecondary
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -65,6 +66,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import android.widget.Toast
+import com.example.data.remote.ApiChannel
+import com.example.data.remote.ApiEvent
 import com.example.data.remote.BackupData
 import com.example.data.remote.BackupPreviewInfo
 import com.example.data.remote.RestoreRealProgress
@@ -88,7 +92,8 @@ import com.example.ui.theme.CardBorder
 import com.example.ui.screens.admin.MassImportCentral
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
-import com.example.ui.theme.RatingYellow
+import com.example.ui.components.PermissionGuard
+import com.example.ui.components.AccessDeniedUI
 import com.example.ui.viewmodel.AdminSection
 import com.example.ui.viewmodel.AdminViewModel
 import com.example.ui.viewmodel.MainViewModel
@@ -98,6 +103,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+import com.example.ui.theme.RatingYellow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -121,6 +128,7 @@ fun AdminScreen(
     }
 
     val currentSection by adminViewModel.currentSection.collectAsState()
+    val currentUser by adminViewModel.currentUser.collectAsState()
     val stats by adminViewModel.stats.collectAsState()
     val catalogActionMessage by adminViewModel.catalogActionMessage.collectAsState()
     val isCatalogActionRunning by adminViewModel.isCatalogActionRunning.collectAsState()
@@ -327,6 +335,7 @@ fun AdminScreen(
             AdminNavDropdownMenu(
                 expanded = isMenuDropdownExpanded,
                 currentSection = currentSection,
+                currentUser = currentUser,
                 onDismissRequest = { isMenuDropdownExpanded = false },
                 onSelectSection = { section ->
                     isMenuDropdownExpanded = false
@@ -339,109 +348,105 @@ fun AdminScreen(
             )
         }
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            when (currentSection) {
-                AdminSection.ESTATISTICAS -> {
-                    com.example.ui.screens.admin.AdminDashboardScreen(
-                        adminViewModel = adminViewModel,
-                        onNavigateSection = { section -> adminViewModel.selectSection(section) }
-                    )
-                }
-                AdminSection.CATALOGO -> {
-                    AdminCatalogoScreen(
-                        adminViewModel = adminViewModel,
-                        onNavigateToMedia = onNavigateToMedia
-                    )
-                }
-                AdminSection.IMPORTACAO -> {
-                    com.example.ui.screens.admin.AdminImportCentralScreen(
-                        adminViewModel = adminViewModel,
-                        initialMode = com.example.ui.screens.admin.ImportMode.INDIVIDUAL,
-                        onNavigateToMedia = onNavigateToMedia
-                    )
-                }
-                AdminSection.IMPORTACAO_MASSA -> {
-                    com.example.ui.screens.admin.AdminImportCentralScreen(
-                        adminViewModel = adminViewModel,
-                        initialMode = com.example.ui.screens.admin.ImportMode.MASS,
-                        onNavigateToMedia = onNavigateToMedia
-                    )
-                }
-                AdminSection.TOP_10 -> {
-                    AdminTop10Screen(adminViewModel = adminViewModel)
-                }
-                AdminSection.DESTAQUES -> {
-                    AdminDestaquesScreen(
-                        adminViewModel = adminViewModel
-                    )
-                }
-                AdminSection.TV_AO_VIVO -> {
-                    AdminTvScreen()
-                }
-                AdminSection.SINCRONIZACAO_AUTOMATICA -> {
-                    com.example.ui.screens.admin.AdminImportCentralScreen(
-                        adminViewModel = adminViewModel,
-                        initialMode = com.example.ui.screens.admin.ImportMode.AUTOMATIC,
-                        onNavigateToMedia = onNavigateToMedia
-                    )
-                }
-                AdminSection.USUARIOS -> {
-                    com.example.ui.screens.admin.AdminUsuariosScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.PERFIS -> {
-                    com.example.ui.screens.admin.AdminPerfisScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.DISPOSITIVOS -> {
-                    AdminDispositivosScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.ADMINISTRADORES -> {
-                    com.example.ui.screens.admin.AdminAdministradoresScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.NOTIFICACOES -> {
-                    AdminNotificacoesScreen(
-                        adminViewModel = adminViewModel
-                    )
-                }
-                AdminSection.PEDIDOS -> {
-                    AdminRequestsScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.ATUALIZACOES_APP -> {
-                    AdminAppUpdatesScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.ATUALIZACOES -> {
-                    com.example.ui.screens.admin.AdminAtualizacoesCampanhasScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.CONTROLE_REMOTO -> {
-                    AdminControleRemotoScreen(viewModel = adminViewModel)
-                }
-                AdminSection.ALTERACOES_PENDENTES -> {
-                    com.example.ui.screens.admin.AdminPendingChangesScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.SINCRONIZACAO -> {
-                    AdminSincronizacaoScreen(
-                        adminViewModel = adminViewModel
-                    )
-                }
-                AdminSection.PLAYERS -> {
-                    com.example.ui.screens.admin.AdminPlayersScreen(viewModel = adminViewModel)
-                }
-                AdminSection.CONFIGURACOES -> {
-                    AdminConfiguracoesScreen(
-                        adminViewModel = adminViewModel
-                    )
-                }
-                AdminSection.CINE_CONFIG -> {
-                    AdminCineConfigScreen(
-                        adminViewModel = adminViewModel
-                    )
-                }
-                AdminSection.LOGS -> {
-                    com.example.ui.screens.admin.AdminLogsScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.HISTORICO -> {
-                    com.example.ui.screens.admin.AdminHistoricoScreen(adminViewModel = adminViewModel)
-                }
-                AdminSection.STATUS_SISTEMA -> {
-                    com.example.ui.screens.admin.AdminSystemStatusScreen(adminViewModel = adminViewModel)
+            // CENTRALIZED AUTHORIZATION GUARD FOR ALL ROUTES
+            PermissionGuard(
+                currentUser = currentUser,
+                permissionKey = currentSection.permissionKey,
+                onRetry = { adminViewModel.refreshAuthorization() },
+                onNavigateBack = onNavigateBack
+            ) {
+                when (currentSection) {
+                    AdminSection.ESTATISTICAS -> {
+                        com.example.ui.screens.admin.AdminDashboardScreen(
+                            adminViewModel = adminViewModel,
+                            onNavigateSection = { section -> adminViewModel.selectSection(section) }
+                        )
+                    }
+                    AdminSection.CATALOGO -> {
+                        AdminCatalogoScreen(
+                            adminViewModel = adminViewModel,
+                            onNavigateToMedia = onNavigateToMedia
+                        )
+                    }
+                    AdminSection.IMPORTACAO -> {
+                        com.example.ui.screens.admin.AdminImportCentralScreen(
+                            adminViewModel = adminViewModel,
+                            initialMode = com.example.ui.screens.admin.ImportMode.INDIVIDUAL,
+                            onNavigateToMedia = onNavigateToMedia
+                        )
+                    }
+                    AdminSection.IMPORTACAO_MASSA -> {
+                        com.example.ui.screens.admin.AdminImportCentralScreen(
+                            adminViewModel = adminViewModel,
+                            initialMode = com.example.ui.screens.admin.ImportMode.MASS,
+                            onNavigateToMedia = onNavigateToMedia
+                        )
+                    }
+                    AdminSection.TOP_10 -> {
+                        AdminTop10Screen(adminViewModel = adminViewModel)
+                    }
+                    AdminSection.DESTAQUES -> {
+                        AdminDestaquesScreen(
+                            adminViewModel = adminViewModel
+                        )
+                    }
+                    AdminSection.TV_AO_VIVO -> {
+                        AdminTvScreen()
+                    }
+                    AdminSection.SINCRONIZACAO_AUTOMATICA -> {
+                        com.example.ui.screens.admin.AdminImportCentralScreen(
+                            adminViewModel = adminViewModel,
+                            initialMode = com.example.ui.screens.admin.ImportMode.AUTOMATIC,
+                            onNavigateToMedia = onNavigateToMedia
+                        )
+                    }
+                    AdminSection.USUARIOS -> {
+                        com.example.ui.screens.admin.AdminUsuariosScreen(adminViewModel = adminViewModel)
+                    }
+                    AdminSection.PERFIS -> {
+                        com.example.ui.screens.admin.AdminPerfisScreen(adminViewModel = adminViewModel)
+                    }
+                    AdminSection.DISPOSITIVOS -> {
+                        AdminDispositivosScreen(adminViewModel = adminViewModel)
+                    }
+                    AdminSection.ADMINISTRADORES -> {
+                        com.example.ui.screens.admin.AdminAdministradoresScreen(adminViewModel = adminViewModel)
+                    }
+                    AdminSection.NOTIFICACOES -> {
+                        AdminNotificacoesScreen(
+                            adminViewModel = adminViewModel
+                        )
+                    }
+                    AdminSection.PEDIDOS -> {
+                        AdminRequestsScreen(adminViewModel = adminViewModel)
+                    }
+                    AdminSection.ATUALIZACOES -> {
+                        com.example.ui.screens.admin.AdminManualUpdatesScreen(adminViewModel = adminViewModel)
+                    }
+                    AdminSection.SINCRONIZACAO -> {
+                        AdminSincronizacaoScreen(
+                            adminViewModel = adminViewModel
+                        )
+                    }
+                    AdminSection.PLAYERS -> {
+                        com.example.ui.screens.admin.AdminPlayersScreen(viewModel = adminViewModel)
+                    }
+                    AdminSection.CONFIGURACOES -> {
+                        AdminConfiguracoesScreen(
+                            adminViewModel = adminViewModel
+                        )
+                    }
+                    AdminSection.CINE_CONFIG -> {
+                        AdminCineConfigScreen(
+                            adminViewModel = adminViewModel
+                        )
+                    }
+                    AdminSection.LOGS -> {
+                        com.example.ui.screens.admin.AdminLogsScreen(adminViewModel = adminViewModel)
+                    }
+                    AdminSection.STATUS_SISTEMA -> {
+                        com.example.ui.screens.admin.AdminSystemStatusScreen(adminViewModel = adminViewModel)
+                    }
                 }
             }
 
@@ -462,7 +467,7 @@ fun AdminScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
-                            CircularProgressIndicator(color = BrandRed, modifier = Modifier.size(24.dp))
+                            RonycineSmileLoader(color = BrandRed, size = 28.dp)
                             val stageText = catalogActionStage ?: "Processando alteração..."
                             Text(stageText, color = Color.White, fontSize = 14.sp)
                         }
@@ -481,6 +486,7 @@ fun AdminScreen(
 fun AdminNavDropdownMenu(
     expanded: Boolean,
     currentSection: AdminSection,
+    currentUser: com.example.data.remote.UserEntity?,
     onDismissRequest: () -> Unit,
     onSelectSection: (AdminSection) -> Unit,
     onLogout: () -> Unit
@@ -579,7 +585,7 @@ fun AdminNavDropdownMenu(
                                         letterSpacing = 0.8.sp
                                     )
                                     Text(
-                                        text = "Gerencie o conteúdo e a plataforma",
+                                        text = currentUser?.displayName ?: "Gerencie a plataforma",
                                         color = Color(0xFF9E9E9E),
                                         fontSize = 11.sp
                                     )
@@ -617,7 +623,9 @@ fun AdminNavDropdownMenu(
                                 Spacer(modifier = Modifier.height(4.dp))
 
                                 // MÓDULOS GERADOS DINAMICAMENTE A PARTIR DO REGISTRY OFICIAL
-                                val modulesByCategory = remember { com.example.ui.screens.admin.AdminRegistry.getModulesByCategory() }
+                                val modulesByCategory = remember(currentUser) { 
+                                    com.example.ui.screens.admin.AdminRegistry.getFilteredModulesByCategory(currentUser) 
+                                }
 
                                 modulesByCategory.forEach { (category, moduleList) ->
                                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1296,7 +1304,7 @@ fun AdminCatalogoScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp, color = BrandRed)
+                                    RonycineSmileLoader(size = 14.dp, color = BrandRed)
                                     Text("Rodando...", color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             } else if (syncProgress.pendingCount > 0) {
@@ -1840,11 +1848,10 @@ fun AdminCatalogoScreen(
                     val progressValue = if (bulkDeleteTotal > 0) bulkDeleteProgress.toFloat() / bulkDeleteTotal.toFloat() else 0f
                     
                     Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
+                        RonycineSmileLoader(
                             progress = progressValue,
                             color = Color(0xFFEF4444),
-                            modifier = Modifier.size(64.dp),
-                            strokeWidth = 4.dp
+                            size = 72.dp
                         )
                         Text(
                             text = "${(progressValue * 100).toInt()}%",
@@ -2529,10 +2536,9 @@ fun CatalogDeleteDialog(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        CircularProgressIndicator(
+                        RonycineSmileLoader(
                             color = Color(0xFFEF4444),
-                            modifier = Modifier.size(36.dp),
-                            strokeWidth = 3.dp
+                            size = 48.dp
                         )
                         Text(
                             text = stage ?: "Excluindo...",
@@ -3391,7 +3397,7 @@ fun BackupRestaurarTab(
                         enabled = !isPreviewLoading && restoreRealProgress?.status != RestoreStatus.RESTORING
                     ) {
                         if (isPreviewLoading) {
-                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            RonycineSmileLoader(color = Color.White, size = 22.dp)
                             Spacer(modifier = Modifier.width(10.dp))
                             Text("ANALISANDO ARQUIVO...", fontWeight = FontWeight.Bold)
                         } else {
@@ -4510,10 +4516,9 @@ fun TmdbAutoSyncTab(adminViewModel: AdminViewModel) {
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (progress.isRunning) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
+                                    RonycineSmileLoader(
                                         color = BrandRed,
-                                        strokeWidth = 2.dp
+                                        size = 18.dp
                                     )
                                 } else {
                                     Icon(
@@ -6827,8 +6832,18 @@ fun AdminConfiguracoesScreen(
 ) {
     val megaEmbedConfig by adminViewModel.megaEmbedConfig.collectAsState()
     val shareAppConfig by adminViewModel.shareAppConfig.collectAsState()
+    val playerSources by adminViewModel.playerSources.collectAsState()
+    val playerConfig by adminViewModel.playerConfig.collectAsState()
 
-    var selectedPlayer by remember(megaEmbedConfig) { mutableStateOf(megaEmbedConfig.defaultPlayer) }
+    var selectedPlayer by remember(megaEmbedConfig, playerConfig) {
+        mutableStateOf(
+            playerConfig.megaEmbed.player.ifBlank {
+                playerConfig.defaultPlayerId.ifBlank {
+                    megaEmbedConfig.defaultPlayer.ifBlank { "megaplay" }
+                }
+            }
+        )
+    }
     var selectedLanguage by remember(megaEmbedConfig) { mutableStateOf(megaEmbedConfig.defaultLanguage) }
     var autoSyncEnabled by remember(megaEmbedConfig) { mutableStateOf(megaEmbedConfig.isAutoSyncEnabled) }
     var playerColorHex by remember(megaEmbedConfig) { mutableStateOf(megaEmbedConfig.colorHex.ifBlank { "fb542b" }) }
@@ -6847,11 +6862,30 @@ fun AdminConfiguracoesScreen(
     var isSaving by remember { mutableStateOf(false) }
     var showSuccessBanner by remember { mutableStateOf(false) }
 
+    // Player modal dialog state
+    var showAddPlayerDialog by remember { mutableStateOf(false) }
+    var editingPlayerSource by remember { mutableStateOf<com.example.data.remote.PlayerSource?>(null) }
+
     // Logout confirmation & password dialogs
     var showLogoutConfirmDialog by remember { mutableStateOf(false) }
     var showChangePasswordDialog by remember { mutableStateOf(false) }
 
     val coroutineScope = rememberCoroutineScope()
+
+    if (showAddPlayerDialog) {
+        AddEditPlayerModal(
+            playerToEdit = editingPlayerSource,
+            onDismiss = {
+                showAddPlayerDialog = false
+                editingPlayerSource = null
+            },
+            onSave = { savedSource ->
+                adminViewModel.savePlayerSource(savedSource)
+                showAddPlayerDialog = false
+                editingPlayerSource = null
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -6963,100 +6997,224 @@ fun AdminConfiguracoesScreen(
                 title = "PLAYER E CONTEÚDO"
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF111111)),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, Color(0xFF222222))
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F0F12)),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF1E1E24))
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    // TÍTULO DA SEÇÃO COMPACTO
                     Column {
                         Text(
-                            text = "Player padrão (MegaEmbed)",
+                            text = "Player padrão",
                             color = Color.White,
-                            fontSize = 14.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Escolha o player do MegaEmbed utilizado para reprodução.",
+                            text = "Escolha o player principal para a reprodução de filmes e séries.",
                             color = Color(0xFF9CA3AF),
-                            fontSize = 12.sp
+                            fontSize = 11.5.sp
                         )
                     }
 
-                    // Seletor do player MegaEmbed: MegaPlay, MegaTube, Vidstack, Clappr
+                    // Seletor de Players: MegaPlay, MegaTube, Vidstack, Vidcore, RedeFlixApi e Customizados
+                    val allSelectableOptions = remember(playerSources) {
+                        val baseList = com.example.data.remote.MegaEmbedPlayerType.ALL_PLAYERS
+                        val customSources = playerSources.filter { 
+                            it.enabled && !it.id.equals("vidsrc", ignoreCase = true) &&
+                            !it.id.equals("mgeb", ignoreCase = true) &&
+                            !baseList.any { base -> base.code.equals(it.id, ignoreCase = true) || base.code.equals(it.internalPlayer, ignoreCase = true) }
+                        }.map {
+                            com.example.data.remote.MegaEmbedPlayerOption(
+                                code = it.id,
+                                displayName = it.name,
+                                description = it.description.ifBlank { "Player externo (${it.type})" }
+                            )
+                        }
+                        baseList + customSources
+                    }
+
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        com.example.data.remote.MegaEmbedPlayerType.ALL_PLAYERS.forEach { option ->
-                            val isSelected = selectedPlayer.equals(option.code, ignoreCase = true)
+                        allSelectableOptions.forEach { option ->
+                            val isSelected = selectedPlayer.equals(option.code, ignoreCase = true) ||
+                                    (option.code == "redeflixapi" && selectedPlayer.equals("redeflix", ignoreCase = true)) ||
+                                    (option.code == "vidcore" && selectedPlayer.equals("clappr", ignoreCase = true))
+
+                            val onSelectOption = {
+                                selectedPlayer = option.code
+                                val cleanColor = com.example.data.remote.MegaEmbedPlayerType.normalizeColor(playerColorHex)
+                                adminViewModel.saveMegaEmbedSettings(player = option.code, color = cleanColor, enabled = true)
+                                adminViewModel.setDefaultPlayer(option.code)
+                            }
+
+                            // Metadados do Player (Ícone, Badge e Nome limpo)
+                            val playerIcon = when (option.code.lowercase()) {
+                                "megaplay" -> Icons.Default.PlayArrow
+                                "megatube" -> Icons.Default.SmartDisplay
+                                "vidstack" -> Icons.Default.Tv
+                                "vidcore", "clappr" -> Icons.Default.VideoLibrary
+                                "redeflixapi", "redeflix" -> Icons.Default.Movie
+                                else -> Icons.Default.Link
+                            }
+                            val badgeText = when (option.code.lowercase()) {
+                                "megaplay" -> "Premium"
+                                "megatube" -> "Youtube"
+                                "vidstack" -> "Moderno"
+                                "vidcore", "clappr" -> "Clássico"
+                                "redeflixapi", "redeflix" -> "TMDB"
+                                else -> "Custom"
+                            }
+                            val badgeColor = when (option.code.lowercase()) {
+                                "megaplay" -> BrandRed
+                                "megatube" -> Color(0xFFFF3333)
+                                "vidstack" -> Color(0xFF38BDF8)
+                                "vidcore", "clappr" -> Color(0xFF4ADE80)
+                                "redeflixapi", "redeflix" -> Color(0xFFF97316)
+                                else -> Color(0xFFA78BFA)
+                            }
+                            val cleanDisplayName = when (option.code.lowercase()) {
+                                "megaplay" -> "MegaPlay"
+                                "megatube" -> "MegaTube"
+                                "vidstack" -> "Vidstack"
+                                "vidcore", "clappr" -> "Vidcore"
+                                "redeflixapi", "redeflix" -> "RedeFlixApi"
+                                else -> option.displayName.substringBefore(" (")
+                            }
+
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { selectedPlayer = option.code }
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onSelectOption() }
                                     .testTag("player_option_${option.code}"),
-                                color = if (isSelected) Color(0xFFfb542b).copy(alpha = 0.12f) else Color(0xFF1A1A1A),
-                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) BrandRed.copy(alpha = 0.08f) else Color(0xFF141418),
+                                shape = RoundedCornerShape(8.dp),
                                 border = BorderStroke(
                                     1.dp,
-                                    if (isSelected) Color(0xFFfb542b) else Color(0xFF2A2A2A)
+                                    if (isSelected) BrandRed.copy(alpha = 0.85f) else Color(0xFF222228)
                                 )
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        .padding(horizontal = 10.dp, vertical = 7.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    RadioButton(
-                                        selected = isSelected,
-                                        onClick = { selectedPlayer = option.code },
-                                        colors = RadioButtonDefaults.colors(
-                                            selectedColor = Color(0xFFfb542b),
-                                            unselectedColor = Color(0xFF9CA3AF)
+                                    // Ícone compacto do Player
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(if (isSelected) BrandRed.copy(alpha = 0.18f) else Color(0xFF1C1C22)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = playerIcon,
+                                            contentDescription = null,
+                                            tint = if (isSelected) BrandRed else badgeColor.copy(alpha = 0.9f),
+                                            modifier = Modifier.size(15.dp)
                                         )
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
+                                    }
+
+                                    Spacer(modifier = Modifier.width(9.dp))
+
+                                    // Nome do Player + Badge + Descrição curta
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = option.displayName,
-                                            color = if (isSelected) Color.White else Color(0xFFE5E7EB),
-                                            fontSize = 14.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        ) {
+                                            Text(
+                                                text = cleanDisplayName,
+                                                color = if (isSelected) Color.White else Color(0xFFE5E7EB),
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+
+                                            // Badge discreto
+                                            Surface(
+                                                color = badgeColor.copy(alpha = 0.15f),
+                                                shape = RoundedCornerShape(3.dp),
+                                                border = BorderStroke(0.5.dp, badgeColor.copy(alpha = 0.4f))
+                                            ) {
+                                                Text(
+                                                    text = badgeText,
+                                                    color = badgeColor,
+                                                    fontSize = 8.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+
                                         Text(
                                             text = option.description,
-                                            color = if (isSelected) Color(0xFFfb542b).copy(alpha = 0.9f) else Color(0xFF9CA3AF),
-                                            fontSize = 12.sp
+                                            color = if (isSelected) Color(0xFFD1D5DB) else Color(0xFF8E8E98),
+                                            fontSize = 10.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(6.dp))
+
+                                    // Círculo de seleção compacto (Radio)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(17.dp)
+                                            .clip(CircleShape)
+                                            .border(
+                                                1.5.dp,
+                                                if (isSelected) BrandRed else Color(0xFF4B5563),
+                                                CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (isSelected) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(9.dp)
+                                                    .clip(CircleShape)
+                                                    .background(BrandRed)
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
                     }
 
-                    Divider(color = Color(0xFF222222))
+                    HorizontalDivider(color = Color(0xFF1E1E24), thickness = 1.dp)
 
-                    // COR DO PLAYER (HEX)
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "COR DO PLAYER (HEX)",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Personalize a cor de destaque do player (ex: #fb542b ou fb542b).",
-                            color = Color(0xFF9CA3AF),
-                            fontSize = 12.sp
-                        )
+                    // COR DO PLAYER (HEX) - COMPACTO
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "COR DE DESTAQUE (HEX)",
+                                color = Color.White,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "ex: #fb542b",
+                                color = Color(0xFF8E8E98),
+                                fontSize = 10.5.sp
+                            )
+                        }
 
                         val isValidHex = com.example.data.remote.MegaEmbedPlayerType.isValidHexColor(playerColorHex)
                         val normalizedHex = com.example.data.remote.MegaEmbedPlayerType.normalizeColor(playerColorHex)
@@ -7073,22 +7231,24 @@ fun AdminConfiguracoesScreen(
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedTextField(
                                 value = playerColorHex,
                                 onValueChange = { playerColorHex = it },
-                                placeholder = { Text("#fb542b", color = Color(0xFF6B7280)) },
+                                placeholder = { Text("#fb542b", color = Color(0xFF6B7280), fontSize = 12.sp) },
                                 modifier = Modifier
                                     .weight(1f)
+                                    .height(44.dp)
                                     .testTag("input_player_color_hex"),
                                 singleLine = true,
                                 isError = !isValidHex,
+                                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.5.sp),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = Color.White,
                                     unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color(0xFFfb542b),
-                                    unfocusedBorderColor = Color(0xFF374151),
+                                    focusedBorderColor = BrandRed,
+                                    unfocusedBorderColor = Color(0xFF26262E),
                                     errorBorderColor = Color(0xFFEF4444)
                                 )
                             )
@@ -7096,10 +7256,10 @@ fun AdminConfiguracoesScreen(
                             // Preview visual da cor
                             Box(
                                 modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(6.dp))
                                     .background(previewColor)
-                                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp)),
+                                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(6.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (!isValidHex) {
@@ -7107,7 +7267,7 @@ fun AdminConfiguracoesScreen(
                                         Icons.Default.Close,
                                         contentDescription = "Cor inválida",
                                         tint = Color.White,
-                                        modifier = Modifier.size(18.dp)
+                                        modifier = Modifier.size(14.dp)
                                     )
                                 }
                             }
@@ -7115,10 +7275,272 @@ fun AdminConfiguracoesScreen(
 
                         if (!isValidHex) {
                             Text(
-                                text = "Formato de cor HEX inválido (use 3, 6 ou 8 dígitos, ex: #fb542b)",
+                                text = "Formato HEX inválido (ex: #fb542b)",
                                 color = Color(0xFFEF4444),
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // SEÇÃO: 🛠️ GERENCIAR PLAYERS - COMPACTO E MODERNO
+        item {
+            ConfigSectionHeader(
+                icon = Icons.Default.Dns,
+                title = "GERENCIAR PLAYERS"
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F0F12)),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF1E1E24))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Fontes de Reprodução",
+                                color = Color.White,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Cadastre novas fontes e configure URLs.",
+                                color = Color(0xFF9CA3AF),
                                 fontSize = 11.sp
                             )
+                        }
+
+                        Button(
+                            onClick = {
+                                editingPlayerSource = null
+                                showAddPlayerDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 9.dp, vertical = 4.dp),
+                            modifier = Modifier
+                                .height(32.dp)
+                                .testTag("btn_add_player_source")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+                            Spacer(Modifier.width(3.dp))
+                            Text("+ Adicionar player", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    HorizontalDivider(color = Color(0xFF1E1E24), thickness = 1.dp)
+
+                    // Player Sources List - Linhas Compactas
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        playerSources.forEach { source ->
+                            val isCurrentActive = selectedPlayer.equals(source.id, ignoreCase = true) ||
+                                    (source.internalPlayer.isNotBlank() && selectedPlayer.equals(source.internalPlayer, ignoreCase = true))
+
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF141418),
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isCurrentActive) BrandRed.copy(alpha = 0.6f) else Color(0xFF222228)
+                                )
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Nome + Badges
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = source.name,
+                                                color = Color.White,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Surface(
+                                                color = if (source.type.contains("Iframe", ignoreCase = true) || source.type.contains("WebView", ignoreCase = true)) {
+                                                    Color(0xFF2196F3).copy(alpha = 0.15f)
+                                                } else {
+                                                    Color(0xFF9E9E9E).copy(alpha = 0.15f)
+                                                },
+                                                shape = RoundedCornerShape(3.dp),
+                                                border = BorderStroke(
+                                                    0.5.dp,
+                                                    if (source.type.contains("Iframe", ignoreCase = true) || source.type.contains("WebView", ignoreCase = true)) {
+                                                        Color(0xFF2196F3).copy(alpha = 0.35f)
+                                                    } else {
+                                                        Color(0xFF9E9E9E).copy(alpha = 0.35f)
+                                                    }
+                                                )
+                                            ) {
+                                                Text(
+                                                    text = if (source.isSystem) "Sistema • ${source.type}" else source.type,
+                                                    color = if (source.type.contains("Iframe", ignoreCase = true) || source.type.contains("WebView", ignoreCase = true)) {
+                                                        Color(0xFF64B5F6)
+                                                    } else {
+                                                        Color(0xFFCCCCCC)
+                                                    },
+                                                    fontSize = 8.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                            if (isCurrentActive) {
+                                                Surface(
+                                                    color = Color(0xFF4CAF50).copy(alpha = 0.15f),
+                                                    shape = RoundedCornerShape(3.dp),
+                                                    border = BorderStroke(0.5.dp, Color(0xFF4CAF50).copy(alpha = 0.4f))
+                                                ) {
+                                                    Text(
+                                                        text = "ATIVO",
+                                                        color = Color(0xFF4CAF50),
+                                                        fontSize = 8.5.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Controles: Status + Switch + Ações
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(end = 2.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(5.dp)
+                                                        .clip(CircleShape)
+                                                        .background(if (source.enabled) Color(0xFF4CAF50) else Color(0xFF6B7280))
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    text = if (source.enabled) "Ativado" else "Desativado",
+                                                    color = if (source.enabled) Color(0xFF4CAF50) else Color(0xFF9CA3AF),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+
+                                            Switch(
+                                                checked = source.enabled,
+                                                onCheckedChange = { isChecked ->
+                                                    adminViewModel.togglePlayerEnabled(source.id, isChecked)
+                                                    if (!isChecked && isCurrentActive) {
+                                                        val fallback = playerSources.find { it.enabled && it.id != source.id }
+                                                        if (fallback != null) {
+                                                            selectedPlayer = fallback.internalPlayer.ifBlank { fallback.id }
+                                                            adminViewModel.setDefaultPlayer(fallback.id)
+                                                        }
+                                                    }
+                                                },
+                                                colors = SwitchDefaults.colors(
+                                                    checkedThumbColor = Color.White,
+                                                    checkedTrackColor = Color(0xFF4CAF50),
+                                                    uncheckedThumbColor = Color.Gray,
+                                                    uncheckedTrackColor = Color(0xFF26262E)
+                                                ),
+                                                modifier = Modifier.scale(0.7f)
+                                            )
+
+                                            // Botão Editar
+                                            IconButton(
+                                                onClick = {
+                                                    editingPlayerSource = source
+                                                    showAddPlayerDialog = true
+                                                },
+                                                modifier = Modifier.size(26.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    contentDescription = "Editar",
+                                                    tint = Color(0xFF64B5F6),
+                                                    modifier = Modifier.size(13.dp)
+                                                )
+                                            }
+
+                                            // Botão Excluir (se customizado)
+                                            if (!source.isSystem && source.id != "mgeb" && source.id != "vidsrc" && source.id != "redeflix" && source.id != "redeflixapi") {
+                                                IconButton(
+                                                    onClick = {
+                                                        adminViewModel.deletePlayerSource(source.id)
+                                                    },
+                                                    modifier = Modifier.size(26.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Delete,
+                                                        contentDescription = "Excluir",
+                                                        tint = Color(0xFFEF5350),
+                                                        modifier = Modifier.size(13.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Template URLs compacto
+                                    if (source.movieTmdbUrl.isNotBlank() || source.tvTmdbUrl.isNotBlank()) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(Color(0xFF0D0D10))
+                                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            if (source.movieTmdbUrl.isNotBlank()) {
+                                                Text(
+                                                    text = "Filme: ${source.movieTmdbUrl}",
+                                                    color = Color(0xFF81C784),
+                                                    fontSize = 9.sp,
+                                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
+                                                )
+                                            }
+                                            if (source.tvTmdbUrl.isNotBlank()) {
+                                                Text(
+                                                    text = "Série: ${source.tvTmdbUrl}",
+                                                    color = Color(0xFF64B5F6),
+                                                    fontSize = 9.sp,
+                                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -7478,10 +7900,9 @@ fun AdminConfiguracoesScreen(
                 enabled = !isSaving
             ) {
                 if (isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
+                    RonycineSmileLoader(
                         color = Color.White,
-                        strokeWidth = 2.5.dp
+                        size = 22.dp
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text("SALVANDO...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -8149,7 +8570,7 @@ fun SearchTab(
         if (isSearching) {
             item {
                 Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = BrandRed)
+                    RonycineSmileLoader(color = BrandRed, size = 40.dp)
                 }
             }
         } else if (searchQuery.isBlank()) {
@@ -8340,72 +8761,834 @@ fun HistoryTab(history: List<AdminViewModel.ImportHistoryItem>) {
 
 @Composable
 fun TvApiTab() {
+    val context = LocalContext.current
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     val tvRepository = remember { LiveTvRepository.getInstance() }
     val tvStats by tvRepository.apiStats.collectAsState()
+    val cachedChannels by tvRepository.cachedChannels.collectAsState()
+    val cachedEvents by tvRepository.cachedEvents.collectAsState()
+    val cachedCategories by tvRepository.cachedChannelCategories.collectAsState()
+    val totalBlockedDuplicates by tvRepository.totalBlockedDuplicates.collectAsState()
+    val embedTvStats by tvRepository.embedTvStats.collectAsState()
+    val syncHistory by tvRepository.syncHistory.collectAsState()
     val coroutineScope = rememberCoroutineScope()
+
     var isSyncingTv by remember { mutableStateOf(false) }
-    var syncResultMsg by remember { mutableStateOf<String?>(null) }
+    var isSyncingEmbedTv by remember { mutableStateOf(false) }
+    var syncSummaryModal by remember { mutableStateOf<com.example.data.repository.LiveTvSyncSummary?>(null) }
+
+    var activeSubTab by remember { mutableIntStateOf(0) }
+
+    var channelSearchQuery by remember { mutableStateOf("") }
+    var channelStatusFilter by remember { mutableStateOf("all") }
+    var selectedCategoryFilter by remember { mutableStateOf("Todos") }
+    var selectedSourceFilter by remember { mutableStateOf("Todos") }
+
+    var showAddChannelModal by remember { mutableStateOf(false) }
+    var showImportApiModal by remember { mutableStateOf(false) }
+    var duplicateWarningChannel by remember { mutableStateOf<ApiChannel?>(null) }
+    var editingChannel by remember { mutableStateOf<ApiChannel?>(null) }
+    var deletingChannel by remember { mutableStateOf<ApiChannel?>(null) }
+    var testingChannel by remember { mutableStateOf<ApiChannel?>(null) }
+    var testingEvent by remember { mutableStateOf<ApiEvent?>(null) }
+
+    val filteredChannels = remember(cachedChannels, channelSearchQuery, channelStatusFilter, selectedCategoryFilter, selectedSourceFilter) {
+        cachedChannels.filter { channel ->
+            val matchesSearch = channelSearchQuery.isBlank() ||
+                    channel.name.contains(channelSearchQuery, ignoreCase = true) ||
+                    channel.id.contains(channelSearchQuery, ignoreCase = true) ||
+                    (channel.category?.contains(channelSearchQuery, ignoreCase = true) == true)
+
+            val matchesStatus = when (channelStatusFilter) {
+                "active" -> channel.isActive == true
+                "inactive" -> channel.isActive != true
+                else -> true
+            }
+
+            val matchesCategory = selectedCategoryFilter == "Todos" ||
+                    channel.category?.equals(selectedCategoryFilter, ignoreCase = true) == true
+
+            val matchesSource = selectedSourceFilter == "Todos" ||
+                    (selectedSourceFilter == "API atual" && (channel.sourceProvider == "api_atual" || channel.sourceProvider == null)) ||
+                    (selectedSourceFilter == "EmbedTV" && channel.sourceProvider == "embedtv") ||
+                    (selectedSourceFilter == "Manual" && channel.sourceProvider == "manual")
+
+            matchesSearch && matchesStatus && matchesCategory && matchesSource
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item { Text("📡 Sincronização de TV & API", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black) }
+        // --- 1. HEADER ADMIN ---
         item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, CardBorder)
-            ) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.LiveTv, null, tint = BrandRed)
-                            Spacer(Modifier.width(8.dp))
-                            Text("API reidosembeds.online", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        }
-                        Surface(
-                            color = if (tvStats.isOnline) Color(0xFF059669).copy(alpha = 0.2f) else Color(0xFFDC2626).copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(6.dp),
-                            border = BorderStroke(1.dp, if (tvStats.isOnline) Color(0xFF059669) else Color(0xFFDC2626))
-                        ) {
                             Text(
-                                if (tvStats.isOnline) "🟢 ONLINE" else "🔴 OFFLINE",
-                                color = if (tvStats.isOnline) Color(0xFF34D399) else Color(0xFFF87171),
+                                "📡 Sincronização de TV & API",
+                                color = Color.White,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Black,
+                                letterSpacing = 0.5.sp
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                color = BrandRed.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(4.dp),
+                                border = BorderStroke(1.dp, BrandRed.copy(alpha = 0.5f))
+                            ) {
+                                Text(
+                                    "🔐 ADMIN",
+                                    color = BrandRed,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            "Gerencie fontes, canais, eventos e sincronizações da TV Ao Vivo.",
+                            color = Color.Gray,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Surface(
+                        color = Color(0xFF059669).copy(alpha = 0.1f),
+                        shape = RoundedCornerShape(20.dp),
+                        border = BorderStroke(1.dp, Color(0xFF059669).copy(alpha = 0.3f))
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .background(Color(0xFF34D399), CircleShape)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Sistema Online",
+                                color = Color(0xFF34D399),
                                 fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
-                    Text("Sincronize canais de TV ao vivo e eventos esportivos.", color = Color.Gray, fontSize = 12.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatBox(Modifier.weight(1f), "CANAIS", tvStats.channelsCount.toString(), Icons.Default.LiveTv, BrandRed)
-                        StatBox(Modifier.weight(1f), "EVENTOS", tvStats.eventsCount.toString(), Icons.Default.SportsSoccer, Color(0xFF3B82F6))
+                }
+                Divider(color = Color(0xFF222222), thickness = 1.dp, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+
+        // --- 2. AÇÕES PRINCIPAIS ---
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        isSyncingTv = true
+                        coroutineScope.launch {
+                            val summary = tvRepository.syncAllWithSummary()
+                            isSyncingTv = false
+                            syncSummaryModal = summary
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1.5f),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("🔄 Sincronizar Tudo", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = { showAddChannelModal = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, Color(0xFF333333)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("＋ Canal", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = { showImportApiModal = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = DarkSurface),
+                    border = BorderStroke(1.dp, Color(0xFF333333)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(0.dp)
+                ) {
+                    Text("📥 Importar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // --- 3. DASHBOARD ADMINISTRATIVO ---
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // APIs Status Card
+                Card(
+                    modifier = Modifier.weight(1.2f),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F0F0F)),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFF1A1A1A))
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("📡 APIs CONECTADAS", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text("2 fontes funcionando", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(12.dp))
+                        Text("Última sincronização: ${tvStats.lastSync.takeLast(5)}", color = Color.Gray, fontSize = 10.sp)
+                        Text("Resposta média: 1.2s", color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
-                    Button(
-                        onClick = {
+                }
+
+                // Quick Stats Grid
+                Column(
+                    modifier = Modifier.weight(2f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AdminStatMini(Modifier.weight(1f), "CANAIS", tvStats.channelsCount.toString())
+                        AdminStatMini(Modifier.weight(1f), "EVENTOS", tvStats.eventsCount.toString())
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AdminStatMini(Modifier.weight(1f), "ATIVOS", tvStats.activeChannelsCount.toString())
+                        AdminStatMini(Modifier.weight(1f), "DUPLICADOS", totalBlockedDuplicates.toString(), labelColor = Color(0xFFF59E0B))
+                    }
+                }
+            }
+        }
+
+        // --- 4. FONTES DE TV ---
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("FONTES DE TV", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+                Text("Gerencie as fontes usadas para alimentar a TV Ao Vivo.", color = Color.Gray, fontSize = 11.sp)
+                
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // REI DOS EMBEDS
+                    AdminSourceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "API ATUAL",
+                        subtitle = "reidosembeds.online",
+                        icon = Icons.Default.Public,
+                        status = if (tvStats.isOnline) "Online" else "Offline",
+                        channels = tvStats.channelsCount,
+                        events = tvStats.eventsCount,
+                        onSync = {
                             isSyncingTv = true
-                            syncResultMsg = null
                             coroutineScope.launch {
-                                val updated = tvRepository.syncAll()
+                                syncSummaryModal = tvRepository.syncReiDosEmbeds()
                                 isSyncingTv = false
-                                syncResultMsg = "✓ Sincronizado: ${updated.channelsCount} canais."
+                            }
+                        }
+                    )
+
+                    // EMBEDTV
+                    AdminSourceCard(
+                        modifier = Modifier.weight(1f),
+                        title = "EMBEDTV",
+                        subtitle = "embedtv.lat",
+                        icon = Icons.Default.Cloud,
+                        status = if (embedTvStats.isOnline) "Online" else "Offline",
+                        channels = embedTvStats.channelsCount,
+                        events = embedTvStats.eventsCount,
+                        onSync = {
+                            isSyncingEmbedTv = true
+                            coroutineScope.launch {
+                                syncSummaryModal = tvRepository.syncAllEmbedTv()
+                                isSyncingEmbedTv = false
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        // --- 5. EPG ---
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F0F0F)),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, Color(0xFF1A1A1A))
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(Color(0xFF1A1A1A), RoundedCornerShape(8.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Schedule, null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text("📺 GUIA DE PROGRAMAÇÃO (EPG)", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Status: ", color = Color.Gray, fontSize = 10.sp)
+                                Text("🟢 Atualizado", color = Color(0xFF34D399), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Última: ${tvStats.lastSync.takeLast(5)}", color = Color.Gray, fontSize = 10.sp)
+                            }
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    tvRepository.syncEmbedTvGuide()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)),
+                            shape = RoundedCornerShape(6.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text("Atualizar EPG", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 6. HISTÓRICO ---
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("📋 HISTÓRICO DE SINCRONIZAÇÕES", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                    Text("Ver tudo", color = BrandRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                }
+
+                if (syncHistory.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(80.dp)
+                            .background(Color(0xFF0F0F0F), RoundedCornerShape(12.dp))
+                            .border(BorderStroke(1.dp, Color(0xFF1A1A1A)), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Nenhum log recente disponível.", color = Color.Gray, fontSize = 11.sp)
+                    }
+                } else {
+                    syncHistory.take(5).forEach { log ->
+                        AdminLogItem(log)
+                    }
+                }
+            }
+        }
+
+        // --- SUB-NAVIGATION TABS ---
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = activeSubTab == 0,
+                    onClick = { activeSubTab = 0 },
+                    label = { Text("📺 Canais (${cachedChannels.size})", fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = BrandRed,
+                        selectedLabelColor = Color.White,
+                        containerColor = DarkSurface,
+                        labelColor = Color.Gray
+                    )
+                )
+                FilterChip(
+                    selected = activeSubTab == 1,
+                    onClick = { activeSubTab = 1 },
+                    label = { Text("🏆 Eventos (${cachedEvents.size})", fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF2563EB),
+                        selectedLabelColor = Color.White,
+                        containerColor = DarkSurface,
+                        labelColor = Color.Gray
+                    )
+                )
+                FilterChip(
+                    selected = activeSubTab == 2,
+                    onClick = { activeSubTab = 2 },
+                    label = { Text("📚 API Docs", fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Color(0xFF059669),
+                        selectedLabelColor = Color.White,
+                        containerColor = DarkSurface,
+                        labelColor = Color.Gray
+                    )
+                )
+            }
+        }
+
+        // --- TAB 0: CANAIS DA TV ---
+        if (activeSubTab == 0) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = channelSearchQuery,
+                        onValueChange = { channelSearchQuery = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("🔎 Pesquisar canal...", color = Color.Gray, fontSize = 13.sp) },
+                        trailingIcon = {
+                            if (channelSearchQuery.isNotEmpty()) {
+                                IconButton(onClick = { channelSearchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = null, tint = Color.Gray)
+                                }
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = !isSyncingTv
-                    ) {
-                        if (isSyncingTv) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp)) else Text("Sincronizar Agora")
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = BrandRed,
+                            unfocusedBorderColor = CardBorder,
+                            focusedContainerColor = DarkSurface,
+                            unfocusedContainerColor = DarkSurface,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true
+                    )
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        item {
+                            FilterChip(
+                                selected = channelStatusFilter == "all",
+                                onClick = { channelStatusFilter = "all" },
+                                label = { Text("Todos Status", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = BrandRed, selectedLabelColor = Color.White)
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = channelStatusFilter == "active",
+                                onClick = { channelStatusFilter = "active" },
+                                label = { Text("🟢 Ativos", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF059669), selectedLabelColor = Color.White)
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = channelStatusFilter == "inactive",
+                                onClick = { channelStatusFilter = "inactive" },
+                                label = { Text("⚪ Inativos", fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFFDC2626), selectedLabelColor = Color.White)
+                            )
+                        }
+
+                        items(cachedCategories) { cat ->
+                            FilterChip(
+                                selected = selectedCategoryFilter == cat,
+                                onClick = { selectedCategoryFilter = cat },
+                                label = { Text(cat, fontSize = 11.sp) },
+                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Color(0xFF3B82F6), selectedLabelColor = Color.White)
+                            )
+                        }
                     }
-                    if (syncResultMsg != null) Text(syncResultMsg!!, color = Color(0xFF34D399), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            if (filteredChannels.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.SearchOff, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(36.dp))
+                            Text("Nenhum canal encontrado.", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Tente mudar a pesquisa ou adicionar novos canais.", color = Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                }
+            } else {
+                items(filteredChannels, key = { it.id }) { channel ->
+                    AdminChannelCard(
+                        channel = channel,
+                        onTest = { testingChannel = channel },
+                        onEdit = { editingChannel = channel },
+                        onToggleStatus = {
+                            coroutineScope.launch {
+                                tvRepository.toggleChannelStatus(channel.id)
+                                Toast.makeText(context, "Status do canal alterado com sucesso.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onDelete = { deletingChannel = channel },
+                        onCopyId = {
+                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(channel.id))
+                            Toast.makeText(context, "ID '${channel.id}' copiado!", Toast.LENGTH_SHORT).show()
+                        },
+                        onCopyUrl = {
+                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(channel.getEffectiveEmbedUrl()))
+                            Toast.makeText(context, "URL do stream copiada!", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
+            }
+        }
+
+        // --- TAB 1: EVENTOS ESPORTIVOS ---
+        if (activeSubTab == 1) {
+            items(cachedEvents, key = { it.id }) { event ->
+                AdminEventCard(
+                    event = event,
+                    onTest = { testingEvent = event },
+                    onCopyUrl = {
+                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(event.playEventUrl ?: ""))
+                        Toast.makeText(context, "URL do evento copiada!", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        }
+
+        // --- TAB 2: API DOCS COMPACTA ---
+        if (activeSubTab == 2) {
+            item {
+                AdminApiDocsCard(onCopy = { label, url ->
+                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(url))
+                    Toast.makeText(context, "URL ($label) copiada!", Toast.LENGTH_SHORT).show()
+                })
+            }
+        }
+    }
+
+    // --- MODALS ---
+    if (showAddChannelModal) {
+        AdminAddChannelDialog(
+            onDismiss = { showAddChannelModal = false },
+            onConfirm = { name, publicId, category, logoUrl, streamUrl, description, isActive, sourceProvider ->
+                coroutineScope.launch {
+                    val result = tvRepository.addChannel(name, publicId, category, logoUrl, streamUrl, description, isActive, sourceProvider = sourceProvider)
+                    when (result) {
+                        is com.example.data.repository.AdminAddChannelResult.Success -> {
+                            showAddChannelModal = false
+                            Toast.makeText(context, "✓ Canal '${result.channel.name}' adicionado com sucesso!", Toast.LENGTH_SHORT).show()
+                        }
+                        is com.example.data.repository.AdminAddChannelResult.Duplicate -> {
+                            showAddChannelModal = false
+                            duplicateWarningChannel = result.existingChannel
+                        }
+                        is com.example.data.repository.AdminAddChannelResult.Error -> {
+                            Toast.makeText(context, "🔴 ${result.message}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    if (showImportApiModal) {
+        AdminImportApiDialog(
+            tvRepository = tvRepository,
+            onDismiss = { showImportApiModal = false },
+            onDuplicate = { dup ->
+                showImportApiModal = false
+                duplicateWarningChannel = dup
+            },
+            onSuccess = { channel ->
+                showImportApiModal = false
+                Toast.makeText(context, "✓ Canal '${channel.name}' importado com sucesso!", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (duplicateWarningChannel != null) {
+        val dup = duplicateWarningChannel!!
+        AlertDialog(
+            onDismissRequest = { duplicateWarningChannel = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFF59E0B))
+                    Spacer(Modifier.width(8.dp))
+                    Text("⚠️ Canal já cadastrado", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Este canal já existe no RONYCINE.", color = Color.LightGray, fontSize = 13.sp)
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color.Black),
+                        border = BorderStroke(1.dp, CardBorder),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(dup.name, color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("ID: ${dup.id} • Categorias: ${dup.category ?: "Geral"}", color = Color.Gray, fontSize = 11.sp)
+                            Text(dup.getEffectiveEmbedUrl(), color = BrandRed, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        channelSearchQuery = dup.name
+                        activeSubTab = 0
+                        duplicateWarningChannel = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed)
+                ) {
+                    Text("Ver canal existente", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { duplicateWarningChannel = null }) {
+                    Text("Cancelar", color = Color.Gray)
+                }
+            },
+            containerColor = DarkSurface
+        )
+    }
+
+    if (syncSummaryModal != null) {
+        val summary = syncSummaryModal!!
+        AlertDialog(
+            onDismissRequest = { syncSummaryModal = null },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (summary.isApiOnline) Icons.Default.CheckCircle else Icons.Default.Error,
+                        contentDescription = null,
+                        tint = if (summary.isApiOnline) Color(0xFF34D399) else Color(0xFFF87171)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (summary.isApiOnline) "SINCRONIZAÇÃO CONCLUÍDA" else "🔴 API INDISPONÍVEL",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(summary.message, color = Color.LightGray, fontSize = 13.sp)
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color.Black),
+                        border = BorderStroke(1.dp, CardBorder),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("✓ ${summary.totalFoundOnApi} canais encontrados na API", color = Color.White, fontSize = 12.sp)
+                            Text("✓ ${summary.newChannelsAdded} novos canais adicionados", color = Color(0xFF34D399), fontSize = 12.sp)
+                            Text("✓ ${summary.existingUpdated} canais já existentes atualizados", color = Color(0xFF60A5FA), fontSize = 12.sp)
+                            Text("✓ ${summary.duplicatesBlocked} duplicados bloqueados", color = Color(0xFFF59E0B), fontSize = 12.sp)
+                            Text("✓ ${summary.errorCount} erros ocorridos", color = if (summary.errorCount > 0) Color(0xFFF87171) else Color.Gray, fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { syncSummaryModal = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed)
+                ) {
+                    Text("Entendido", fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = DarkSurface
+        )
+    }
+
+    if (editingChannel != null) {
+        val ch = editingChannel!!
+        AdminEditChannelDialog(
+            channel = ch,
+            onDismiss = { editingChannel = null },
+            onConfirm = { updated ->
+                coroutineScope.launch {
+                    tvRepository.updateChannel(updated)
+                    editingChannel = null
+                    Toast.makeText(context, "✓ Canal '${updated.name}' atualizado!", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+
+    if (deletingChannel != null) {
+        val ch = deletingChannel!!
+        AlertDialog(
+            onDismissRequest = { deletingChannel = null },
+            title = { Text("Excluir Canal", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = { Text("Tem certeza que deseja excluir o canal '${ch.name}'? Esta ação não afetará outros canais.", color = Color.LightGray, fontSize = 13.sp) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            tvRepository.deleteChannel(ch.id)
+                            deletingChannel = null
+                            Toast.makeText(context, "Canal excluído com sucesso.", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text("Excluir", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingChannel = null }) {
+                    Text("Cancelar", color = Color.Gray)
+                }
+            },
+            containerColor = DarkSurface
+        )
+    }
+
+    if (testingChannel != null) {
+        AdminPlayerTestDialog(
+            channel = testingChannel!!,
+            onDismiss = { testingChannel = null }
+        )
+    }
+}
+
+@Composable
+fun AdminChannelCard(
+    channel: ApiChannel,
+    onTest: () -> Unit,
+    onEdit: () -> Unit,
+    onToggleStatus: () -> Unit,
+    onDelete: () -> Unit,
+    onCopyId: () -> Unit,
+    onCopyUrl: () -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, CardBorder)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = RoundedCornerShape(10.dp),
+                color = Color.Black,
+                border = BorderStroke(1.dp, CardBorder)
+            ) {
+                if (!channel.logoUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(channel.logoUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = channel.name,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize().padding(4.dp)
+                    )
+                } else {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Tv, contentDescription = null, tint = BrandRed)
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(channel.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.width(6.dp))
+                    Surface(
+                        color = if (channel.isActive == true) Color(0xFF059669).copy(alpha = 0.2f) else Color(0xFFDC2626).copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(4.dp)
+                    ) {
+                        Text(
+                            if (channel.isActive == true) "🟢 ATIVO" else "⚪ INATIVO",
+                            color = if (channel.isActive == true) Color(0xFF34D399) else Color(0xFFF87171),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Text("@${channel.id}", color = Color.Gray, fontSize = 11.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Surface(color = Color(0xFF1E293B), shape = RoundedCornerShape(4.dp)) {
+                        Text(channel.category ?: "Geral", color = Color(0xFF94A3B8), fontSize = 10.sp, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                    }
+                }
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onTest, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = "Testar", tint = Color(0xFF34D399), modifier = Modifier.size(20.dp))
+                }
+                IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Edit, contentDescription = "Editar", tint = Color(0xFF60A5FA), modifier = Modifier.size(18.dp))
+                }
+                Box {
+                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Mais", tint = Color.Gray, modifier = Modifier.size(20.dp))
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.background(DarkSurface)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("▶ Testar Canal", color = Color.White, fontSize = 12.sp) },
+                            onClick = { showMenu = false; onTest() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("✏ Editar", color = Color.White, fontSize = 12.sp) },
+                            onClick = { showMenu = false; onEdit() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (channel.isActive == true) "⏸ Desativar" else "🟢 Ativar", color = Color.White, fontSize = 12.sp) },
+                            onClick = { showMenu = false; onToggleStatus() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("📋 Copiar ID (@${channel.id})", color = Color.White, fontSize = 12.sp) },
+                            onClick = { showMenu = false; onCopyId() }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("🔗 Copiar URL Stream", color = Color.White, fontSize = 12.sp) },
+                            onClick = { showMenu = false; onCopyUrl() }
+                        )
+                        HorizontalDivider(color = CardBorder)
+                        DropdownMenuItem(
+                            text = { Text("🗑 Excluir", color = Color(0xFFF87171), fontSize = 12.sp, fontWeight = FontWeight.Bold) },
+                            onClick = { showMenu = false; onDelete() }
+                        )
+                    }
                 }
             }
         }
@@ -8413,18 +9596,691 @@ fun TvApiTab() {
 }
 
 @Composable
-fun StatBox(modifier: Modifier, label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector, color: Color) {
+fun AdminEventCard(
+    event: ApiEvent,
+    onTest: () -> Unit,
+    onCopyUrl: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, CardBorder)
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    color = when (event.status?.lowercase(Locale.ROOT)) {
+                        "live", "ao vivo" -> Color(0xFFDC2626).copy(alpha = 0.2f)
+                        else -> Color(0xFF2563EB).copy(alpha = 0.2f)
+                    },
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        when (event.status?.lowercase(Locale.ROOT)) {
+                            "live", "ao vivo" -> "🔴 AO VIVO"
+                            else -> "🟡 PRÓXIMO"
+                        },
+                        color = when (event.status?.lowercase(Locale.ROOT)) {
+                            "live", "ao vivo" -> Color(0xFFF87171)
+                            else -> Color(0xFF93C5FD)
+                        },
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+                Text(event.startTime ?: "Hoje", color = Color.Gray, fontSize = 11.sp)
+            }
+
+            Text(event.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            if (!event.competition.isNullOrBlank()) {
+                Text("🏆 ${event.competition}", color = Color.LightGray, fontSize = 12.sp)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onTest,
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("▶ Assistir / Testar", fontSize = 11.sp)
+                }
+                OutlinedButton(
+                    onClick = onCopyUrl,
+                    border = BorderStroke(1.dp, CardBorder),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Copiar URL", color = Color.White, fontSize = 11.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminDuplicateChannelWarning(
+    channel: ApiChannel,
+    onDismiss: () -> Unit,
+    onViewChannel: (ApiChannel) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFF59E0B))
+                Spacer(Modifier.width(8.dp))
+                Text("CANAL JÁ CADASTRADO", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Este canal já existe no banco de dados. Para evitar duplicidade, o sistema bloqueou a criação de um segundo registro.",
+                    color = Color.LightGray,
+                    fontSize = 13.sp
+                )
+                
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF151515)),
+                    border = BorderStroke(1.dp, Color(0xFF222222)),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            model = channel.logoUrl,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(4.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(channel.name, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text("ID: ${channel.id} • ${channel.category}", color = Color.Gray, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { 
+                    onViewChannel(channel)
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = BrandRed)
+            ) {
+                Text("Ver Canal", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = Color.Gray)
+            }
+        },
+        containerColor = Color(0xFF1A1A1A)
+    )
+}
+@Composable
+fun AdminAddChannelDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, publicId: String, category: String, logoUrl: String, streamUrl: String, description: String, isActive: Boolean, sourceProvider: String) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var publicId by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("Notícias") }
+    var logoUrl by remember { mutableStateOf("") }
+    var streamUrl by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var isActive by remember { mutableStateOf(true) }
+    var sourceProvider by remember { mutableStateOf("manual") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("ADICIONAR NOVO CANAL", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                Text("Preencha os dados técnicos do canal.", color = Color.Gray, fontSize = 11.sp)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Source Selection Section
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Fonte de Dados", color = Color.LightGray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("manual", "api_atual", "embedtv").forEach { src ->
+                            FilterChip(
+                                selected = sourceProvider == src,
+                                onClick = { sourceProvider = src },
+                                label = { Text(src.replace("_", " ").uppercase(Locale.ROOT), fontSize = 9.sp, fontWeight = FontWeight.Bold) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = BrandRed,
+                                    selectedLabelColor = Color.White,
+                                    containerColor = Color(0xFF151515),
+                                    labelColor = Color.Gray
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = sourceProvider == src,
+                                    borderColor = if (sourceProvider == src) BrandRed else Color(0xFF222222),
+                                    selectedBorderColor = BrandRed
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // Inputs Group
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AdminField(value = name, onValueChange = { 
+                        name = it
+                        if (publicId.isEmpty()) publicId = it.lowercase(Locale.ROOT).replace(" ", "").replace("-", "")
+                    }, label = "Nome do canal (Ex: CNN Brasil)")
+
+                    AdminField(value = publicId, onValueChange = { publicId = it.lowercase(Locale.ROOT).replace(" ", "") }, label = "ID público (Ex: cnnbrasil)")
+                    
+                    AdminField(value = category, onValueChange = { category = it }, label = "Categoria (Ex: Notícias, Esportes)")
+                    
+                    AdminField(value = logoUrl, onValueChange = { logoUrl = it }, label = "Logo URL (HTTPS)")
+                    
+                    AdminField(value = streamUrl, onValueChange = { streamUrl = it }, label = "URL de reprodução (.m3u8, .mpd ou embed)")
+
+                    AdminField(value = description, onValueChange = { description = it }, label = "Descrição / Notas (Opcional)", singleLine = false)
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF151515), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text("Canal Ativado", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Switch(
+                        checked = isActive,
+                        onCheckedChange = { isActive = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF059669))
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(name, publicId, category, logoUrl, streamUrl, description, isActive, sourceProvider) },
+                colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.height(42.dp)
+            ) {
+                Text("ADICIONAR CANAL", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("CANCELAR", color = Color.Gray, fontSize = 12.sp) }
+        },
+        containerColor = Color(0xFF111111)
+    )
+}
+
+@Composable
+fun AdminField(value: String, onValueChange: (String) -> Unit, label: String, singleLine: Boolean = true) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label, fontSize = 11.sp) },
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = BrandRed,
+            unfocusedBorderColor = Color(0xFF222222),
+            focusedTextColor = Color.White,
+            unfocusedTextColor = Color.White,
+            focusedLabelColor = BrandRed,
+            unfocusedLabelColor = Color.Gray,
+            focusedContainerColor = Color(0xFF0A0A0A),
+            unfocusedContainerColor = Color(0xFF0A0A0A)
+        ),
+        singleLine = singleLine,
+        modifier = Modifier.fillMaxWidth(),
+        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp)
+    )
+}
+
+
+@Composable
+fun AdminImportApiDialog(
+    tvRepository: LiveTvRepository,
+    onDismiss: () -> Unit,
+    onDuplicate: (ApiChannel) -> Unit,
+    onSuccess: (ApiChannel) -> Unit
+) {
+    var publicId by remember { mutableStateOf("") }
+    var isSearching by remember { mutableStateOf(false) }
+    var previewChannel by remember { mutableStateOf<ApiChannel?>(null) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var selectedProvider by remember { mutableStateOf("api_atual") }
+    val coroutineScope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Download, contentDescription = null, tint = Color(0xFF60A5FA), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("IMPORTAR DA API", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                }
+                Text("Selecione a fonte e digite o ID para consulta.", color = Color.Gray, fontSize = 11.sp)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Provider selection
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("api_atual", "embedtv").forEach { prov ->
+                        FilterChip(
+                            selected = selectedProvider == prov,
+                            onClick = { selectedProvider = prov },
+                            label = { Text(if (prov == "api_atual") "API ATUAL" else "EMBEDTV", fontSize = 9.sp, fontWeight = FontWeight.Bold) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = BrandRed,
+                                selectedLabelColor = Color.White,
+                                containerColor = Color(0xFF151515),
+                                labelColor = Color.Gray
+                            )
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = publicId,
+                        onValueChange = { publicId = it.lowercase(Locale.ROOT).trim() },
+                        placeholder = { Text("Ex: cnnbrasil", fontSize = 12.sp) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = BrandRed,
+                            unfocusedBorderColor = Color(0xFF222222),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedContainerColor = Color(0xFF0A0A0A),
+                            unfocusedContainerColor = Color(0xFF0A0A0A)
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp)
+                    )
+
+                    Button(
+                        onClick = {
+                            if (publicId.isNotBlank()) {
+                                isSearching = true
+                                errorMsg = null
+                                previewChannel = null
+                                coroutineScope.launch {
+                                    val result = tvRepository.importChannelFromApi(publicId, provider = selectedProvider)
+                                    isSearching = false
+                                    when (result) {
+                                        is com.example.data.repository.AdminImportChannelResult.Preview -> previewChannel = result.channel
+                                        is com.example.data.repository.AdminImportChannelResult.Duplicate -> onDuplicate(result.existingChannel)
+                                        is com.example.data.repository.AdminImportChannelResult.NotFound -> errorMsg = result.message
+                                        is com.example.data.repository.AdminImportChannelResult.Error -> errorMsg = result.message
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(50.dp),
+                        enabled = !isSearching
+                    ) {
+                        if (isSearching) RonycineSmileLoader(size = 16.dp) else Text("BUSCAR", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+
+                if (errorMsg != null) {
+                    Surface(
+                        color = Color(0xFFDC2626).copy(alpha = 0.1f),
+                        border = BorderStroke(1.dp, Color(0xFFDC2626).copy(alpha = 0.3f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "⚠️ $errorMsg",
+                            color = Color(0xFFF87171),
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
+
+                if (previewChannel != null) {
+                    val ch = previewChannel!!
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("PREVIEW DO CANAL", color = Color.Gray, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0A0A0A)),
+                            border = BorderStroke(1.dp, Color(0xFF34D399).copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                AsyncImage(
+                                    model = ch.logoUrl,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(ch.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("ID: ${ch.id} • ${ch.category ?: "Geral"}", color = Color.Gray, fontSize = 11.sp)
+                                    Text(
+                                        ch.sourceProvider?.uppercase() ?: "API",
+                                        color = Color(0xFF34D399),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
+                        }
+                        
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val res = tvRepository.saveImportedChannel(previewChannel!!)
+                                    when (res) {
+                                        is com.example.data.repository.AdminAddChannelResult.Success -> onSuccess(res.channel)
+                                        is com.example.data.repository.AdminAddChannelResult.Duplicate -> onDuplicate(res.existingChannel)
+                                        is com.example.data.repository.AdminAddChannelResult.Error -> errorMsg = res.message
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(42.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF059669)),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("IMPORTAR CANAL AGORA", fontWeight = FontWeight.Black, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("FECHAR", color = Color.Gray, fontSize = 11.sp) }
+        },
+        containerColor = Color(0xFF111111)
+    )
+}
+
+@Composable
+fun AdminEditChannelDialog(
+    channel: ApiChannel,
+    onDismiss: () -> Unit,
+    onConfirm: (ApiChannel) -> Unit
+) {
+    var name by remember { mutableStateOf(channel.name) }
+    var category by remember { mutableStateOf(channel.category ?: "Geral") }
+    var logoUrl by remember { mutableStateOf(channel.logoUrl ?: "") }
+    var streamUrl by remember { mutableStateOf(channel.getEffectiveEmbedUrl()) }
+    var description by remember { mutableStateOf(channel.description ?: "") }
+    var isActive by remember { mutableStateOf(channel.isActive == true) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("EDITAR CANAL", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+                Text("Editando ID: @${channel.id}", color = Color.Gray, fontSize = 11.sp)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                AdminField(value = name, onValueChange = { name = it }, label = "Nome do canal")
+                AdminField(value = category, onValueChange = { category = it }, label = "Categoria")
+                AdminField(value = logoUrl, onValueChange = { logoUrl = it }, label = "Logo URL")
+                AdminField(value = streamUrl, onValueChange = { streamUrl = it }, label = "URL do Stream/Player")
+                AdminField(value = description, onValueChange = { description = it }, label = "Descrição", singleLine = false)
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF151515), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Text("Canal Ativado", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Switch(
+                        checked = isActive,
+                        onCheckedChange = { isActive = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF059669))
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onConfirm(channel.copy(name = name, category = category, logoUrl = logoUrl, embedUrl = streamUrl, description = description, isActive = isActive))
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.height(42.dp)
+            ) {
+                Text("SALVAR ALTERAÇÕES", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("CANCELAR", color = Color.Gray, fontSize = 12.sp) }
+        },
+        containerColor = Color(0xFF111111)
+    )
+}
+
+@Composable
+fun AdminPlayerTestDialog(
+    channel: ApiChannel,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.PlayCircle, contentDescription = null, tint = BrandRed)
+                Spacer(Modifier.width(8.dp))
+                Text("TESTAR CANAL: ${channel.name}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(
+                    color = Color(0xFF059669).copy(alpha = 0.2f),
+                    border = BorderStroke(1.dp, Color(0xFF059669)),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("🟢 Fonte funcionando / URL ativa", color = Color(0xFF34D399), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color.Black),
+                    border = BorderStroke(1.dp, CardBorder),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Stream URL:", color = Color.Gray, fontSize = 11.sp)
+                        Text(channel.getEffectiveEmbedUrl(), color = Color(0xFF60A5FA), fontSize = 12.sp)
+                        Text("ID: ${channel.id} • Categoria: ${channel.category ?: "Geral"}", color = Color.LightGray, fontSize = 11.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = BrandRed)) {
+                Text("Fechar", fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = DarkSurface
+    )
+}
+
+@Composable
+fun AdminApiDocsCard(onCopy: (String, String) -> Unit) {
+    val endpoints = listOf(
+        "BASE REI" to "https://reidosembeds.online/api",
+        "CANAIS REI" to "https://reidosembeds.online/api/channels",
+        "EVENTOS REI" to "https://reidosembeds.online/api/eventos",
+        "GUIA REI" to "https://reidosembeds.online/api/guia",
+        "---" to "---",
+        "EMBEDTV CANAIS" to "https://embedtv.lat/api/channels",
+        "EMBEDTV EVENTOS" to "https://embedtv.lat/api/events",
+        "EMBEDTV EPG" to "https://embedtv.lat/api/epg_all"
+    )
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, CardBorder)
+    ) {
+        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("📚 DOCUMENTAÇÃO COMPACTA DA API", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text("Endpoints oficiais integrados com o ecossistema RONYCINE:", color = Color.Gray, fontSize = 12.sp)
+
+            endpoints.forEach { (label, url) ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(Color.Black, RoundedCornerShape(8.dp)).padding(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(label, color = BrandRed, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                        Text(url, color = Color.LightGray, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = { onCopy(label, url) }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = "Copiar", tint = Color(0xFF60A5FA), modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminStatMini(modifier: Modifier = Modifier, label: String, value: String, labelColor: Color = Color.Gray) {
+    Box(
+        modifier = modifier
+            .background(Color(0xFF0F0F0F), RoundedCornerShape(8.dp))
+            .border(BorderStroke(1.dp, Color(0xFF1A1A1A)), RoundedCornerShape(8.dp))
+            .padding(10.dp)
+    ) {
+        Column {
+            Text(label, color = labelColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            Text(value, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Black)
+        }
+    }
+}
+
+@Composable
+fun AdminSourceCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    status: String,
+    channels: Int,
+    events: Int,
+    onSync: () -> Unit
+) {
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = BorderStroke(1.dp, CardBorder.copy(alpha = 0.5f)),
-        shape = RoundedCornerShape(12.dp)
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F0F0F)),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, Color(0xFF1A1A1A))
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(20.dp))
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(text = value, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Black)
-            Text(text = label, color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(icon, null, tint = BrandRed, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text(title, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(subtitle, color = Color.Gray, fontSize = 8.sp)
+                }
+            }
+            
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(if (status == "Online") Color(0xFF34D399) else Color.Red, androidx.compose.foundation.shape.CircleShape)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(status, color = if (status == "Online") Color(0xFF34D399) else Color.Red, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            }
+
+            Divider(color = Color(0xFF1A1A1A))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column {
+                    Text("Canais", color = Color.Gray, fontSize = 8.sp)
+                    Text(channels.toString(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+                Column {
+                    Text("Eventos", color = Color.Gray, fontSize = 8.sp)
+                    Text(events.toString(), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            Button(
+                onClick = onSync,
+                modifier = Modifier.fillMaxWidth().height(28.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A1A1A)),
+                shape = RoundedCornerShape(6.dp),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Text("Sincronizar", fontSize = 9.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun AdminLogItem(log: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0F0F0F)),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, Color(0xFF151515))
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .background(Color(0xFF34D399).copy(alpha = 0.1f), androidx.compose.foundation.shape.CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(androidx.compose.material.icons.Icons.Default.Check, null, tint = Color(0xFF34D399), modifier = Modifier.size(12.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                log,
+                color = Color.LightGray,
+                fontSize = 10.sp,
+                lineHeight = 14.sp,
+                modifier = Modifier.weight(1f)
+            )
         }
     }
 }
@@ -8454,7 +10310,11 @@ fun PreviewDialog(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (isLoading) {
-                        CircularProgressIndicator(color = BrandRed, modifier = Modifier.align(Alignment.CenterHorizontally))
+                        RonycineSmileLoader(
+                            color = BrandRed,
+                            size = 32.dp,
+                            modifier = Modifier.align(Alignment.CenterHorizontally)
+                        )
                     } else if (successEntity != null) {
                         Text("${successEntity.title} foi adicionado ao catálogo!", color = Color.White)
                     } else if (media != null) {
@@ -8967,10 +10827,9 @@ fun AdminAuthScreen(
                                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp, pressedElevation = 1.dp)
                             ) {
                                 if (isVerifying) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        color = Color.White,
-                                        strokeWidth = 2.dp
+                                    RonycineSmileLoader(
+                                        size = 18.dp,
+                                        color = Color.White
                                     )
                                     Spacer(modifier = Modifier.width(10.dp))
                                     Text(
@@ -9386,10 +11245,9 @@ fun AdminDestaquesScreenLegacy(
                                 )
                             }
                             else -> {
-                                CircularProgressIndicator(
+                                RonycineSmileLoader(
                                     color = BrandRed,
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(14.dp)
+                                    size = 14.dp
                                 )
                                 Text(
                                     text = "CARREGANDO TRAILER...",
@@ -10046,7 +11904,7 @@ fun AdminDestaquesScreenLegacy(
                                     .height(180.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(color = BrandRed)
+                                RonycineSmileLoader(color = BrandRed)
                             }
                         }
                     } else if (searchResults.isEmpty()) {
@@ -10853,9 +12711,7 @@ fun AdminSincronizacaoScreen(
     val liveChannels by adminViewModel.allChannels.collectAsState(initial = emptyList())
     val devices by adminViewModel.allDevices.collectAsState(initial = emptyList())
     val updateEvents by adminViewModel.updateEvents.collectAsState(initial = emptyList())
-    val publishedVersions by adminViewModel.publishedVersions.collectAsState(initial = emptyList())
     val remoteAuditLogs by adminViewModel.remoteAuditLogs.collectAsState(initial = emptyList())
-    
     val totalChannels = liveChannels.size
     val onlineDevices = devices.count { it.isOnline }
     val offlineDevices = devices.size - onlineDevices
@@ -10891,7 +12747,6 @@ fun AdminSincronizacaoScreen(
     }
 
     // Dialog state controllers
-    var deviceIdForUpdate by remember { mutableStateOf<Set<String>?>(null) }
     var deviceIdForSuspend by remember { mutableStateOf<Set<String>?>(null) }
     var deviceIdForBan by remember { mutableStateOf<Set<String>?>(null) }
     var deviceForNotification by remember { mutableStateOf<com.example.data.remote.DeviceEntity?>(null) }
@@ -11112,10 +12967,9 @@ fun AdminSincronizacaoScreen(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         if (isCatalogActionRunning) {
-                            CircularProgressIndicator(
+                            RonycineSmileLoader(
                                 color = Color.White,
-                                modifier = Modifier.size(14.dp),
-                                strokeWidth = 2.dp
+                                size = 14.dp
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
@@ -11263,15 +13117,6 @@ fun AdminSincronizacaoScreen(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Button(
-                                    onClick = { deviceIdForUpdate = selectedDeviceIds },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E3A8A)),
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                    shape = RoundedCornerShape(4.dp),
-                                    modifier = Modifier.height(26.dp)
-                                ) {
-                                    Text("ATUALIZAR", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                }
 
                                 Button(
                                     onClick = { deviceIdForSuspend = selectedDeviceIds },
@@ -11512,7 +13357,7 @@ fun AdminSincronizacaoScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             if (isSyncingLocal) {
-                                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                                RonycineSmileLoader(color = Color.White, size = 14.dp)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("SINCRONIZANDO...", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 
@@ -11525,17 +13370,6 @@ fun AdminSincronizacaoScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("SINCRONIZAR / ATUALIZAR DADOS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             }
-                        }
-
-                        Button(
-                            onClick = { deviceIdForUpdate = setOf(currentDetailDevice.deviceId) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF374151)),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(Icons.Default.Update, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("FORÇAR ATUALIZAÇÃO DO APP", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
 
                         Row(
@@ -11703,98 +13537,6 @@ fun AdminSincronizacaoScreen(
             },
             dismissButton = {
                 TextButton(onClick = { deviceForNotification = null }) {
-                    Text("CANCELAR", color = Color.LightGray)
-                }
-            },
-            containerColor = DarkSurface,
-            shape = RoundedCornerShape(16.dp)
-        )
-    }
-
-    // Modal de seleção de versão para atualização do dispositivo
-    if (deviceIdForUpdate != null) {
-        val targetIds = deviceIdForUpdate!!
-        var selectedVersion by remember { mutableStateOf<com.example.data.remote.AppVersionEntity?>(null) }
-        val filteredVersions = publishedVersions.filter { it.isPublished }
-
-        AlertDialog(
-            onDismissRequest = { deviceIdForUpdate = null },
-            title = { Text("ATUALIZAR DISPOSITIVOS", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Selecione a versão do aplicativo que deseja enviar para ${targetIds.size} dispositivo(s).",
-                        color = Color.LightGray,
-                        fontSize = 11.sp
-                    )
-
-                    if (filteredVersions.isEmpty()) {
-                        Text(
-                            text = "Nenhuma versão publicada disponível. Cadastre e publique uma nova versão na central de atualizações.",
-                            color = BrandRed,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 180.dp)
-                                .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            filteredVersions.forEach { version ->
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { selectedVersion = version },
-                                    color = if (selectedVersion?.id == version.id) Color.White.copy(alpha = 0.08f) else Color.Transparent,
-                                    border = BorderStroke(
-                                        width = 1.dp,
-                                        color = if (selectedVersion?.id == version.id) BrandRed else CardBorder
-                                    ),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(8.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column {
-                                            Text("Versão v${version.versionName}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                            Text("Build: ${version.versionCode}", color = Color.Gray, fontSize = 10.sp)
-                                        }
-                                        if (selectedVersion?.id == version.id) {
-                                            Icon(Icons.Default.Check, contentDescription = null, tint = BrandRed, modifier = Modifier.size(14.dp))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                if (selectedVersion != null) {
-                    Button(
-                        onClick = {
-                            adminViewModel.updateSelectedDevices(targetIds, selectedVersion!!)
-                            deviceIdForUpdate = null
-                            selectedDeviceIds = emptySet()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed)
-                    ) {
-                        Text("ATUALIZAR", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { deviceIdForUpdate = null }) {
                     Text("CANCELAR", color = Color.LightGray)
                 }
             },
@@ -12813,6 +14555,247 @@ fun AdminErrorBoundary(
     } else {
         content()
     }
+}
+
+@Composable
+fun AddEditPlayerModal(
+    playerToEdit: com.example.data.remote.PlayerSource?,
+    onDismiss: () -> Unit,
+    onSave: (com.example.data.remote.PlayerSource) -> Unit
+) {
+    var name by remember { mutableStateOf(playerToEdit?.name ?: "") }
+    var id by remember { mutableStateOf(playerToEdit?.id ?: "") }
+    var description by remember { mutableStateOf(playerToEdit?.description ?: "") }
+    var type by remember { mutableStateOf(playerToEdit?.type ?: "Iframe / WebView") }
+    var movieTmdbUrl by remember { mutableStateOf(playerToEdit?.movieTmdbUrl ?: "https://redeflixapi.store/filme/{tmdbId}") }
+    var tvTmdbUrl by remember { mutableStateOf(playerToEdit?.tvTmdbUrl ?: "https://redeflixapi.store/serie/{tmdbId}/{seasonNumber}/{episodeNumber}") }
+    var enabled by remember { mutableStateOf(playerToEdit?.enabled ?: true) }
+    var forMovies by remember { mutableStateOf(playerToEdit?.supportedContent?.contains("movie") ?: true) }
+    var forSeries by remember { mutableStateOf(playerToEdit?.supportedContent?.contains("tv") ?: true) }
+    var internalPlayer by remember { mutableStateOf(playerToEdit?.internalPlayer ?: "") }
+    var playerColor by remember { mutableStateOf(playerToEdit?.playerColor ?: "#fb542b") }
+
+    val isEditing = playerToEdit != null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = if (isEditing) "Editar Player" else "Adicionar Novo Player",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Nome do player
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { 
+                        name = it
+                        if (!isEditing && id.isBlank()) {
+                            id = it.trim().lowercase().replace(Regex("[^a-z0-9]"), "")
+                        }
+                    },
+                    label = { Text("Nome do Player (ex: RedeFlixApi)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = BrandRed,
+                        unfocusedBorderColor = Color(0xFF333333),
+                        focusedLabelColor = BrandRed,
+                        unfocusedLabelColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                // ID interno
+                OutlinedTextField(
+                    value = id,
+                    onValueChange = { id = it },
+                    label = { Text("ID Interno (ex: redeflixapi)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !isEditing || !playerToEdit.isSystem,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = BrandRed,
+                        unfocusedBorderColor = Color(0xFF333333),
+                        focusedLabelColor = BrandRed,
+                        unfocusedLabelColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                // Descrição
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Descrição (ex: Player externo via TMDB)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = BrandRed,
+                        unfocusedBorderColor = Color(0xFF333333),
+                        focusedLabelColor = BrandRed,
+                        unfocusedLabelColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                // Tipo de Player
+                Text("Tipo de Player", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("Iframe / WebView", "Embed", "MP4", "HLS").forEach { t ->
+                        val isSelected = type.equals(t, ignoreCase = true)
+                        Surface(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { type = t },
+                            color = if (isSelected) BrandRed else Color(0xFF222222),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = t,
+                                color = Color.White,
+                                fontSize = 10.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                // Template Filmes
+                OutlinedTextField(
+                    value = movieTmdbUrl,
+                    onValueChange = { movieTmdbUrl = it },
+                    label = { Text("URL Template Filmes") },
+                    placeholder = { Text("https://redeflixapi.store/filme/{tmdbId}") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = BrandRed,
+                        unfocusedBorderColor = Color(0xFF333333),
+                        focusedLabelColor = BrandRed,
+                        unfocusedLabelColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                // Template Séries
+                OutlinedTextField(
+                    value = tvTmdbUrl,
+                    onValueChange = { tvTmdbUrl = it },
+                    label = { Text("URL Template Séries") },
+                    placeholder = { Text("https://redeflixapi.store/serie/{tmdbId}/{seasonNumber}/{episodeNumber}") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = BrandRed,
+                        unfocusedBorderColor = Color(0xFF333333),
+                        focusedLabelColor = BrandRed,
+                        unfocusedLabelColor = Color.Gray,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    )
+                )
+
+                // Ativado Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Ativado", color = Color.White, fontSize = 13.sp)
+                    Switch(
+                        checked = enabled,
+                        onCheckedChange = { enabled = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Color(0xFF4CAF50))
+                    )
+                }
+
+                // Suporte de Conteúdo
+                Text("Disponibilidade de Conteúdo", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { forMovies = !forMovies }) {
+                        Checkbox(
+                            checked = forMovies,
+                            onCheckedChange = { forMovies = it },
+                            colors = CheckboxDefaults.colors(checkedColor = BrandRed)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Filmes", color = Color.White, fontSize = 13.sp)
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { forSeries = !forSeries }) {
+                        Checkbox(
+                            checked = forSeries,
+                            onCheckedChange = { forSeries = it },
+                            colors = CheckboxDefaults.colors(checkedColor = BrandRed)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Séries", color = Color.White, fontSize = 13.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (name.isNotBlank()) {
+                        val supported = mutableListOf<String>()
+                        if (forMovies) supported.add("movie")
+                        if (forSeries) supported.add("tv")
+                        
+                        val newSource = (playerToEdit ?: com.example.data.remote.PlayerSource()).copy(
+                            id = id.ifBlank { name.trim().lowercase().replace(Regex("[^a-z0-9]"), "") },
+                            name = name.trim(),
+                            description = description.trim(),
+                            type = type.trim(),
+                            movieTmdbUrl = movieTmdbUrl.trim(),
+                            tvTmdbUrl = tvTmdbUrl.trim(),
+                            enabled = enabled,
+                            supportedContent = supported,
+                            internalPlayer = internalPlayer.ifBlank { id.trim().lowercase() },
+                            playerColor = playerColor.trim(),
+                            updatedAt = System.currentTimeMillis()
+                        )
+                        onSave(newSource)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                enabled = name.isNotBlank()
+            ) {
+                Text("SALVAR PLAYER", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("CANCELAR", color = Color.Gray)
+            }
+        },
+        containerColor = Color(0xFF1A1A1A)
+    )
 }
 
 

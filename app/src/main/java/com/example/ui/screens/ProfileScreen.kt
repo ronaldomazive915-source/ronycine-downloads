@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,9 +22,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -32,14 +35,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Velocity
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import coil.compose.AsyncImage
 import com.example.config.AppShareConfig
 import com.example.data.remote.UserProfile
+import com.example.data.remote.UpdateFetchStatus
 import com.example.ui.components.ProfileAvatar
 import com.example.ui.components.ProfilePhotoActionSheet
 import com.example.ui.components.AvatarSelectionSheet
 import com.example.ui.components.ShareAppModal
 import com.example.ui.components.VerifiedBadge
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
@@ -58,13 +71,14 @@ fun ProfileScreen(
     authViewModel: AuthViewModel,
     onNavigateToHistory: () -> Unit,
     onNavigateToMyList: () -> Unit,
-    onNavigateToDownloads: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToAdmin: () -> Unit,
     onNavigateToLogin: () -> Unit,
     onNavigateToProfileSelection: () -> Unit = {},
     onNavigateToCreateProfile: () -> Unit = {},
     onNavigateToInfo: () -> Unit = {},
+    onNavigateToUpdateScreen: () -> Unit = {},
+    onNavigateToDownloads: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -74,7 +88,66 @@ fun ProfileScreen(
     var showPhotoActionSheet by remember { mutableStateOf(false) }
     var showAvatarPickerSheet by remember { mutableStateOf(false) }
     var showEditProfileDialog by remember { mutableStateOf(false) }
+    var showDiagnosticDetailsModal by remember { mutableStateOf(false) }
     var newUsernameInput by remember { mutableStateOf("") }
+    var profileForPinEntry by remember { mutableStateOf<UserProfile?>(null) }
+
+    // Pull-To-Refresh State with Smile Loader
+    val maxPullPx = with(LocalDensity.current) { 80.dp.toPx() }
+    val triggerPx = with(LocalDensity.current) { 60.dp.toPx() }
+    var pullOffsetPx by remember { mutableFloatStateOf(0f) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var isRefreshSuccess by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < 0 && pullOffsetPx > 0f && !isRefreshing) {
+                    val newOffset = (pullOffsetPx + available.y).coerceAtLeast(0f)
+                    val consumed = pullOffsetPx - newOffset
+                    pullOffsetPx = newOffset
+                    return Offset(0f, consumed)
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (available.y > 0 && !isRefreshing) {
+                    val newOffset = (pullOffsetPx + available.y * 0.5f).coerceAtMost(maxPullPx * 1.5f)
+                    val consumedY = newOffset - pullOffsetPx
+                    pullOffsetPx = newOffset
+                    return Offset(0f, consumedY)
+                }
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (!isRefreshing) {
+                    if (pullOffsetPx >= triggerPx) {
+                        isRefreshing = true
+                        pullOffsetPx = maxPullPx
+                        coroutineScope.launch {
+                            viewModel.manualRefreshCatalog()
+                            delay(700L)
+                            isRefreshSuccess = true
+                            delay(400L)
+                            isRefreshSuccess = false
+                            isRefreshing = false
+                            pullOffsetPx = 0f
+                        }
+                    } else {
+                        pullOffsetPx = 0f
+                    }
+                }
+                return Velocity.Zero
+            }
+        }
+    }
 
     val authState by authViewModel.authState.collectAsState()
     val usernameCheckState by authViewModel.usernameCheckState.collectAsState()
@@ -395,10 +468,9 @@ fun ProfileScreen(
                                 modifier = Modifier.padding(start = 4.dp, top = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(12.dp),
-                                    color = BrandRed,
-                                    strokeWidth = 1.5.dp
+                                RonycineSmileLoader(
+                                    size = 14.dp,
+                                    color = BrandRed
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -473,10 +545,9 @@ fun ProfileScreen(
                     enabled = authState !is AuthState.Loading && usernameCheckState is UsernameCheckState.Available
                 ) {
                     if (authState is AuthState.Loading) {
-                        CircularProgressIndicator(
+                        RonycineSmileLoader(
                             color = Color.White,
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp
+                            size = 16.dp
                         )
                     } else {
                         Text("SALVAR", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.5.sp)
@@ -496,47 +567,181 @@ fun ProfileScreen(
         )
     }
 
-    val catalogSyncResult by viewModel.catalogSyncResult.collectAsState()
-    if (catalogSyncResult != null) {
-        val res = catalogSyncResult!!
+    if (showDiagnosticDetailsModal) {
+        val devModelModal = remember { android.os.Build.MODEL ?: "Android Device" }
+        val devIdModal = remember {
+            com.example.data.remote.FirebaseService.getInstance(context.applicationContext).getOrGeneratePersistentDeviceId()
+        }
+        val isBlockedModal by viewModel.isDeviceBlocked.collectAsState()
+        val isAdminAuthorizedModal by viewModel.isAdminAuthorized.collectAsState()
+
+        var isFirebaseConnectedModal by remember { mutableStateOf<Boolean?>(null) }
+        LaunchedEffect(showDiagnosticDetailsModal) {
+            val fbService = com.example.data.remote.FirebaseService.getInstance(context.applicationContext)
+            isFirebaseConnectedModal = fbService.testFirestoreConnection()
+        }
+
+        var adminRecordStatusModal by remember { mutableStateOf("VERIFICANDO...") }
+        LaunchedEffect(showDiagnosticDetailsModal) {
+            val fbService = com.example.data.remote.FirebaseService.getInstance(context.applicationContext)
+            val dId = fbService.getOrGeneratePersistentDeviceId()
+            try {
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                db.collection("devices").document(dId).get().addOnSuccessListener { snap ->
+                    if (snap != null && snap.exists()) {
+                        val hasAdmin = snap.getBoolean("adminAccess") ?: false
+                        adminRecordStatusModal = if (hasAdmin) "ENCONTRADO (ADMIN)" else "ENCONTRADO (COMUM)"
+                    } else {
+                        adminRecordStatusModal = "NÃO ENCONTRADO"
+                    }
+                }.addOnFailureListener {
+                    adminRecordStatusModal = "ERRO AO BUSCAR"
+                }
+            } catch (e: Exception) {
+                adminRecordStatusModal = "ERRO"
+            }
+        }
+
+        val connectionTextModal = when (isFirebaseConnectedModal) {
+            true -> "CONECTADO"
+            false -> "ERRO DE CONEXÃO"
+            null -> "TESTANDO..."
+        }
+        val connectionColorModal = when (isFirebaseConnectedModal) {
+            true -> Color(0xFF10B981)
+            false -> Color(0xFFEF4444)
+            null -> Color.Gray
+        }
+
         AlertDialog(
-            onDismissRequest = { viewModel.clearCatalogSyncResult() },
+            onDismissRequest = { showDiagnosticDetailsModal = false },
             containerColor = DarkSurface,
+            shape = RoundedCornerShape(16.dp),
             title = {
-                Text("Sincronização Concluída", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Build,
+                        contentDescription = null,
+                        tint = BrandRed,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = "DETALHES DO DIAGNÓSTICO",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                }
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(res.message, color = Color.LightGray, fontSize = 12.sp)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    DiagnosticRow("Dispositivo", devModelModal)
+                    DiagnosticRow("Device ID", devIdModal)
+                    DiagnosticRow("Admin State", if (isAdminAuthorizedModal) "AUTORIZADO" else "NÃO AUTORIZADO", valueColor = if (isAdminAuthorizedModal) Color(0xFF10B981) else Color(0xFFEF4444))
+                    DiagnosticRow("Acesso", if (isBlockedModal) "BLOQUEADO" else "ATIVO", valueColor = if (isBlockedModal) Color(0xFFEF4444) else Color(0xFF10B981))
+                    DiagnosticRow("Registro Firestore", adminRecordStatusModal)
+                    DiagnosticRow("Firebase API", connectionTextModal, valueColor = connectionColorModal)
+
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("• Filmes adicionados: ${res.newMovies}", color = Color.White, fontSize = 11.sp)
-                    Text("• Séries adicionadas: ${res.newSeries}", color = Color.White, fontSize = 11.sp)
-                    Text("• Conteúdos atualizados: ${res.updatedCount}", color = Color.White, fontSize = 11.sp)
-                    Text("• Duplicados ignorados: ${res.ignoredCount}", color = Color.White, fontSize = 11.sp)
-                    Text("• Erros: ${res.errorCount}", color = if (res.errorCount > 0) Color(0xFFF87171) else Color(0xFF34D399), fontSize = 11.sp)
+
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.initDeviceManager()
+                            Toast.makeText(context, "Re-sincronizando autorização...", Toast.LENGTH_SHORT).show()
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, CardBorder),
+                        modifier = Modifier.fillMaxWidth().height(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Forçar Re-sincronização", color = Color.White, fontSize = 11.5.sp)
+                    }
                 }
             },
             confirmButton = {
                 Button(
-                    onClick = { viewModel.clearCatalogSyncResult() },
+                    onClick = { showDiagnosticDetailsModal = false },
                     colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("OK", color = Color.White, fontSize = 12.sp)
+                    Text("FECHAR", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
             }
         )
     }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(DarkBackground)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 14.dp, vertical = 12.dp)
-            .testTag("profile_screen"),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+            .nestedScroll(nestedScrollConnection)
+            .testTag("profile_screen")
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // Pull-To-Refresh Smile Loader Header
+            AnimatedVisibility(
+                visible = pullOffsetPx > 0f || isRefreshing || isRefreshSuccess,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    when {
+                        isRefreshSuccess -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color(0xFF10B981),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Perfil e catálogo atualizados!",
+                                    color = Color(0xFF10B981),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        isRefreshing -> {
+                            RonycineSmileLoader(
+                                size = 32.dp,
+                                color = BrandRed
+                            )
+                        }
+                        else -> {
+                            val progress = (pullOffsetPx / triggerPx).coerceIn(0f, 1f)
+                            RonycineSmileLoader(
+                                size = 32.dp,
+                                color = BrandRed,
+                                progress = progress
+                            )
+                        }
+                    }
+                }
+            }
         // ---------------------------------------------------------
         // Top Header
         // ---------------------------------------------------------
@@ -685,27 +890,48 @@ fun ProfileScreen(
 
                             Spacer(modifier = Modifier.height(4.dp))
 
-                            // Role Badge
-                            Surface(
-                                color = if (currentUser?.role == "FOUNDER") Color(0xFF7C3AED).copy(alpha = 0.25f) else Color(0xFF0F172A),
-                                shape = RoundedCornerShape(6.dp),
-                                border = BorderStroke(
-                                    0.8.dp,
-                                    if (currentUser?.role == "FOUNDER") Color(0xFFC084FC) else Color(0xFF38BDF8).copy(alpha = 0.6f)
-                                )
+                            // Badges Row (Role + Kids + Status)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = when (currentUser?.role) {
-                                        "FOUNDER" -> "⭐ FUNDADOR"
-                                        "ADMIN" -> "🛡️ ADMINISTRADOR"
-                                        "USER" -> "👤 MEMBRO VIP"
-                                        else -> "👤 CONTA ATIVA"
-                                    },
-                                    color = if (currentUser?.role == "FOUNDER") Color(0xFFE9D5FF) else Color(0xFF38BDF8),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                )
+                                Surface(
+                                    color = if (currentUser?.role == "FOUNDER") Color(0xFF7C3AED).copy(alpha = 0.25f) else Color(0xFF0F172A),
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(
+                                        0.8.dp,
+                                        if (currentUser?.role == "FOUNDER") Color(0xFFC084FC) else Color(0xFF38BDF8).copy(alpha = 0.6f)
+                                    )
+                                ) {
+                                    Text(
+                                        text = when (currentUser?.role) {
+                                            "FOUNDER" -> "⭐ FUNDADOR"
+                                            "ADMIN" -> "🛡️ ADMINISTRADOR"
+                                            "USER" -> "👤 MEMBRO VIP"
+                                            else -> "👤 CONTA ATIVA"
+                                        },
+                                        color = if (currentUser?.role == "FOUNDER") Color(0xFFE9D5FF) else Color(0xFF38BDF8),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
+
+                                if (activeProfile?.isKidsProfile == true) {
+                                    Surface(
+                                        color = Color(0xFF0284C7).copy(alpha = 0.22f),
+                                        shape = RoundedCornerShape(6.dp),
+                                        border = BorderStroke(0.8.dp, Color(0xFF38BDF8))
+                                    ) {
+                                        Text(
+                                            text = "👶 MODO INFANTIL",
+                                            color = Color(0xFF7DD3FC),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -749,8 +975,12 @@ fun ProfileScreen(
                                         .width(62.dp)
                                         .clickable {
                                             if (!isActive) {
-                                                authViewModel.selectProfile(prof)
-                                                Toast.makeText(context, "Perfil alterado para ${prof.name}", Toast.LENGTH_SHORT).show()
+                                                if (!prof.pinHash.isNullOrBlank()) {
+                                                    profileForPinEntry = prof
+                                                } else {
+                                                    authViewModel.selectProfile(prof)
+                                                    Toast.makeText(context, "Perfil alterado para ${prof.name}", Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         }
                                         .testTag("profile_item_${prof.id}")
@@ -784,6 +1014,34 @@ fun ProfileScreen(
                                         if (prof.isVerified) {
                                             VerifiedBadge(size = 11.dp, showToastOnClick = false)
                                         }
+                                        if (!prof.pinHash.isNullOrBlank()) {
+                                            Icon(
+                                                imageVector = Icons.Default.Lock,
+                                                contentDescription = "Protegido por PIN",
+                                                tint = BrandRed,
+                                                modifier = Modifier.size(10.dp)
+                                            )
+                                        }
+                                    }
+
+                                    if (prof.isKidsProfile) {
+                                        Text(
+                                            text = if (isActive) "👶 Ativo" else "👶 Kids",
+                                            color = if (isActive) Color(0xFF38BDF8) else TextSecondary.copy(alpha = 0.8f),
+                                            fontSize = 8.5.sp,
+                                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1
+                                        )
+                                    } else if (isActive) {
+                                        Text(
+                                            text = "✓ Ativo",
+                                            color = BrandRed,
+                                            fontSize = 8.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1
+                                        )
                                     }
                                 }
                             }
@@ -839,11 +1097,8 @@ fun ProfileScreen(
                     ) {
                         OutlinedButton(
                             onClick = {
-                                if (onNavigateToProfileSelection != {}) {
-                                    onNavigateToProfileSelection()
-                                } else {
-                                    authViewModel.selectProfile(null)
-                                }
+                                authViewModel.lockCurrentProfile()
+                                onNavigateToProfileSelection()
                             },
                             modifier = Modifier.weight(1f).height(36.dp),
                             shape = RoundedCornerShape(8.dp),
@@ -1037,14 +1292,27 @@ fun ProfileScreen(
                 HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
 
                 ProfileMenuItem(
-                    icon = Icons.Default.Download,
-                    iconTint = Color(0xFFFBBF24),
-                    title = "Downloads (Offline)",
+                    icon = Icons.Default.FileDownload,
+                    iconTint = Color(0xFF38BDF8),
+                    title = "Meus Downloads",
+                    subtitle = "Filmes e séries salvos para offline",
                     onClick = onNavigateToDownloads,
                     testTag = "profile_downloads_button"
                 )
             }
         }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // ---------------------------------------------------------
+        // New Premium Update Card
+        // ---------------------------------------------------------
+        UpdateStatusCard(
+            viewModel = viewModel,
+            onNavigateToUpdateScreen = onNavigateToUpdateScreen
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         // ---------------------------------------------------------
         // 4. Compartilhar Aplicativo Card
@@ -1127,10 +1395,11 @@ fun ProfileScreen(
                     testTag = "profile_settings_button"
                 )
 
-                val isAdminAuthorized by viewModel.isAdminAuthorized.collectAsState()
-                val isFounder = currentUser?.role == "FOUNDER"
+                val isAdminAuthorizedState by viewModel.isAdminAuthorized.collectAsState()
+                val isAdminRole = currentUser?.role == "ADMIN"
+                val isFounderRole = currentUser?.role == "FOUNDER"
 
-                if (isAdminAuthorized || isFounder) {
+                if (isAdminAuthorizedState || isAdminRole || isFounderRole) {
                     HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
                     ProfileMenuItem(
                         icon = Icons.Default.AdminPanelSettings,
@@ -1140,169 +1409,6 @@ fun ProfileScreen(
                         onClick = onNavigateToAdmin,
                         testTag = "profile_admin_button"
                     )
-                }
-            }
-        }
-
-        // ---------------------------------------------------------
-        // 6. Sincronização do Catálogo
-        // ---------------------------------------------------------
-        val syncStatus by viewModel.syncStatus.collectAsState()
-        val catalogVersion by viewModel.catalogVersion.collectAsState()
-        val lastSyncFormatted by viewModel.lastSyncFormatted.collectAsState()
-        val isCatalogSyncing by viewModel.isCatalogSyncing.collectAsState()
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            shape = RoundedCornerShape(12.dp),
-            border = BorderStroke(1.dp, CardBorder)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF38BDF8).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Sync,
-                                contentDescription = null,
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "Sincronização do Catálogo",
-                                color = Color.White,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "Versão: v${if (catalogVersion > 0) catalogVersion else 100}",
-                                color = TextSecondary,
-                                fontSize = 10.5.sp
-                            )
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = { viewModel.manualRefreshCatalog() },
-                        enabled = !isCatalogSyncing,
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, Color(0xFF38BDF8)),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        modifier = Modifier
-                            .height(34.dp)
-                            .testTag("manual_refresh_catalog_button")
-                    ) {
-                        if (isCatalogSyncing) {
-                            CircularProgressIndicator(
-                                color = Color(0xFF38BDF8),
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Sincronizando...",
-                                color = Color(0xFF38BDF8),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = null,
-                                tint = Color(0xFF38BDF8),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Atualizar",
-                                color = Color(0xFF38BDF8),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-
-                HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            text = if (syncStatus == com.example.data.remote.SyncStatus.OFFLINE) "🔴 Catálogo Offline" else "🟢 Catálogo Sincronizado",
-                            color = if (syncStatus == com.example.data.remote.SyncStatus.OFFLINE) Color(0xFFF87171) else Color(0xFF34D399),
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false
-                        )
-                        if (lastSyncFormatted.isNotBlank()) {
-                            Text(
-                                text = "Última: $lastSyncFormatted",
-                                color = TextSecondary,
-                                fontSize = 10.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-
-                    var time by remember { mutableStateOf("") }
-                    LaunchedEffect(Unit) {
-                        val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
-                        while (true) {
-                            time = sdf.format(java.util.Date())
-                            kotlinx.coroutines.delay(1000L)
-                        }
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "HORA:",
-                            color = TextSecondary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = time,
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                        )
-                    }
                 }
             }
         }
@@ -1338,13 +1444,11 @@ fun ProfileScreen(
         }
 
         // ---------------------------------------------------------
-        // 8. Diagnóstico de Acesso (Admin / Dev)
+        // 8. Diagnóstico de Acesso (Compacto)
         // ---------------------------------------------------------
-        val devModel = remember { android.os.Build.MODEL ?: "" }
-        val devId = remember {
-            com.example.data.remote.FirebaseService.getInstance(context.applicationContext).getOrGeneratePersistentDeviceId()
-        }
+        val devModel = remember { android.os.Build.MODEL ?: "Android Device" }
         val isAdminAuthorized by viewModel.isAdminAuthorized.collectAsState()
+        val isBlocked by viewModel.isDeviceBlocked.collectAsState()
         val isEligibleForDebug = devModel.contains("MAO-LX9", ignoreCase = true) ||
                                  devModel.contains("sdk_gphone64_arm64", ignoreCase = true) ||
                                  isAdminAuthorized
@@ -1356,38 +1460,27 @@ fun ProfileScreen(
                 isFirebaseConnected = fbService.testFirestoreConnection()
             }
 
-            var adminRecordStatus by remember { mutableStateOf("VERIFICANDO...") }
-            LaunchedEffect(Unit) {
-                val fbService = com.example.data.remote.FirebaseService.getInstance(context.applicationContext)
-                val dId = fbService.getOrGeneratePersistentDeviceId()
-                try {
-                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                    db.collection("devices").document(dId).get().addOnSuccessListener { snap ->
-                        if (snap != null && snap.exists()) {
-                            val hasAdmin = snap.getBoolean("adminAccess") ?: false
-                            adminRecordStatus = if (hasAdmin) "ENCONTRADO (ADMIN)" else "ENCONTRADO (COMUM)"
-                        } else {
-                            adminRecordStatus = "NÃO ENCONTRADO"
-                        }
-                    }.addOnFailureListener {
-                        adminRecordStatus = "ERRO AO BUSCAR"
-                    }
-                } catch (e: Exception) {
-                    adminRecordStatus = "ERRO"
-                }
+            val connectionText = when (isFirebaseConnected) {
+                true -> "CONECTADO"
+                false -> "OFFLINE"
+                null -> "VERIFICANDO..."
+            }
+            val connectionColor = when (isFirebaseConnected) {
+                true -> Color(0xFF10B981)
+                false -> Color(0xFFEF4444)
+                null -> Color.Gray
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("admin_diagnostics_card"),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1A0E0E)),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
                 shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, BrandRed.copy(alpha = 0.6f))
+                border = BorderStroke(1.dp, CardBorder)
             ) {
                 Column(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
@@ -1395,61 +1488,47 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "🔧 DIAGNÓSTICO DE ACESSO",
-                            color = Color.White,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Surface(
-                            color = BrandRed,
-                            shape = RoundedCornerShape(4.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Text(
-                                text = "ADMIN / DEV",
+                                text = "🔧 Diagnóstico de acesso",
                                 color = Color.White,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = if (isBlocked || isFirebaseConnected == false) Color(0xFFEF4444) else Color(0xFF10B981),
+                                modifier = Modifier.size(15.dp)
                             )
                         }
                     }
 
-                    HorizontalDivider(color = BrandRed.copy(alpha = 0.25f), thickness = 1.dp)
+                    HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
 
                     DiagnosticRow("Dispositivo", devModel)
-                    DiagnosticRow("Device ID", devId)
-                    DiagnosticRow("Admin State", if (isAdminAuthorized) "AUTORIZADO" else "NÃO AUTORIZADO", valueColor = if (isAdminAuthorized) Color(0xFF34D399) else Color(0xFFF87171))
+                    DiagnosticRow("Acesso", if (isBlocked) "BLOQUEADO" else "ATIVO", valueColor = if (isBlocked) Color(0xFFEF4444) else Color(0xFF10B981))
+                    DiagnosticRow("Firebase", connectionText, valueColor = connectionColor)
 
-                    val isBlocked by viewModel.isDeviceBlocked.collectAsState()
-                    DiagnosticRow("Acesso", if (isBlocked) "BLOQUEADO" else "ATIVO", valueColor = if (isBlocked) Color(0xFFF87171) else Color(0xFF34D399))
-                    DiagnosticRow("Registro Firestore", adminRecordStatus)
+                    HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
 
-                    val connectionText = when (isFirebaseConnected) {
-                        true -> "CONECTADO"
-                        false -> "ERRO DE CONEXÃO"
-                        null -> "TESTANDO..."
-                    }
-                    val connectionColor = when (isFirebaseConnected) {
-                        true -> Color(0xFF34D399)
-                        false -> Color(0xFFF87171)
-                        null -> Color.Gray
-                    }
-                    DiagnosticRow("Firebase API", connectionText, valueColor = connectionColor)
-
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Button(
-                        onClick = {
-                            viewModel.initDeviceManager()
-                            Toast.makeText(context, "Re-sincronizando autorização...", Toast.LENGTH_SHORT).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                        shape = RoundedCornerShape(8.dp),
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(34.dp)
+                            .clickable { showDiagnosticDetailsModal = true }
+                            .padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Forçar Re-sincronização", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Ver detalhes ›",
+                            color = BrandRed,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             }
@@ -1457,6 +1536,20 @@ fun ProfileScreen(
 
         Spacer(modifier = Modifier.height(20.dp))
     }
+
+    // Modal de verificação de PIN para troca rápida de perfil
+    profileForPinEntry?.let { targetProfile ->
+        com.example.ui.components.ProfilePinDialog(
+            profile = targetProfile,
+            onDismissRequest = { profileForPinEntry = null },
+            onPinVerified = {
+                profileForPinEntry = null
+                authViewModel.unlockAndSelectProfile(targetProfile)
+                Toast.makeText(context, "Perfil alterado para ${targetProfile.name}", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+}
 }
 
 @Composable
@@ -1530,15 +1623,188 @@ private fun DiagnosticRow(label: String, value: String, valueColor: Color = Colo
 }
 
 @Composable
+fun UpdateStatusCard(
+    viewModel: com.example.ui.viewmodel.MainViewModel,
+    onNavigateToUpdateScreen: () -> Unit
+) {
+    val hasUpdateAvailable by viewModel.shouldShowUpdateDot.collectAsState()
+    val fetchStatus by viewModel.updateFetchStatus.collectAsState()
+    val currentVersion = remember { viewModel.getInstalledVersionName() }
+    
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scale"
+    )
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onNavigateToUpdateScreen() }
+            .testTag("profile_update_card"),
+        colors = CardDefaults.cardColors(
+            containerColor = DarkSurface
+        ),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (hasUpdateAvailable) BrandRed.copy(alpha = 0.5f) else CardBorder
+        )
+    ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Icon
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (hasUpdateAvailable) BrandRed.copy(alpha = 0.15f) 
+                            else Color.White.copy(alpha = 0.05f)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = if (hasUpdateAvailable) BrandRed else Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Buscar atualização",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    val subtitle = when {
+                        fetchStatus is UpdateFetchStatus.Loading -> "Verificando atualizações..."
+                        hasUpdateAvailable -> "Nova atualização disponível"
+                        fetchStatus is UpdateFetchStatus.Error -> "Não foi possível verificar agora"
+                        else -> "Verifique se há uma nova versão"
+                    }
+                    
+                    Text(
+                        text = subtitle,
+                        color = if (hasUpdateAvailable) BrandRed else TextSecondary,
+                        fontSize = 12.sp
+                    )
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (!hasUpdateAvailable && fetchStatus !is UpdateFetchStatus.Loading) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color(0xFF4ADE80),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Você está atualizado • $currentVersion",
+                                color = Color(0xFF4ADE80),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        } else if (hasUpdateAvailable) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .graphicsLayer(scaleX = scale, scaleY = scale, alpha = alpha)
+                                    .background(BrandRed, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Toque para baixar nova versão",
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        } else if (fetchStatus is UpdateFetchStatus.Error) {
+                            Text(
+                                text = "Tentar novamente",
+                                color = BrandRed,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Pulsing Red Dot
+            if (hasUpdateAvailable) {
+                Box(
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .size(8.dp)
+                        .align(Alignment.TopEnd)
+                        .scale(scale)
+                        .clip(CircleShape)
+                        .background(Color.Red.copy(alpha = alpha))
+                        .border(1.dp, Color.Red.copy(alpha = 0.5f), CircleShape)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun ProfileMenuItem(
     icon: ImageVector,
     iconTint: Color,
     title: String,
     subtitle: String? = null,
     badgeText: String? = null,
+    showDot: Boolean = false,
     onClick: () -> Unit,
     testTag: String
 ) {
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+    val scale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scale"
+    )
+
     Surface(
         onClick = onClick,
         color = Color.Transparent,
@@ -1565,19 +1831,57 @@ private fun ProfileMenuItem(
                     tint = iconTint,
                     modifier = Modifier.size(16.dp)
                 )
+
+                if (showDot) {
+                    // Glow effect
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .align(Alignment.TopEnd)
+                            .offset(x = 3.dp, y = (-3).dp)
+                            .scale(scale)
+                            .clip(CircleShape)
+                            .background(Color.Red.copy(alpha = alpha * 0.4f))
+                    )
+                    
+                    // Main dot
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .align(Alignment.TopEnd)
+                            .offset(x = 2.dp, y = (-2).dp)
+                            .clip(CircleShape)
+                            .background(Color.Red)
+                            .border(1.dp, DarkBackground, CircleShape)
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    color = Color.White,
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = title,
+                        color = Color.White,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    
+                    if (showDot && title == "Buscar atualizações") {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        // Pulsing red dot next to title
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .scale(scale)
+                                .clip(CircleShape)
+                                .background(Color.Red.copy(alpha = alpha))
+                        )
+                    }
+                }
                 if (subtitle != null) {
                     Text(
                         text = subtitle,
-                        color = TextSecondary,
+                        color = if (showDot && title == "Buscar atualizações") Color.White.copy(alpha = 0.9f) else TextSecondary,
                         fontSize = 10.5.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1611,3 +1915,4 @@ private fun ProfileMenuItem(
         }
     }
 }
+

@@ -9,17 +9,15 @@ import com.example.ui.viewmodel.AdminSection
  * Categorias oficiais do Painel Administrativo RONYCINE
  */
 enum class AdminCategory(val title: String, val order: Int) {
-    PAINEL("PAINEL", 1),
-    CONTEUDO("CONTEÚDO", 2),
-    USUARIOS_DISPOSITIVOS("USUÁRIOS E DISPOSITIVOS", 3),
-    COMUNICACAO("COMUNICAÇÃO", 4),
-    ATUALIZACOES("ATUALIZAÇÕES", 5),
-    SISTEMA("SISTEMA", 6)
+    CONTEUDO("CONTEÚDO", 1),
+    USUARIOS_DISPOSITIVOS("USUÁRIOS E DISPOSITIVOS", 2),
+    COMUNICACAO("COMUNICAÇÃO", 3),
+    ATUALIZACOES("ATUALIZAÇÕES", 4),
+    SISTEMA("SISTEMA", 5)
 }
 
 /**
  * Registro oficial de módulo administrativo.
- * Previne duplicidade de menus, rotas, telas e ações.
  */
 data class AdminModule(
     val id: String,
@@ -33,23 +31,21 @@ data class AdminModule(
 )
 
 /**
- * Catálogo Único e Centralizado de todos os 21 módulos administrativos do RONYCINE.
+ * Catálogo Único e Centralizado dos módulos administrativos do RONYCINE.
  */
 object AdminRegistry {
 
     val modules: List<AdminModule> = listOf(
-        // 1. PAINEL
+        // 1. CONTEÚDO
         AdminModule(
             id = "visao_geral",
             section = AdminSection.ESTATISTICAS,
             title = "Visão Geral",
             subtitle = "Dashboard com métricas e atalhos rápidos",
-            category = AdminCategory.PAINEL,
+            category = AdminCategory.CONTEUDO,
             icon = Icons.Default.Dashboard,
             testTag = "admin_menu_visao_geral"
         ),
-
-        // 2. CONTEÚDO
         AdminModule(
             id = "catalogo",
             section = AdminSection.CATALOGO,
@@ -104,26 +100,8 @@ object AdminRegistry {
             icon = Icons.Default.LiveTv,
             testTag = "admin_menu_tv"
         ),
-        AdminModule(
-            id = "gerenciador_players",
-            section = AdminSection.PLAYERS,
-            title = "Players",
-            subtitle = "Configurar fontes, URLs e fallbacks de vídeo",
-            category = AdminCategory.CONTEUDO,
-            icon = Icons.Default.PlayCircleOutline,
-            testTag = "admin_menu_players"
-        ),
-        AdminModule(
-            id = "sincronizacao_automatica",
-            section = AdminSection.SINCRONIZACAO_AUTOMATICA,
-            title = "Sincronização Automática",
-            subtitle = "Automação, monitoramento e fila de importação de conteúdos",
-            category = AdminCategory.CONTEUDO,
-            icon = Icons.Default.AutoMode,
-            testTag = "admin_menu_sincronizacao_automatica"
-        ),
 
-        // 3. USUÁRIOS E DISPOSITIVOS
+        // 2. USUÁRIOS E DISPOSITIVOS
         AdminModule(
             id = "usuarios",
             section = AdminSection.USUARIOS,
@@ -161,7 +139,7 @@ object AdminRegistry {
             testTag = "admin_menu_administradores"
         ),
 
-        // 4. COMUNICAÇÃO
+        // 3. COMUNICAÇÃO
         AdminModule(
             id = "notificacoes",
             section = AdminSection.NOTIFICACOES,
@@ -180,55 +158,19 @@ object AdminRegistry {
             icon = Icons.Default.PlaylistAddCheck,
             testTag = "admin_menu_pedidos"
         ),
-        AdminModule(
-            id = "cine_config",
-            section = AdminSection.CINE_CONFIG,
-            title = "Configurações do Cine",
-            subtitle = "Personalize o assistente de IA, avatar, personalidade e status",
-            category = AdminCategory.COMUNICACAO,
-            icon = Icons.Default.SmartToy,
-            testTag = "admin_menu_cine_config"
-        ),
 
-        // 5. ATUALIZAÇÕES
+        // 4. ATUALIZAÇÕES
         AdminModule(
-            id = "versoes_app",
-            section = AdminSection.ATUALIZACOES_APP,
-            title = "Versões do Aplicativo",
-            subtitle = "Criar, publicar e gerenciar novas versões de APK",
-            category = AdminCategory.ATUALIZACOES,
-            icon = Icons.Default.SystemUpdate,
-            testTag = "admin_menu_versoes_app"
-        ),
-        AdminModule(
-            id = "atualizacoes",
+            id = "atualizacao_atual",
             section = AdminSection.ATUALIZACOES,
-            title = "Atualizações",
-            subtitle = "Campanhas de atualização, forçar updates e status global",
+            title = "Atualização Atual",
+            subtitle = "Gerenciar a versão vigente do aplicativo (appUpdates/current)",
             category = AdminCategory.ATUALIZACOES,
             icon = Icons.Default.CloudSync,
-            testTag = "admin_menu_atualizacoes"
-        ),
-        AdminModule(
-            id = "controle_dispositivo",
-            section = AdminSection.CONTROLE_REMOTO,
-            title = "Controle por Dispositivo",
-            subtitle = "Comandos remotos e atualizações por dispositivo",
-            category = AdminCategory.ATUALIZACOES,
-            icon = Icons.Default.SettingsRemote,
-            testTag = "admin_menu_controle_dispositivo"
-        ),
-        AdminModule(
-            id = "alteracoes_pendentes",
-            section = AdminSection.ALTERACOES_PENDENTES,
-            title = "Alterações Pendentes",
-            subtitle = "Revisar e publicar alterações de catálogo e sistema",
-            category = AdminCategory.ATUALIZACOES,
-            icon = Icons.Default.PendingActions,
-            testTag = "admin_menu_alteracoes_pendentes"
+            testTag = "admin_menu_atualizacao_atual"
         ),
 
-        // 6. SISTEMA
+        // 5. SISTEMA
         AdminModule(
             id = "sincronizacao",
             section = AdminSection.SINCRONIZACAO,
@@ -257,15 +199,6 @@ object AdminRegistry {
             testTag = "admin_menu_logs"
         ),
         AdminModule(
-            id = "historico",
-            section = AdminSection.HISTORICO,
-            title = "Histórico",
-            subtitle = "Histórico de importações, sincronizações e backups",
-            category = AdminCategory.SISTEMA,
-            icon = Icons.Default.ManageHistory,
-            testTag = "admin_menu_historico"
-        ),
-        AdminModule(
             id = "status_firebase",
             section = AdminSection.STATUS_SISTEMA,
             title = "Status do Firebase",
@@ -276,12 +209,12 @@ object AdminRegistry {
         )
     )
 
-    fun getModulesByCategory(): Map<AdminCategory, List<AdminModule>> {
-        return modules.groupBy { it.category }
+    fun getFilteredModulesByCategory(user: com.example.data.remote.UserEntity?): Map<AdminCategory, List<AdminModule>> {
+        if (user == null) return emptyMap()
+        
+        return modules.filter { module ->
+            user.hasPermission(module.section.permissionKey)
+        }.groupBy { it.category }
             .toSortedMap(compareBy { it.order })
-    }
-
-    fun findModule(section: AdminSection): AdminModule? {
-        return modules.find { it.section == section }
     }
 }

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.example.ui.components.RonycineSmileLoader
 import com.example.data.local.TmdbAutoSyncHistoryEntity
 import com.example.data.remote.ImportConfig
 import com.example.data.remote.ImportItem
@@ -352,7 +353,10 @@ fun SmartImportSection(
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = BrandRed) },
                         trailingIcon = {
                             if (isSearching) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = BrandRed, strokeWidth = 2.dp)
+                                RonycineSmileLoader(
+                                    color = BrandRed,
+                                    size = 16.dp
+                                )
                             } else if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = {
                                     searchQuery = ""
@@ -522,7 +526,10 @@ fun SmartImportSection(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.padding(bottom = 8.dp)
                             ) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = BrandRed, strokeWidth = 2.dp)
+                                RonycineSmileLoader(
+                                    color = BrandRed,
+                                    size = 14.dp
+                                )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(text = stepMsg, color = Color.LightGray, fontSize = 11.sp)
                             }
@@ -565,7 +572,10 @@ fun SmartImportSection(
                                 modifier = Modifier.height(36.dp)
                             ) {
                                 if (isRunning) {
-                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
+                                    RonycineSmileLoader(
+                                        color = Color.White,
+                                        size = 14.dp
+                                    )
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(text = importStepMessage ?: "Importando...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 } else {
@@ -642,7 +652,10 @@ fun SmartImportSection(
                         .height(120.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = BrandRed)
+                    RonycineSmileLoader(
+                        color = BrandRed,
+                        size = 32.dp
+                    )
                 }
             }
         } else if (filteredRecent.isEmpty()) {
@@ -1099,7 +1112,10 @@ fun MgebImportSection(
                     )
                     
                     if (isMgebLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = BrandRed, strokeWidth = 2.dp)
+                        RonycineSmileLoader(
+                            color = BrandRed,
+                            size = 16.dp
+                        )
                     } else {
                         IconButton(
                             onClick = { adminViewModel.loadMgebCatalog(forceRefresh = true) },
@@ -1353,7 +1369,10 @@ fun MgebImportSection(
         if (isMgebLoading && candidates.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = BrandRed)
+                    RonycineSmileLoader(
+                        color = BrandRed,
+                        size = 32.dp
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text("Carregando catálogo da API...", color = Color.Gray)
                 }
@@ -1707,7 +1726,10 @@ fun AutoImportSection(
                         modifier = Modifier.height(38.dp)
                     ) {
                         if (autoSyncProgress.isRunning) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            RonycineSmileLoader(
+                                color = Color.White,
+                                size = 16.dp
+                            )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Sincronizando...", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         } else {
@@ -1739,7 +1761,10 @@ fun AutoImportSection(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (autoSyncProgress.isRunning) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = BrandRed, strokeWidth = 2.dp)
+                                RonycineSmileLoader(
+                                    color = BrandRed,
+                                    size = 16.dp
+                                )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("PROCESSANDO...", color = Color.Yellow, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             } else {
@@ -1879,7 +1904,10 @@ fun RecentToImportSection(
                 shape = RoundedCornerShape(8.dp)
             ) {
                 if (isLoading) {
-                    CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color.White, strokeWidth = 2.dp)
+                    RonycineSmileLoader(
+                        color = Color.White,
+                        size = 14.dp
+                    )
                 } else {
                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
@@ -1893,7 +1921,10 @@ fun RecentToImportSection(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = BrandRed)
+                RonycineSmileLoader(
+                    color = BrandRed,
+                    size = 32.dp
+                )
             }
         } else if (filteredCandidates.isEmpty()) {
             Box(

@@ -6,10 +6,14 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <queries>
         <package android:name="idm.internet.download.manager" />
@@ -17,6 +21,8 @@
         <package android:name="idm.internet.download.manager.lite" />
         <package android:name="com.dv.adm" />
         <package android:name="com.dv.adm.pay" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.whatsapp.w4b" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="video/*" />
@@ -67,8 +73,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="https"
-                    android:host="ronycine.app"
-                    android:pathPrefix="/download" />
+                    android:host="ronycine.app" />
             </intent-filter>
 
             <!-- Custom Deep Link Fallback Scheme -->
@@ -76,11 +81,15 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="ronycine"
-                    android:host="install" />
+                <data android:scheme="ronycine" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name="com.example.util.DownloadService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <service
             android:name="com.example.data.remote.MyFirebaseMessagingService"

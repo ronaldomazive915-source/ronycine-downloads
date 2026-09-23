@@ -195,8 +195,11 @@ data class RemoteConfigEntity(
     val enableDownloads: Boolean = true,
     val enableRequests: Boolean = true,
     val enableLiveTV: Boolean = true,
-    val enableTrailers: Boolean = true,
+    val enableTrailers: Boolean = false,
     val announcement: String = "",
+    val enableInternalDownloads: Boolean = true,
+    val enableExternalDownloads: Boolean = true,
+    val enableSpecificExternalDownloaders: Boolean = true,
     val updatedAt: Long = System.currentTimeMillis()
 )
 
@@ -290,6 +293,46 @@ data class UpdateOperationEntity(
         }
 }
 
+data class AppUpdate(
+    val id: String = "current",
+    val updateId: String = "",
+    val version: String = "1.0.0",
+    val versionCode: Int = 1,
+    val title: String = "",
+    val description: String = "",
+    val changelog: String = "",
+    val apkUrl: String = "",
+    val appDownloadUrl: String = "",
+    val active: Boolean = true,
+    val publishedAt: Long = 0L,
+    val updatedAt: Long = 0L,
+    val createdAt: Long = 0L,
+    val notifyUsers: Boolean = false,
+    val eventId: String = "",
+    val sendGeneralNotification: Boolean = false
+) {
+    val versionName: String get() = version
+    val enabled: Boolean get() = active
+    val mandatory: Boolean get() = false
+    val notificationEnabled: Boolean get() = notifyUsers || sendGeneralNotification
+    val effectiveUpdateId: String get() = if (updateId.isNotBlank()) updateId else eventId
+
+    val datePublishedFormatted: String
+        get() {
+            val ts = if (updatedAt > 0L) updatedAt else if (publishedAt > 0L) publishedAt else if (createdAt > 0L) createdAt else return "N/A"
+            val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("pt", "BR"))
+            return sdf.format(Date(ts))
+        }
+}
+
+typealias ManualUpdateConfig = AppUpdate
+
+sealed class UpdateFetchStatus {
+    object Loading : UpdateFetchStatus()
+    data class Success(val update: AppUpdate) : UpdateFetchStatus()
+    data class Error(val message: String) : UpdateFetchStatus()
+}
+
 data class Top10ItemEntity(
     val rank: Int = 1,
     val tmdbId: Int = 0,
@@ -323,7 +366,7 @@ data class FeaturedItemConfigEntity(
     val overview: String = "",
     val genres: String = "",
     val trailerUrl: String = "",
-    val autoPlayTrailer: Boolean = true,
+    val autoPlayTrailer: Boolean = false,
     val displayOrder: Int = 0,
     val isActive: Boolean = true,
     val restricted18: Boolean = false,

@@ -37,6 +37,7 @@ import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.TextSecondary
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.viewmodel.MainViewModel
 import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.AuthState
@@ -48,7 +49,6 @@ fun SettingsScreen(
     viewModel: MainViewModel,
     authViewModel: AuthViewModel? = null,
     onNavigateBack: () -> Unit,
-    onNavigateToDownloads: () -> Unit,
     onNavigateToInfo: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -505,10 +505,9 @@ fun SettingsScreen(
                                 modifier = Modifier.padding(start = 4.dp, top = 2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(12.dp),
-                                    color = BrandRed,
-                                    strokeWidth = 1.5.dp
+                                RonycineSmileLoader(
+                                    size = 14.dp,
+                                    color = BrandRed
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -587,10 +586,9 @@ fun SettingsScreen(
                     modifier = Modifier.testTag("dialog_save_username_button")
                 ) {
                     if (authState is AuthState.Loading) {
-                        CircularProgressIndicator(
+                        RonycineSmileLoader(
                             color = Color.White,
-                            modifier = Modifier.size(14.dp),
-                            strokeWidth = 2.dp
+                            size = 16.dp
                         )
                     } else {
                         Text("SALVAR", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.5.sp)
@@ -993,26 +991,6 @@ fun SettingsScreen(
                 border = BorderStroke(1.dp, CardBorder)
             ) {
                 Column {
-                    // 9. Downloads
-                    SettingsClickableRow(
-                        icon = Icons.Default.Download,
-                        iconTint = Color(0xFF38BDF8),
-                        title = "Downloads",
-                        description = "Local de armazenamento e gerenciar downloads.",
-                        actionContent = {
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = null,
-                                tint = Color.Gray,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        onClick = onNavigateToDownloads,
-                        testTag = "row_downloads"
-                    )
-
-                    HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
-
                     // 10. Limpar cache
                     SettingsClickableRow(
                         icon = Icons.Default.DeleteSweep,

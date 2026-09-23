@@ -14,5 +14,6 @@ data class ChannelEntity(
     val logoUrl: String,
     val streamUrl: String,
     val isOnline: Boolean = true,
-    val addedAt: Long = System.currentTimeMillis()
+    val addedAt: Long = System.currentTimeMillis(),
+    val sourceProvider: String = "api_atual"
 )

@@ -125,7 +125,7 @@ fun TrendingScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(trendingItems, key = { it.tmdbId }) { media ->
+                    items(trendingItems, key = { it.tmdbId }, contentType = { "media_card" }) { media ->
                         MediaCard(
                             media = media,
                             onClick = { onNavigateToDetail(media.tmdbId, media.mediaType) },

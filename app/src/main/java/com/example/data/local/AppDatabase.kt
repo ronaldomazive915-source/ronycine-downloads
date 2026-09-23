@@ -18,14 +18,15 @@ import androidx.room.RoomDatabase
         AuditLogEntity::class,
         BackupHistoryEntity::class,
         TmdbAutoSyncHistoryEntity::class,
-        DownloadEntity::class
+        DownloadTask::class
     ],
-    version = 14,
+    version = 19,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun playFilmeDao(): PlayFilmeDao
+    abstract fun downloadDao(): DownloadDao
 
     companion object {
         @Volatile

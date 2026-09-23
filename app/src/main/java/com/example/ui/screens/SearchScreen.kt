@@ -53,6 +53,7 @@ import com.example.data.repository.SmartSearchResultItem
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.MainViewModel
 import com.example.util.MediaClassifier
+import com.example.ui.components.RonycineSmileLoader
 import kotlinx.coroutines.launch
 
 /**
@@ -99,13 +100,12 @@ fun SearchScreen(
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
 
-    // --- Filter States ---
-    var selectedCategory by rememberSaveable { mutableStateOf("all") } // "all", "movie", "tv", "anime", "dorama"
-    var selectedQuickFilter by rememberSaveable { mutableStateOf("Todos") } // "Todos", "Recentes", "Populares", "8+", or genre name
-    var filterGenre by rememberSaveable { mutableStateOf<String?>(null) }
-    var filterYear by rememberSaveable { mutableStateOf("Todos") }
-    var filterMinRating by rememberSaveable { mutableStateOf(0.0) }
-    var sortOption by rememberSaveable { mutableStateOf(ExploreSortOption.RECENTES) }
+    val selectedCategory by viewModel.exploreCategory.collectAsState()
+    val selectedQuickFilter by viewModel.exploreQuickFilter.collectAsState()
+    val filterGenre by viewModel.exploreGenreFilter.collectAsState()
+    val filterYear by viewModel.exploreYearFilter.collectAsState()
+    val filterMinRating by viewModel.exploreMinRatingFilter.collectAsState()
+    val sortOption by viewModel.exploreSortOption.collectAsState()
 
     var showFilterSheet by rememberSaveable { mutableStateOf(false) }
 
@@ -119,146 +119,10 @@ fun SearchScreen(
         count
     }
 
-    // Contextual Quick Filters for the selected category
-    val contextualQuickFilters = remember(selectedCategory, availableGenres, allMedia) {
-        val base = mutableListOf("Todos", "Recentes", "Populares", "8+ ⭐")
+    val contextualQuickFilters by viewModel.exploreContextualQuickFilters.collectAsState()
 
-        // Extract top genres relevant to the selected category
-        val categoryItems = allMedia.filter { media ->
-            val cat = MediaClassifier.classifyMedia(media)
-            when (selectedCategory) {
-                "movie" -> cat == MediaClassifier.CATEGORY_MOVIE
-                "tv" -> cat == MediaClassifier.CATEGORY_SERIES
-                "anime" -> cat == MediaClassifier.CATEGORY_ANIME
-                "dorama" -> cat == MediaClassifier.CATEGORY_DORAMA
-                else -> true
-            }
-        }
-
-        val topGenres = categoryItems.flatMap { it.genres.split(",") }
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && it != "Todos" }
-            .groupingBy { it }
-            .eachCount()
-            .entries
-            .sortedByDescending { it.value }
-            .map { it.key }
-            .take(8)
-
-        base.addAll(topGenres)
-        base.distinct()
-    }
-
-    // Filter and Sort Catalog Items
-    val filteredCatalog = remember(
-        allMedia,
-        selectedCategory,
-        selectedQuickFilter,
-        filterGenre,
-        filterYear,
-        filterMinRating,
-        sortOption,
-        searchQuery
-    ) {
-        allMedia.filter { media ->
-            val cat = MediaClassifier.classifyMedia(media)
-
-            // 1. Category check (STRICT classification)
-            val categoryMatch = when (selectedCategory) {
-                "movie" -> cat == MediaClassifier.CATEGORY_MOVIE
-                "tv" -> cat == MediaClassifier.CATEGORY_SERIES
-                "anime" -> cat == MediaClassifier.CATEGORY_ANIME
-                "dorama" -> cat == MediaClassifier.CATEGORY_DORAMA
-                else -> true // "all"
-            }
-            if (!categoryMatch) return@filter false
-
-            // 2. Search query match
-            if (searchQuery.isNotBlank()) {
-                val query = searchQuery.trim().lowercase()
-                val titleMatch = media.title.lowercase().contains(query)
-                val originalTitleMatch = media.originalTitle.lowercase().contains(query)
-                val genreMatch = media.genres.lowercase().contains(query)
-                if (!titleMatch && !originalTitleMatch && !genreMatch) return@filter false
-            }
-
-            // 3. Quick Filter check
-            when (selectedQuickFilter) {
-                "8+ ⭐" -> if (media.rating < 8.0) return@filter false
-                "Todos", "Recentes", "Populares" -> { /* handled in sort */ }
-                else -> {
-                    // Selected a genre chip from quick filters
-                    if (!media.genres.contains(selectedQuickFilter, ignoreCase = true)) return@filter false
-                }
-            }
-
-            // 4. Advanced Genre filter
-            if (!filterGenre.isNullOrBlank() && filterGenre != "Todos") {
-                if (!media.genres.contains(filterGenre!!, ignoreCase = true)) return@filter false
-            }
-
-            // 5. Year Filter
-            if (filterYear != "Todos") {
-                when (filterYear) {
-                    "2010s" -> {
-                        val y = media.releaseYear.toIntOrNull()
-                        if (y == null || y !in 2010..2019) return@filter false
-                    }
-                    "Clássicos" -> {
-                        val y = media.releaseYear.toIntOrNull()
-                        if (y == null || y >= 2010) return@filter false
-                    }
-                    else -> {
-                        if (!media.releaseYear.startsWith(filterYear)) return@filter false
-                    }
-                }
-            }
-
-            // 6. Rating Filter
-            if (filterMinRating > 0.0) {
-                if (media.rating < filterMinRating) return@filter false
-            }
-
-            true
-        }.distinctBy { "${it.tmdbId}_${it.mediaType}" }
-            .let { list ->
-                // Apply sorting
-                when {
-                    selectedQuickFilter == "Recentes" -> {
-                        list.sortedWith(
-                            compareByDescending<MediaEntity> { it.releaseYear }
-                                .thenByDescending { it.addedAt }
-                                .thenByDescending { it.id }
-                        )
-                    }
-                    selectedQuickFilter == "Populares" -> {
-                        list.sortedWith(
-                            compareByDescending<MediaEntity> { it.rating }
-                                .thenByDescending { it.releaseYear }
-                        )
-                    }
-                    else -> {
-                        when (sortOption) {
-                            ExploreSortOption.RECENTES -> list.sortedWith(
-                                compareByDescending<MediaEntity> { it.releaseYear }
-                                    .thenByDescending { it.addedAt }
-                                    .thenByDescending { it.id }
-                            )
-                            ExploreSortOption.POPULARES -> list.sortedWith(
-                                compareByDescending<MediaEntity> { it.rating }
-                                    .thenByDescending { it.releaseYear }
-                            )
-                            ExploreSortOption.MELHOR_AVALIADOS -> list.sortedByDescending { it.rating }
-                            ExploreSortOption.ANTIGOS -> list.sortedWith(
-                                compareBy<MediaEntity> { it.releaseYear.ifBlank { "9999" } }
-                            )
-                            ExploreSortOption.TITULO_AZ -> list.sortedBy { it.title.lowercase() }
-                            ExploreSortOption.TITULO_ZA -> list.sortedByDescending { it.title.lowercase() }
-                        }
-                    }
-                }
-            }
-    }
+    // Use the pre-filtered catalog from ViewModel (computed in background)
+    val filteredCatalog by viewModel.filteredExploreCatalog.collectAsState()
 
     // Filter smart search results if in external search mode
     val filteredSmartResults = remember(smartSearchResults, selectedCategory) {
@@ -301,136 +165,84 @@ fun SearchScreen(
                     .fillMaxSize()
                     .statusBarsPadding()
             ) {
-                // ==========================================
-                // 1. TOP HEADER (TITLE & FILTER BUTTON)
-                // ==========================================
-                ExploreTopHeader(
-                    title = "EXPLORAR",
+                // Modularized Header Section
+                ExploreHeaderSection(
+                    searchQuery = searchQuery,
                     activeFiltersCount = activeFiltersCount,
-                    onOpenFilters = { showFilterSheet = true }
-                )
-
-                // ==========================================
-                // 2. SINGLE INTEGRATED SEARCH BAR
-                // ==========================================
-                ExploreSearchBar(
-                    query = searchQuery,
                     onQueryChanged = { viewModel.onExploreSearchQueryChanged(it) },
                     onClearQuery = {
                         viewModel.clearExploreSearch()
                         focusManager.clearFocus()
-                    }
+                    },
+                    onOpenFilters = { showFilterSheet = true }
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // ==========================================
-                // 3. MAIN CATEGORIES (HORIZONTAL SCROLL)
-                // ==========================================
-                ExploreCategoryTabs(
+                // Modularized Filter Section
+                ExploreFilterSection(
                     selectedCategory = selectedCategory,
+                    selectedQuickFilter = selectedQuickFilter,
+                    contextualQuickFilters = contextualQuickFilters,
                     onSelectCategory = { cat ->
-                        selectedCategory = cat
-                        selectedQuickFilter = "Todos"
-                        filterGenre = null
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // ==========================================
-                // 4. CONTEXTUAL QUICK FILTERS ROW
-                // ==========================================
-                ExploreQuickFiltersRow(
-                    filters = contextualQuickFilters,
-                    selectedFilter = selectedQuickFilter,
+                        viewModel.updateExploreCategory(cat)
+                        viewModel.updateExploreQuickFilter("Todos")
+                        viewModel.updateExploreGenre(null)
+                    },
                     onSelectFilter = { filter ->
-                        selectedQuickFilter = filter
+                        viewModel.updateExploreQuickFilter(filter)
                         if (filter != "Todos" && filter != "Recentes" && filter != "Populares" && filter != "8+ ⭐") {
-                            filterGenre = filter
+                            viewModel.updateExploreGenre(filter)
                         } else {
-                            filterGenre = null
+                            viewModel.updateExploreGenre(null)
                         }
                     }
                 )
 
-                // ==========================================
-                // 5. RESULT COUNTER & ACTIVE FILTER BADGES
-                // ==========================================
+                // Modularized Result Header
                 ExploreResultHeader(
                     categoryTitle = categoryTitle,
                     count = filteredCatalog.size,
                     hasActiveFilters = activeFiltersCount > 0 || selectedQuickFilter != "Todos" || searchQuery.isNotEmpty(),
                     onClearFilters = {
-                        selectedCategory = "all"
-                        selectedQuickFilter = "Todos"
-                        filterGenre = null
-                        filterYear = "Todos"
-                        filterMinRating = 0.0
-                        sortOption = ExploreSortOption.RECENTES
-                        viewModel.onSearchQueryChanged("")
+                        viewModel.updateExploreCategory("all")
+                        viewModel.updateExploreQuickFilter("Todos")
+                        viewModel.updateExploreGenre(null)
+                        viewModel.updateExploreYear("Todos")
+                        viewModel.updateExploreMinRating(0.0)
+                        viewModel.updateExploreSort(ExploreSortOption.RECENTES)
+                        viewModel.onExploreSearchQueryChanged("")
                     }
                 )
 
-                // ==========================================
-                // 6. MAIN CONTENT GRID / SMART SEARCH / EMPTY
-                // ==========================================
+                // Modularized Main Content
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
-                    when {
-                        // Skeleton loading when no media is loaded yet
-                        isInitialLoading -> {
-                            ExploreSkeletonGrid()
+                    ExploreContentSection(
+                        isInitialLoading = isInitialLoading,
+                        isSearching = isSearching,
+                        searchQuery = searchQuery,
+                        filteredCatalog = filteredCatalog,
+                        filteredSmartResults = filteredSmartResults,
+                        processingKeys = processingKeys,
+                        activeFiltersCount = activeFiltersCount,
+                        selectedQuickFilter = selectedQuickFilter,
+                        onNavigateToDetail = onNavigateToDetail,
+                        onNavigate = onNavigate,
+                        onSendRequest = { viewModel.sendMediaRequest(it) },
+                        onClearFilters = {
+                            viewModel.updateExploreCategory("all")
+                            viewModel.updateExploreQuickFilter("Todos")
+                            viewModel.updateExploreGenre(null)
+                            viewModel.updateExploreYear("Todos")
+                            viewModel.updateExploreMinRating(0.0)
+                            viewModel.updateExploreSort(ExploreSortOption.RECENTES)
+                            viewModel.onSearchQueryChanged("")
                         }
-
-                        // Search mode active with smart search results
-                        searchQuery.isNotBlank() && isSearching -> {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(color = BrandRed, strokeWidth = 3.dp)
-                            }
-                        }
-
-                        // Smart Search item cards if external items exist
-                        searchQuery.isNotBlank() && filteredCatalog.isEmpty() && filteredSmartResults.isNotEmpty() -> {
-                            ExploreSmartSearchResultsList(
-                                results = filteredSmartResults,
-                                processingKeys = processingKeys,
-                                onNavigateToDetail = onNavigateToDetail,
-                                onNavigate = onNavigate,
-                                onSendRequest = { viewModel.sendMediaRequest(it) }
-                            )
-                        }
-
-                        // Empty State
-                        filteredCatalog.isEmpty() -> {
-                            ExploreEmptyState(
-                                hasFilters = activeFiltersCount > 0 || selectedQuickFilter != "Todos" || searchQuery.isNotEmpty(),
-                                onClearFilters = {
-                                    selectedCategory = "all"
-                                    selectedQuickFilter = "Todos"
-                                    filterGenre = null
-                                    filterYear = "Todos"
-                                    filterMinRating = 0.0
-                                    sortOption = ExploreSortOption.RECENTES
-                                    viewModel.onSearchQueryChanged("")
-                                }
-                            )
-                        }
-
-                        // Normal Responsive Catalog Grid
-                        else -> {
-                            ExploreMediaGrid(
-                                items = filteredCatalog,
-                                onNavigateToDetail = onNavigateToDetail
-                            )
-                        }
-                    }
+                    )
                 }
             }
         }
@@ -449,18 +261,124 @@ fun SearchScreen(
             availableGenres = availableGenres,
             totalResultCount = filteredCatalog.size,
             onApply = { cat, genre, year, rating, sort ->
-                selectedCategory = cat
-                filterGenre = genre
-                filterYear = year
-                filterMinRating = rating
-                sortOption = sort
+                viewModel.updateExploreCategory(cat)
+                viewModel.updateExploreGenre(genre)
+                viewModel.updateExploreYear(year)
+                viewModel.updateExploreMinRating(rating)
+                viewModel.updateExploreSort(sort)
                 if (genre != null) {
-                    selectedQuickFilter = genre
+                    viewModel.updateExploreQuickFilter(genre)
                 }
                 showFilterSheet = false
             },
             onDismiss = { showFilterSheet = false }
         )
+    }
+}
+
+// =========================================================================
+// MODULARIZED SECTIONS FOR PERFORMANCE
+// =========================================================================
+
+@Composable
+private fun ExploreHeaderSection(
+    searchQuery: String,
+    activeFiltersCount: Int,
+    onQueryChanged: (String) -> Unit,
+    onClearQuery: () -> Unit,
+    onOpenFilters: () -> Unit
+) {
+    Column {
+        ExploreTopHeader(
+            title = "EXPLORAR",
+            activeFiltersCount = activeFiltersCount,
+            onOpenFilters = onOpenFilters
+        )
+
+        ExploreSearchBar(
+            query = searchQuery,
+            onQueryChanged = onQueryChanged,
+            onClearQuery = onClearQuery
+        )
+    }
+}
+
+@Composable
+private fun ExploreFilterSection(
+    selectedCategory: String,
+    selectedQuickFilter: String,
+    contextualQuickFilters: List<String>,
+    onSelectCategory: (String) -> Unit,
+    onSelectFilter: (String) -> Unit
+) {
+    Column {
+        ExploreCategoryTabs(
+            selectedCategory = selectedCategory,
+            onSelectCategory = onSelectCategory
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        ExploreQuickFiltersRow(
+            filters = contextualQuickFilters,
+            selectedFilter = selectedQuickFilter,
+            onSelectFilter = onSelectFilter
+        )
+    }
+}
+
+@Composable
+private fun ExploreContentSection(
+    isInitialLoading: Boolean,
+    isSearching: Boolean,
+    searchQuery: String,
+    filteredCatalog: List<MediaEntity>,
+    filteredSmartResults: List<SmartSearchResultItem>,
+    processingKeys: Set<String>,
+    activeFiltersCount: Int,
+    selectedQuickFilter: String,
+    onNavigateToDetail: (Int, String) -> Unit,
+    onNavigate: ((String) -> Unit)?,
+    onSendRequest: (MediaEntity) -> Unit,
+    onClearFilters: () -> Unit
+) {
+    when {
+        isInitialLoading -> {
+            ExploreSkeletonGrid()
+        }
+
+        searchQuery.isNotBlank() && isSearching -> {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                RonycineSmileLoader(color = BrandRed, size = 42.dp)
+            }
+        }
+
+        searchQuery.isNotBlank() && filteredCatalog.isEmpty() && filteredSmartResults.isNotEmpty() -> {
+            ExploreSmartSearchResultsList(
+                results = filteredSmartResults,
+                processingKeys = processingKeys,
+                onNavigateToDetail = onNavigateToDetail,
+                onNavigate = onNavigate,
+                onSendRequest = onSendRequest
+            )
+        }
+
+        filteredCatalog.isEmpty() -> {
+            ExploreEmptyState(
+                hasFilters = activeFiltersCount > 0 || selectedQuickFilter != "Todos" || searchQuery.isNotEmpty(),
+                onClearFilters = onClearFilters
+            )
+        }
+
+        else -> {
+            ExploreMediaGrid(
+                items = filteredCatalog,
+                onNavigateToDetail = onNavigateToDetail
+            )
+        }
     }
 }
 
@@ -879,8 +797,10 @@ private fun ExplorePosterCard(
     val imageRequest = remember(imageUrl) {
         ImageRequest.Builder(context)
             .data(imageUrl)
-            .size(340, 510)
-            .crossfade(false)
+            .size(240, 360) // Optimized for 3-column grid
+            .crossfade(200)
+            .placeholder(android.R.drawable.progress_horizontal)
+            .error(android.R.drawable.ic_menu_report_image)
             .build()
     }
 
@@ -1399,10 +1319,9 @@ fun SmartSearchResultCard(
                         }
                         SearchItemStatus.AVAILABLE_FOR_REQUEST -> {
                             if (isProcessing) {
-                                CircularProgressIndicator(
+                                RonycineSmileLoader(
                                     color = BrandRed,
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
+                                    size = 16.dp
                                 )
                             } else {
                                 OutlinedButton(

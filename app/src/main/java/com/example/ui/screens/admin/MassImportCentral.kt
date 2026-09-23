@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.ui.components.RonycineSmileLoader
 import com.example.data.remote.ImportConfig
 import com.example.data.remote.ImportItem
 import com.example.data.remote.ImportJob
@@ -476,10 +477,9 @@ fun JobStatusCard(
             ) {
                 StatusBadge(job.status)
                 if (job.status == "processing" || isDiscovering) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = BrandRed
+                    RonycineSmileLoader(
+                        color = BrandRed,
+                        size = 16.dp
                     )
                 }
             }

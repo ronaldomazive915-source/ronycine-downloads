@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import android.content.Intent
+import android.net.Uri
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.pm.ActivityInfo
@@ -31,11 +33,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkSurface
 import com.example.util.WebViewUtils
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.ByteArrayInputStream
 
 /**
@@ -122,10 +126,12 @@ fun EmbedPlayer(
     title: String = "RONYCINE",
     isFullscreen: Boolean = false,
     autoplayEnabled: Boolean = true,
+    initialPositionSeconds: Double = 0.0,
     onToggleFullscreen: (() -> Unit)? = null,
     onAudioSourceChange: ((EmbedAudioSource) -> Unit)? = null,
     onPlaybackProgress: ((currentTime: Double, duration: Double, event: String) -> Unit)? = null,
     onTryAgain: (() -> Unit)? = null,
+    onTryAnotherPlayer: (() -> Unit)? = null,
     onWebViewCreated: ((WebView?) -> Unit)? = null,
     onUrlChanged: ((String) -> Unit)? = null,
     playerLoadId: Int = 0
@@ -166,6 +172,22 @@ fun EmbedPlayer(
 
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
     var isCustomViewShowing by remember { mutableStateOf(false) }
+
+    // State for specific authorization error from RedeFlixApi
+    var isAuthorizationError by remember(embedUrl, retryCount) { mutableStateOf(false) }
+
+    // Unified logs for debugging (only in DEBUG mode)
+    LaunchedEffect(embedUrl, audioSource) {
+        val isRedeFlix = embedUrl.contains("redeflix", ignoreCase = true)
+        if (isRedeFlix) {
+            android.util.Log.d("REDEFLIX", "Player selecionado: RedeFlixApi")
+            android.util.Log.d("REDEFLIX", "URL: $embedUrl")
+            android.util.Log.d("REDEFLIX", "TMDB ID: $tmdbId")
+            android.util.Log.d("REDEFLIX", "Tipo: $mediaType")
+            android.util.Log.d("REDEFLIX", "Temporada: ${season ?: "N/A"}")
+            android.util.Log.d("REDEFLIX", "Episódio: ${episode ?: "N/A"}")
+        }
+    }
     var customViewContainerRef by remember { mutableStateOf<FrameLayout?>(null) }
     var customViewCallbackRef by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
@@ -238,6 +260,7 @@ fun EmbedPlayer(
 
             if (activity != null) {
                 try {
+                    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                     val window = activity.window
                     val insetsController = WindowCompat.getInsetsController(window, window.decorView)
                     insetsController.show(WindowInsetsCompat.Type.systemBars())
@@ -290,30 +313,76 @@ fun EmbedPlayer(
         }
     }
 
+    val handlePlayerFailure: (String) -> Unit = remember(onTryAnotherPlayer, embedUrl, mediaType, tmdbId) {
+        { reason ->
+            android.util.Log.w(
+                "RONYCINE_DIAG",
+                "PLAYER_FAILURE_TRIGGERED: contentType=$mediaType, tmdbId=$tmdbId, playerUrl=$embedUrl, finalUrl=${activeWebView?.url ?: "N/A"}, reason=$reason, autoFallback=${onTryAnotherPlayer != null}"
+            )
+            (context as? Activity)?.runOnUiThread {
+                if (onTryAnotherPlayer != null) {
+                    onTryAnotherPlayer.invoke()
+                } else {
+                    isLoading = false
+                    hasError = true
+                    errorMessage = reason
+                }
+            }
+        }
+    }
+
     // Timeout guard and loading dismiss guard: ensures overlay never gets stuck over video
-    LaunchedEffect(embedUrl, retryCount, isValidTarget) {
+    LaunchedEffect(embedUrl, retryCount, playerLoadId, isValidTarget) {
         if (!isValidTarget) {
             isLoading = false
             hasError = true
-            errorMessage = "Não foi possível carregar o player. TMDB ID não encontrado no catálogo."
+            errorMessage = "Não foi possível carregar o player. Identificador de mídia ou URL inválida."
             return@LaunchedEffect
         }
 
         isLoading = true
         hasError = false
+        isAuthorizationError = false
         errorMessage = null
         loadProgress = 0
 
-        // Auto-dismiss loading overlay after 3 seconds so the video canvas is never covered
-        delay(3000L)
+        android.util.Log.i("RONYCINE_DIAG", "[PLAYER_CLICK] Toque para iniciar player. tmdbId=$tmdbId, mediaType=$mediaType")
+        android.util.Log.i("RONYCINE_DIAG", "[PLAYER_URL_CREATED] URL gerada: $embedUrl")
+        android.util.Log.i("RONYCINE_DIAG", "[PLAYER_REQUEST_STARTED] WebView iniciando carregamento. timestamp=${System.currentTimeMillis()}")
+
+        // Improved auto-dismiss logic: check periodically for progress or player events
+        launch {
+            for (i in 1..80) { // Up to 8 seconds total, 100ms intervals
+                delay(100L)
+                // If progress is significant (>20%) OR we received a JS event saying it's ready/playing
+                if (!isLoading || hasError) break
+                
+                if (loadProgress >= 25) {
+                    isLoading = false
+                    android.util.Log.i("RONYCINE_DIAG", "[PLAYER_UI_READY] Progresso atingiu $loadProgress% em ${i*100}ms. Removendo overlay.")
+                    break
+                }
+            }
+            // Final safety check after total timeout
+            if (isLoading && !hasError && loadProgress >= 15) {
+                isLoading = false
+            }
+        }
+
+        // Hard timeout after 10 seconds if the WebView hasn't loaded enough content
+        delay(6000L) // Total 10 seconds
         if (isLoading && !hasError) {
-            isLoading = false
+            android.util.Log.w("RONYCINE_DIAG", "PLAYER_TIMEOUT: Timeout após 10s sem resposta para contentType=$mediaType, tmdbId=$tmdbId, url=$embedUrl")
+            handlePlayerFailure("O provedor demorou muito para responder. Tentando alternativa...")
         }
     }
 
     // Back handler for fullscreen HTML5 custom video views or player fullscreen mode
-    BackHandler(enabled = isCustomViewShowing || isFullscreen) {
-        if (isCustomViewShowing) {
+    BackHandler(enabled = isCustomViewShowing || isFullscreen || isAuthorizationError) {
+        if (isAuthorizationError) {
+            isAuthorizationError = false
+            onTryAgain?.invoke()
+        } else if (isCustomViewShowing) {
             hideCustomView()
         } else if (isFullscreen) {
             android.util.Log.i("RONYCINE_FULLSCREEN", "FULLSCREEN_EXIT: Exit triggered by BackHandler")
@@ -368,7 +437,8 @@ fun EmbedPlayer(
 
                             // Mitigation for MESA / RenderNode errors: 
                             // Software layer on emulators or after crash, avoiding forced LAYER_TYPE_HARDWARE.
-                            WebViewUtils.applySafeLayerType(this, forceSoftware = (retryCount > 0))
+                            WebViewUtils.applySafeLayerType(this, forceSoftware = false)
+                            setBackgroundColor(android.graphics.Color.BLACK)
 
                             // Third party cookies required for embeds
                             try {
@@ -383,7 +453,7 @@ fun EmbedPlayer(
                                 mediaPlaybackRequiresUserGesture = false
                                 loadsImagesAutomatically = true
                                 mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                allowFileAccess = false
+                                allowFileAccess = true
                                 allowContentAccess = true
                                 useWideViewPort = true
                                 loadWithOverviewMode = true
@@ -396,21 +466,71 @@ fun EmbedPlayer(
                                     safeBrowsingEnabled = false
                                 }
                                 setGeolocationEnabled(false)
-                                userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                                
+                                // Clean User-Agent: Modern mobile browser to avoid bot detection
+                                userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
                             }
 
                             addJavascriptInterface(object {
                                 @android.webkit.JavascriptInterface
                                 fun onPlayerEvent(event: String, currentTime: Double, duration: Double) {
-                                    android.util.Log.d("RONYCINE_PLAYER", "VIDSRC_EVENT: event=$event, time=$currentTime, dur=$duration")
+                                    android.util.Log.d("RONYCINE_DIAG", "PLAYER_EVENT: event=$event, time=$currentTime, dur=$duration")
+                                    if (event == "ended" || event == "completed") {
+                                        (context as? Activity)?.runOnUiThread {
+                                            if (isCustomViewShowing) {
+                                                hideCustomView()
+                                            }
+                                        }
+                                    } else if (event == "media_ready" || event == "playing" || event == "play") {
+                                        (context as? Activity)?.runOnUiThread {
+                                            isLoading = false
+                                        }
+                                    }
                                     onPlaybackProgress?.invoke(currentTime, duration, event)
                                 }
 
                                 @android.webkit.JavascriptInterface
+                                fun logDiagnostic(hasVideo: Boolean, hasIframe: Boolean, readyState: Int, statusSnippet: String) {
+                                    android.util.Log.i(
+                                        "RONYCINE_DIAG",
+                                        "DIAGNOSTIC: contentType=$mediaType, tmdbId=$tmdbId, playerUrl=$embedUrl, finalUrl=${activeWebView?.url ?: "N/A"}, videoReadyState=$readyState, hasVideo=$hasVideo, hasIframe=$hasIframe, statusSnippet=$statusSnippet"
+                                    )
+                                }
+
+                                @android.webkit.JavascriptInterface
+                                fun onContentFailed(reason: String) {
+                                    android.util.Log.e(
+                                        "RONYCINE_DIAG",
+                                        "PLAYER_ERROR: contentType=$mediaType, tmdbId=$tmdbId, playerUrl=$embedUrl, finalUrl=${activeWebView?.url ?: "N/A"}, reason=$reason"
+                                    )
+                                    handlePlayerFailure(reason)
+                                }
+
+                                @android.webkit.JavascriptInterface
+                                fun onAuthorizationError(type: String) {
+                                    android.util.Log.e("REDEFLIX", "Authorization error detected: $type")
+                                    (context as? Activity)?.runOnUiThread {
+                                        isAuthorizationError = true
+                                        isLoading = false
+                                    }
+                                }
+
+                                @android.webkit.JavascriptInterface
                                 fun onFullscreenStateChanged(isJsFullscreen: Boolean) {
-                                    android.util.Log.i("RONYCINE_FULLSCREEN", "PLAYER_STATE: JS fullscreen change event. isJsFullscreen=$isJsFullscreen")
-                                    if (isJsFullscreen && !isFullscreen) {
-                                        onToggleFullscreen?.invoke()
+                                    android.util.Log.i("RONYCINE_FULLSCREEN", "PLAYER_STATE: JS fullscreen change event. isJsFullscreen=$isJsFullscreen, isFullscreen=$isFullscreen")
+                                    (context as? Activity)?.runOnUiThread {
+                                        if (isJsFullscreen) {
+                                            if (!isFullscreen) {
+                                                onToggleFullscreen?.invoke()
+                                            }
+                                        } else {
+                                            if (isCustomViewShowing) {
+                                                hideCustomView()
+                                            }
+                                            if (isFullscreen) {
+                                                onToggleFullscreen?.invoke()
+                                            }
+                                        }
                                     }
                                 }
 
@@ -428,7 +548,7 @@ fun EmbedPlayer(
                                                 mode.contains("portrait") -> {
                                                     activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
                                                 }
-                                                mode == "toggle" || mode == "rotate" || mode == "change" || mode == "flip" || mode.isEmpty() -> {
+                                                mode == "toggle" -> {
                                                     val currentOrient = activity.resources.configuration.orientation
                                                     if (currentOrient == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
                                                         activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
@@ -443,27 +563,44 @@ fun EmbedPlayer(
                             }, "RonycineBridge")
 
                             webViewClient = object : WebViewClient() {
-                                private val blockedAdKeywords = listOf(
-                                    "doubleclick", "googlesyndication", "popads", "adsterra",
-                                    "monetag", "histats", "propellerads", "exoclick", "juicyads",
-                                    "onclick", "adnxs", "trafficjunky", "adcolony", "admob",
-                                    "taboola", "outbrain", "criteo", "pubmatic", "openx",
-                                    "adroll", "smartadserver", "popunder", "adform", "yieldmo",
-                                    "clickadu", "hilltopads", "bet365", "1xbet", "blaze"
-                                )
-
                                 override fun shouldInterceptRequest(
                                     view: WebView?,
                                     request: WebResourceRequest?
                                 ): WebResourceResponse? {
-                                    val uri = request?.url?.toString()?.lowercase() ?: return null
-                                    for (kw in blockedAdKeywords) {
-                                        if (uri.contains(kw)) {
-                                            return WebResourceResponse(
-                                                "text/plain",
-                                                "UTF-8",
-                                                ByteArrayInputStream(ByteArray(0))
-                                            )
+                                    val urlStr = request?.url?.toString() ?: return null
+                                    val host = request.url?.host?.lowercase() ?: ""
+                                    
+                                    // Intercept and block ads, popups, and tracker requests to prevent Chromium renderer process crashes (aw_browser_terminator.cc)
+                                    if (!request.isForMainFrame) {
+                                        val isAd = host.contains("pop") || 
+                                                host.contains("click") || 
+                                                host.contains("ads") || 
+                                                host.contains("adsystem") || 
+                                                host.contains("adservice") || 
+                                                host.contains("tracker") || 
+                                                host.contains("analytic") || 
+                                                host.contains("exoclick") || 
+                                                host.contains("doubleclick") || 
+                                                host.contains("adsterra") || 
+                                                host.contains("juicyads") || 
+                                                host.contains("propeller") || 
+                                                host.contains("onclick") || 
+                                                host.contains("histats") || 
+                                                host.contains("miner") || 
+                                                host.contains("coin") || 
+                                                host.contains("bet") || 
+                                                host.contains("casino") || 
+                                                urlStr.contains("/ads/") || 
+                                                urlStr.contains("ad_type") || 
+                                                urlStr.contains("ad_key") || 
+                                                urlStr.contains("ad_slot")
+                                        
+                                        val mainHost = try { Uri.parse(embedUrl).host?.lowercase() ?: "" } catch(_: Exception) { "" }
+                                        val isMainPlayerResource = host == mainHost || (mainHost.isNotEmpty() && host.endsWith("." + mainHost))
+                                        
+                                        if (isAd && !isMainPlayerResource) {
+                                            android.util.Log.v("RONYCINE_ADBLOCK", "AD_BLOCKED: $urlStr")
+                                            return WebResourceResponse("text/plain", "UTF-8", ByteArrayInputStream("".toByteArray()))
                                         }
                                     }
                                     return super.shouldInterceptRequest(view, request)
@@ -473,50 +610,95 @@ fun EmbedPlayer(
                                     view: WebView?,
                                     request: WebResourceRequest?
                                 ): Boolean {
-                                    val targetUrl = request?.url?.toString() ?: return false
-                                    // Block non-http intents to avoid hijacking app navigation
-                                    if (!targetUrl.startsWith("http://") && !targetUrl.startsWith("https://")) {
-                                        android.util.Log.i("RONYCINE_PLAYER", "PLAYER_EXTERNAL_REDIRECT: Blocked non-http/https intent url=$targetUrl")
+                                    val targetUri = request?.url ?: return false
+                                    val scheme = targetUri.scheme?.lowercase() ?: ""
+                                    
+                                    android.util.Log.i("RONYCINE_DIAG", "[LIVE_REDIRECT_STATUS] Redirect detected: $targetUri. timestamp=${System.currentTimeMillis()}")
+
+                                    // Prevent non-http/https intents (e.g. market://, intent://, tg://) from crashing the WebView
+                                    if (scheme != "http" && scheme != "https") {
+                                        android.util.Log.i("RONYCINE_PLAYER", "PLAYER_EXTERNAL_INTENT: Ignored non-web scheme: $scheme")
                                         return true
                                     }
-                                    
-                                    // Check if it looks like an ad redirect
-                                    val lowercaseUrl = targetUrl.lowercase()
-                                    val isPotentialAdRedirect = lowercaseUrl.contains("redirect") || 
-                                            lowercaseUrl.contains("ads") || 
-                                            lowercaseUrl.contains("popunder") || 
-                                            lowercaseUrl.contains("click") || 
-                                            lowercaseUrl.contains("promo") ||
-                                            lowercaseUrl.contains("game") ||
-                                            lowercaseUrl.contains("bet") ||
-                                            lowercaseUrl.contains("cassino") ||
-                                            lowercaseUrl.contains("slot")
-                                    
-                                    if (isPotentialAdRedirect) {
-                                        android.util.Log.i("RONYCINE_PLAYER", "PLAYER_EXTERNAL_REDIRECT: Blocked potential ad redirect URL=$targetUrl")
-                                        return true // Block ad redirects!
-                                    }
-                                    
-                                    // Allow internal embed navigation, block external navigations away from embed domain
+
+                                    // Allow normal http/https player navigation, iframe redirects, media manifests and CDNs
                                     return false
                                 }
 
-                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                     super.onPageStarted(view, url, favicon)
                                     isLoading = true
                                     url?.let {
                                         onUrlChanged?.invoke(it)
-                                        android.util.Log.i("RONYCINE_PLAYER", "PLAYER_URL: $it")
+                                        android.util.Log.i("RONYCINE_DIAG", "[LIVE_EMBED_STATUS] Carregamento iniciado: $it. timestamp=${System.currentTimeMillis()}")
+                                        android.util.Log.i("RONYCINE_DIAG", "[PLAYER_RESPONSE] Resposta recebida da URL: $it. timestamp=${System.currentTimeMillis()}")
                                     }
                                 }
 
                                 override fun onPageFinished(view: WebView?, url: String?) {
                                     super.onPageFinished(view, url)
-                                    isLoading = false
                                     url?.let {
                                         onUrlChanged?.invoke(it)
-                                        android.util.Log.i("RONYCINE_PLAYER", "PLAYER_NAVIGATION: Loaded page=$it")
+                                        android.util.Log.i("RONYCINE_DIAG", "[PLAYER_IFRAME_LOADED] WebView onPageFinished para url: $it. timestamp=${System.currentTimeMillis()}")
                                     }
+                                    
+                                    // Deep inspection for provider errors and video readiness
+                                    view?.evaluateJavascript(
+                                        """
+                                        (function() {
+                                            function inspectPage() {
+                                                var body = document.body;
+                                                var text = (body ? (body.innerText || body.textContent || '') : '') || '';
+                                                var title = document.title || '';
+                                                var videos = document.querySelectorAll('video');
+                                                var iframes = document.querySelectorAll('iframe');
+                                                var hasVideo = videos.length > 0;
+                                                var hasIframe = iframes.length > 0;
+                                                var v = document.querySelector('video');
+                                                var readyState = v ? v.readyState : -1;
+                                                
+                                                if (window.RonycineBridge && window.RonycineBridge.logDiagnostic) {
+                                                    window.RonycineBridge.logDiagnostic(hasVideo, hasIframe, readyState, (title + ' | ' + text).substring(0, 80));
+                                                }
+                                                
+                                                var lower = text.toLowerCase();
+                                                if (lower.includes('database connection failed') ||
+                                                    lower.includes('connection failed. please check logs') ||
+                                                    lower.includes('site em manutenção')) {
+                                                    if (window.RonycineBridge && window.RonycineBridge.onContentFailed) {
+                                                        window.RonycineBridge.onContentFailed('Servidor do provedor offline (Falha de banco de dados)');
+                                                    }
+                                                    return;
+                                                }
+                                                
+                                                if (lower.includes('esta autorização pertence a outro dispositivo')) {
+                                                    if (window.RonycineBridge && window.RonycineBridge.onAuthorizationError) {
+                                                        window.RonycineBridge.onAuthorizationError('redeflix_device_mismatch');
+                                                    }
+                                                    return;
+                                                }
+                                                
+                                                if ((lower.includes('error 404') || lower.includes('not found') || lower.includes('404 not found')) && !hasIframe && !hasVideo) {
+                                                    if (window.RonycineBridge && window.RonycineBridge.onContentFailed) {
+                                                        window.RonycineBridge.onContentFailed('Conteúdo não encontrado neste provedor (404)');
+                                                    }
+                                                    return;
+                                                }
+                                                
+                                                if (hasVideo || hasIframe) {
+                                                    if (window.RonycineBridge && window.RonycineBridge.onPlayerEvent) {
+                                                        window.RonycineBridge.onPlayerEvent('media_ready', 0, 0);
+                                                    }
+                                                }
+                                            }
+                                            inspectPage();
+                                            setTimeout(inspectPage, 600);
+                                            setTimeout(inspectPage, 1500);
+                                            setTimeout(inspectPage, 3000);
+                                        })();
+                                        """.trimIndent(),
+                                        null
+                                    )
                                     // Inject guard to ensure video does not pause during fullscreen resize or orientation change
                                     try {
                                         view?.evaluateJavascript(
@@ -579,9 +761,6 @@ fun EmbedPlayer(
                                                             margin: 0 !important;
                                                             padding: 0 !important;
                                                             background: #000000 !important;
-                                                            transition: none !important;
-                                                            animation: none !important;
-                                                            transform: none !important;
                                                         }
                                                         iframe, video {
                                                             width: 100% !important;
@@ -591,9 +770,6 @@ fun EmbedPlayer(
                                                             padding: 0 !important;
                                                             display: block !important;
                                                             box-sizing: border-box !important;
-                                                            transition: none !important;
-                                                            animation: none !important;
-                                                            transform: none !important;
                                                         }
                                                         .ronycine-player-fullscreen {
                                                             width: 100vw !important;
@@ -605,9 +781,6 @@ fun EmbedPlayer(
                                                             background: #000000 !important;
                                                             position: relative !important;
                                                             overflow: hidden !important;
-                                                            transition: none !important;
-                                                            animation: none !important;
-                                                            transform: none !important;
                                                         }
                                                         .ronycine-player-fullscreen video,
                                                         .ronycine-player-fullscreen iframe {
@@ -617,9 +790,6 @@ fun EmbedPlayer(
                                                             margin: 0 !important;
                                                             padding: 0 !important;
                                                             display: block !important;
-                                                            transition: none !important;
-                                                            animation: none !important;
-                                                            transform: none !important;
                                                         }
                                                     `;
                                                     document.head.appendChild(style);
@@ -642,12 +812,63 @@ fun EmbedPlayer(
                                                     return vids;
                                                 }
                                                 
+                                                var initialPos = $initialPositionSeconds;
+                                                var hasAppliedResume = false;
+
+                                                function applyResumeSeek(v) {
+                                                    if (hasAppliedResume || initialPos <= 2.0) return;
+                                                    if (v && v.duration && v.duration > 0) {
+                                                        try {
+                                                            if (Math.abs(v.currentTime - initialPos) > 2) {
+                                                                v.currentTime = initialPos;
+                                                                hasAppliedResume = true;
+                                                                console.log('[CONTINUE WATCHING] Retomando video em ' + initialPos + ' segundos');
+                                                            }
+                                                        } catch(e) {}
+                                                    }
+                                                }
+
+                                                var lastReportedTime = 0;
+                                                function notifyBridge(event, time, dur) {
+                                                    try {
+                                                        if (window.RonycineBridge && window.RonycineBridge.onPlayerEvent) {
+                                                            var now = Date.now();
+                                                            if (event === 'timeupdate') {
+                                                                if (now - lastReportedTime < 2500) return;
+                                                                lastReportedTime = now;
+                                                            }
+                                                            window.RonycineBridge.onPlayerEvent(event, time || 0, dur || 0);
+                                                        }
+                                                    } catch(e) {}
+                                                }
+
                                                 function setupVideo(v) {
                                                     if (v.__rc_hooked) return;
                                                     v.__rc_hooked = true;
-                                                    v.addEventListener('play', function() { lastState = true; });
-                                                    v.addEventListener('playing', function() { lastState = true; });
+                                                    applyResumeSeek(v);
+                                                    v.addEventListener('loadedmetadata', function() {
+                                                        applyResumeSeek(v);
+                                                        notifyBridge('loadedmetadata', v.currentTime, v.duration);
+                                                    });
+                                                    v.addEventListener('canplay', function() {
+                                                        applyResumeSeek(v);
+                                                    });
+                                                    v.addEventListener('play', function() {
+                                                        lastState = true;
+                                                        notifyBridge('play', v.currentTime, v.duration);
+                                                    });
+                                                    v.addEventListener('playing', function() {
+                                                        lastState = true;
+                                                        notifyBridge('playing', v.currentTime, v.duration);
+                                                    });
+                                                    v.addEventListener('timeupdate', function() {
+                                                        notifyBridge('timeupdate', v.currentTime, v.duration);
+                                                    });
+                                                    v.addEventListener('durationchange', function() {
+                                                        notifyBridge('timeupdate', v.currentTime, v.duration);
+                                                    });
                                                     v.addEventListener('pause', function() {
+                                                        notifyBridge('pause', v.currentTime, v.duration);
                                                         if (isResizing && lastState) {
                                                             setTimeout(function() {
                                                                 if (v.paused && lastState) {
@@ -658,7 +879,23 @@ fun EmbedPlayer(
                                                             lastState = false;
                                                         }
                                                     });
+                                                    v.addEventListener('ended', function() {
+                                                        lastState = false;
+                                                        notifyBridge('ended', v.currentTime, v.duration);
+                                                    });
                                                 }
+
+                                                document.addEventListener('ended', function(e) {
+                                                    if (e.target && (e.target.tagName === 'VIDEO' || e.target.nodeName === 'VIDEO')) {
+                                                        notifyBridge('ended', e.target.currentTime, e.target.duration);
+                                                    }
+                                                }, true);
+
+                                                document.addEventListener('timeupdate', function(e) {
+                                                    if (e.target && (e.target.tagName === 'VIDEO' || e.target.nodeName === 'VIDEO')) {
+                                                        notifyBridge('timeupdate', e.target.currentTime, e.target.duration);
+                                                    }
+                                                }, true);
                                                 
                                                 window.__ronycine_notify_transition = function(isFS) {
                                                     isResizing = true;
@@ -673,7 +910,7 @@ fun EmbedPlayer(
                                                                 if (v.paused) v.play().catch(function() {});
                                                             });
                                                         }
-                                                    }, 300);
+                                                    }, 1500);
                                                 };
                                                 
                                                 setInterval(function() {
@@ -723,8 +960,11 @@ fun EmbedPlayer(
                                                             var dur = Number(msg.duration || msg.total || 0);
                                                             if (typeof type === 'string') {
                                                                 var evLower = type.toLowerCase();
-                                                                if (evLower === 'playing' || evLower === 'paused' || evLower === 'completed' || evLower === 'seeked' || evLower === 'player_event') {
+                                                                if (evLower === 'playing' || evLower === 'paused' || evLower === 'completed' || evLower === 'ended' || evLower === 'end' || evLower === 'finish' || evLower === 'seeked' || evLower === 'player_event') {
                                                                     var subEvent = (evLower === 'player_event' && msg.event) ? String(msg.event).toLowerCase() : evLower;
+                                                                    if (subEvent === 'completed' || subEvent === 'ended' || subEvent === 'finish' || subEvent === 'end') {
+                                                                        subEvent = 'ended';
+                                                                    }
                                                                     if (window.RonycineBridge && window.RonycineBridge.onPlayerEvent) {
                                                                         window.RonycineBridge.onPlayerEvent(subEvent, time, dur);
                                                                     }
@@ -745,12 +985,37 @@ fun EmbedPlayer(
                                     request: WebResourceRequest?,
                                     error: WebResourceError?
                                 ) {
+                                    val isMainFrame = request?.isForMainFrame == true
+                                    val errCode = error?.errorCode ?: -1
+                                    val errDesc = error?.description?.toString() ?: "Falha de conexão"
+                                    
+                                    if (isMainFrame) {
+                                        android.util.Log.e("RONYCINE_DIAG", "[LIVE_STREAM_STATUS] Erro de rede no frame principal: $errCode ($errDesc). URL=${request?.url}")
+                                    }
+
                                     super.onReceivedError(view, request, error)
-                                    if (request?.isForMainFrame == true) {
-                                        android.util.Log.e("RONYCINE_PLAYER", "PLAYER_ERROR: Failed to load url=${request.url} description=${error?.description}")
-                                        isLoading = false
-                                        hasError = true
-                                        errorMessage = "Não foi possível carregar o player."
+                                    
+                                    if (isMainFrame) {
+                                        android.util.Log.e("RONYCINE_DIAG", "PLAYER_ERROR: onReceivedError, contentType=$mediaType, tmdbId=$tmdbId, playerUrl=$embedUrl, finalUrl=${request?.url}, code=$errCode, desc=$errDesc")
+                                        handlePlayerFailure("Falha ao carregar reprodução ($errDesc)")
+                                    }
+                                }
+
+                                override fun onReceivedHttpError(
+                                    view: WebView?,
+                                    request: WebResourceRequest?,
+                                    errorResponse: WebResourceResponse?
+                                ) {
+                                    val statusCode = errorResponse?.statusCode ?: -1
+                                    val isMainFrame = request?.isForMainFrame == true
+                                    
+                                    android.util.Log.e("RONYCINE_DIAG", "[LIVE_STREAM_STATUS] Erro HTTP detectado: $statusCode. URL=${request?.url}. isMainFrame=$isMainFrame")
+
+                                    super.onReceivedHttpError(view, request, errorResponse)
+                                    
+                                    if (isMainFrame && (statusCode >= 400)) {
+                                        android.util.Log.e("RONYCINE_DIAG", "HTTP_STATUS_ERROR: contentType=$mediaType, tmdbId=$tmdbId, playerUrl=$embedUrl, finalUrl=${request?.url}, status=$statusCode")
+                                        handlePlayerFailure("Erro do servidor ($statusCode)")
                                     }
                                 }
 
@@ -784,9 +1049,7 @@ fun EmbedPlayer(
                                     if (retryCount < 2) {
                                         retryCount++
                                     } else {
-                                        isLoading = false
-                                        hasError = true
-                                        errorMessage = "O reprodutor encerrou inesperadamente. Clique em Recarregar ou tente outro servidor."
+                                        handlePlayerFailure("O reprodutor encerrou inesperadamente.")
                                     }
                                     return true
                                 }
@@ -816,9 +1079,6 @@ fun EmbedPlayer(
                                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                     super.onProgressChanged(view, newProgress)
                                     loadProgress = newProgress
-                                    if (newProgress >= 40) {
-                                        isLoading = false
-                                    }
                                 }
 
                                 override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
@@ -834,7 +1094,15 @@ fun EmbedPlayer(
 
                             activeWebView = this
                             onWebViewCreated?.invoke(this)
-                            loadUrl(embedUrl)
+                            
+                            // Inject Referer header to avoid 403 Forbidden errors from providers
+                            val referer = when {
+                                embedUrl.contains("rdembed") || embedUrl.contains("reidosembeds") -> "https://reidosembeds.online"
+                                embedUrl.contains("redeflix") -> "https://redeflixapi.store"
+                                else -> "https://ronycine.app"
+                            }
+                            val extraHeaders = mapOf("Referer" to referer)
+                            loadUrl(embedUrl, extraHeaders)
                         }
                     },
                     update = { view ->
@@ -855,7 +1123,7 @@ fun EmbedPlayer(
 
         // --- PROFESSIONAL COMPACT LOADING STATE ---
         AnimatedVisibility(
-            visible = isLoading && !hasError,
+            visible = isLoading && !hasError && !isAuthorizationError,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
@@ -870,23 +1138,39 @@ fun EmbedPlayer(
                     verticalArrangement = Arrangement.Center,
                     modifier = Modifier.padding(24.dp)
                 ) {
-                    CircularProgressIndicator(
+                    RonycineSmileLoader(
                         color = BrandRed,
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(42.dp)
+                        size = 42.dp
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
-                        text = "CARREGANDO PLAYER...",
+                        text = "PREPARANDO REPRODUÇÃO",
                         color = Color.White,
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Black,
-                        letterSpacing = 1.sp
+                        letterSpacing = 1.2.sp
                     )
 
                     Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "Conectando ao player...",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val currentProviderHost = remember(embedUrl) {
+                        try {
+                            android.net.Uri.parse(embedUrl).host?.lowercase() ?: audioSource.providerDomain
+                        } catch (_: Exception) {
+                            audioSource.providerDomain
+                        }
+                    }
 
                     Surface(
                         color = DarkSurface,
@@ -894,12 +1178,123 @@ fun EmbedPlayer(
                         border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder)
                     ) {
                         Text(
-                            text = "${audioSource.label.uppercase()} • ${audioSource.providerDomain}",
+                            text = "${audioSource.label.uppercase()} • $currentProviderHost",
                             color = Color.LightGray,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
+                    }
+                }
+            }
+        }
+
+        // --- REDEFLIX AUTHORIZATION ERROR OVERLAY ---
+        if (isAuthorizationError) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.95f))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Security,
+                        contentDescription = null,
+                        tint = BrandRed,
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = "REDEFLIXAPI",
+                        color = BrandRed,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Esta autorização pertence a outro dispositivo.",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = "O servidor da RedeFlixApi detectou um conflito de identidade. Isso pode ocorrer se o seu IP mudou ou se há dados de sessão antigos.",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(32.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                android.util.Log.i("REDEFLIX", "User chose to try another player")
+                                isAuthorizationError = false
+                                onTryAgain?.invoke()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
+                        ) {
+                            Text("OUTRO PLAYER", color = Color.White)
+                        }
+                        
+                                Button(
+                                    onClick = {
+                                        android.util.Log.i("REDEFLIX", "Resetting all web storage and authorization data for RedeFlixApi")
+                                        // Clear all cookies, localStorage, and web storage to completely reset identity
+                                        try {
+                                            // 1. Clear Cookies
+                                            val cookieManager = CookieManager.getInstance()
+                                            cookieManager.removeAllCookies {
+                                                android.util.Log.d("REDEFLIX", "Cookies removed: $it")
+                                            }
+                                            
+                                            // 2. Clear WebStorage (LocalStorage, IndexedDB, etc)
+                                            WebStorage.getInstance().deleteAllData()
+                                            
+                                            // 3. Clear WebView Cache
+                                            activeWebView?.clearCache(true)
+                                            activeWebView?.clearFormData()
+                                            activeWebView?.clearHistory()
+
+                                            (context as? Activity)?.runOnUiThread {
+                                                isAuthorizationError = false
+                                                retryCount++ // Triggers reload with fresh state
+                                            }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("REDEFLIX", "Error during reset: ${e.message}")
+                                            isAuthorizationError = false
+                                            retryCount++
+                                        }
+                                    },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = BrandRed)
+                        ) {
+                            Text("REDEFINIR", color = Color.White)
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(16.dp))
+                    TextButton(onClick = {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://redeflixapi.store/"))
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }) {
+                        Text("Verificar no Navegador", color = Color.Gray, fontSize = 12.sp)
                     }
                 }
             }
@@ -963,8 +1358,23 @@ fun EmbedPlayer(
                             Text("TENTAR NOVAMENTE", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
-                        // Switch audio source button if available
-                        if (onAudioSourceChange != null) {
+                        if (onTryAnotherPlayer != null) {
+                            OutlinedButton(
+                                onClick = {
+                                    hasError = false
+                                    isLoading = true
+                                    onTryAnotherPlayer.invoke()
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder),
+                                modifier = Modifier.testTag("embed_other_player_btn")
+                            ) {
+                                Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("OUTRO PLAYER", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else if (onAudioSourceChange != null) {
                             val alternateSource = if (audioSource == EmbedAudioSource.DUBLADO) {
                                 EmbedAudioSource.LEGENDADO
                             } else {

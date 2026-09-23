@@ -62,28 +62,30 @@ class AnimesDoramasViewModel(application: Application) : AndroidViewModel(applic
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
-    // Local room streams (Strict separation: Animes ONLY, Doramas ONLY)
-    val localAnimes: StateFlow<List<MediaEntity>> = dao.getAllMedia()
-        .combine(_searchQuery) { list: List<MediaEntity>, query: String ->
-            val animes = list.filter {
-                (it.mediaCategory == MediaClassifier.CATEGORY_ANIME ||
-                        (it.mediaCategory.isBlank() && MediaClassifier.isAnime(it))) &&
-                        it.mediaCategory != MediaClassifier.CATEGORY_DORAMA
-            }
-            if (query.isBlank()) animes
-            else animes.filter { it.title.contains(query, ignoreCase = true) || it.originalTitle.contains(query, ignoreCase = true) }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val activeProfile = firebaseService?.activeProfile ?: MutableStateFlow(null)
 
-    val localDoramas: StateFlow<List<MediaEntity>> = dao.getAllMedia()
-        .combine(_searchQuery) { list: List<MediaEntity>, query: String ->
-            val doramas = list.filter {
-                (it.mediaCategory == MediaClassifier.CATEGORY_DORAMA ||
-                        (it.mediaCategory.isBlank() && MediaClassifier.isDorama(it))) &&
-                        it.mediaCategory != MediaClassifier.CATEGORY_ANIME
-            }
-            if (query.isBlank()) doramas
-            else doramas.filter { it.title.contains(query, ignoreCase = true) || it.originalTitle.contains(query, ignoreCase = true) }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // Local room streams (Strict separation: Animes ONLY, Doramas ONLY, with Kids Mode filtering)
+    val localAnimes: StateFlow<List<MediaEntity>> = combine(dao.getAllMedia(), _searchQuery, activeProfile) { list: List<MediaEntity>, query: String, profile ->
+        val safeList = com.example.util.ContentAccessManager.filterContentForProfile(profile, list)
+        val animes = safeList.filter {
+            (it.mediaCategory == MediaClassifier.CATEGORY_ANIME ||
+                    (it.mediaCategory.isBlank() && MediaClassifier.isAnime(it))) &&
+                    it.mediaCategory != MediaClassifier.CATEGORY_DORAMA
+        }
+        if (query.isBlank()) animes
+        else animes.filter { it.title.contains(query, ignoreCase = true) || it.originalTitle.contains(query, ignoreCase = true) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val localDoramas: StateFlow<List<MediaEntity>> = combine(dao.getAllMedia(), _searchQuery, activeProfile) { list: List<MediaEntity>, query: String, profile ->
+        val safeList = com.example.util.ContentAccessManager.filterContentForProfile(profile, list)
+        val doramas = safeList.filter {
+            (it.mediaCategory == MediaClassifier.CATEGORY_DORAMA ||
+                    (it.mediaCategory.isBlank() && MediaClassifier.isDorama(it))) &&
+                    it.mediaCategory != MediaClassifier.CATEGORY_ANIME
+        }
+        if (query.isBlank()) doramas
+        else doramas.filter { it.title.contains(query, ignoreCase = true) || it.originalTitle.contains(query, ignoreCase = true) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         viewModelScope.launch {

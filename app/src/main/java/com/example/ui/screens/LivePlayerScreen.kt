@@ -558,18 +558,21 @@ fun LivePlayerScreen(
                                                 .background(BrandRed, CircleShape)
                                         )
                                         Text(
-                                            text = "AGORA: ${matchedChannel.currentProgram}",
+                                            text = "AGORA: ${matchedChannel.nowPlayingTitle ?: "Programação"}",
                                             color = Color.White,
                                             fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold
                                         )
                                     }
                                     Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "PRÓXIMO: ${matchedChannel.nextProgram}",
-                                        color = Color.LightGray,
-                                        fontSize = 12.sp
-                                    )
+                                    val nextProg = matchedChannel.nowPlayingNextProgrammes?.firstOrNull()
+                                    if (!nextProg.isNullOrBlank()) {
+                                        Text(
+                                            text = "PRÓXIMO: $nextProg",
+                                            color = Color.LightGray,
+                                            fontSize = 12.sp
+                                        )
+                                    }
                                 }
                             }
                         }

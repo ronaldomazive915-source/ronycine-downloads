@@ -88,7 +88,7 @@ fun RestrictedAccessScreen(
                 )
 
                 Text(
-                    text = "Este dispositivo não possui autorização para acessar o Painel Administrativo.",
+                    text = "Esta conta de usuário não possui autorização para acessar o Painel Administrativo. Solicite a concessão de privilégios de ADMIN ao Founder do RONYCINE.",
                     color = TextSecondary,
                     fontSize = 14.sp,
                     textAlign = TextAlign.Center,

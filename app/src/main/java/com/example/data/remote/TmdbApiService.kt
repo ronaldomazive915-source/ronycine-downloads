@@ -121,7 +121,7 @@ interface TmdbApiService {
         @Path("movie_id") movieId: Int,
         @Query("api_key") apiKey: String,
         @Query("language") language: String = "pt-BR",
-        @Query("append_to_response") appendToResponse: String = "videos,credits"
+        @Query("append_to_response") appendToResponse: String = "credits"
     ): TmdbMediaDto
 
     @GET("tv/{series_id}")
@@ -129,7 +129,7 @@ interface TmdbApiService {
         @Path("series_id") seriesId: Int,
         @Query("api_key") apiKey: String,
         @Query("language") language: String = "pt-BR",
-        @Query("append_to_response") appendToResponse: String = "videos,credits"
+        @Query("append_to_response") appendToResponse: String = "credits"
     ): TmdbMediaDto
 
     @GET("movie/{movie_id}/credits")
@@ -175,4 +175,40 @@ interface TmdbApiService {
         @Query("language") language: String = "pt-BR",
         @Query("page") page: Int = 1
     ): TmdbPageResponse<TmdbMediaDto>
+
+    @GET("discover/movie")
+    suspend fun discoverMovies(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String = "pt-BR",
+        @Query("with_watch_providers") withWatchProviders: String? = null,
+        @Query("watch_region") watchRegion: String? = null,
+        @Query("with_genres") withGenres: String? = null,
+        @Query("include_adult") includeAdult: Boolean = false,
+        @Query("page") page: Int = 1,
+        @Query("sort_by") sortBy: String = "popularity.desc"
+    ): TmdbPageResponse<TmdbMediaDto>
+
+    @GET("discover/tv")
+    suspend fun discoverSeries(
+        @Query("api_key") apiKey: String,
+        @Query("language") language: String = "pt-BR",
+        @Query("with_watch_providers") withWatchProviders: String? = null,
+        @Query("watch_region") watchRegion: String? = null,
+        @Query("with_genres") withGenres: String? = null,
+        @Query("include_adult") includeAdult: Boolean = false,
+        @Query("page") page: Int = 1,
+        @Query("sort_by") sortBy: String = "popularity.desc"
+    ): TmdbPageResponse<TmdbMediaDto>
+
+    @GET("movie/{movie_id}/watch/providers")
+    suspend fun getMovieWatchProviders(
+        @Path("movie_id") movieId: Int,
+        @Query("api_key") apiKey: String
+    ): TmdbWatchProvidersResponse
+
+    @GET("tv/{series_id}/watch/providers")
+    suspend fun getSeriesWatchProviders(
+        @Path("series_id") seriesId: Int,
+        @Query("api_key") apiKey: String
+    ): TmdbWatchProvidersResponse
 }

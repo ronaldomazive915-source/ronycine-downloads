@@ -95,3 +95,25 @@ data class TmdbGenreDto(
     @Json(name = "name") val name: String
 )
 
+@JsonClass(generateAdapter = true)
+data class TmdbWatchProvidersResponse(
+    @Json(name = "id") val id: Int,
+    @Json(name = "results") val results: Map<String, TmdbWatchProvidersRegion>? = emptyMap()
+)
+
+@JsonClass(generateAdapter = true)
+data class TmdbWatchProvidersRegion(
+    @Json(name = "link") val link: String? = null,
+    @Json(name = "flatrate") val flatrate: List<TmdbWatchProviderItem>? = emptyList(),
+    @Json(name = "rent") val rent: List<TmdbWatchProviderItem>? = emptyList(),
+    @Json(name = "buy") val buy: List<TmdbWatchProviderItem>? = emptyList()
+)
+
+@JsonClass(generateAdapter = true)
+data class TmdbWatchProviderItem(
+    @Json(name = "display_priority") val displayPriority: Int? = 0,
+    @Json(name = "logo_path") val logoPath: String? = null,
+    @Json(name = "provider_id") val providerId: Int,
+    @Json(name = "provider_name") val providerName: String
+)
+

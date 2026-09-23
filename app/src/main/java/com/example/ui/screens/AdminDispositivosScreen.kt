@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.remote.DeviceEntity
@@ -34,6 +36,9 @@ import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.TextSecondary
 import com.example.ui.viewmodel.AdminViewModel
 import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.concurrent.TimeUnit
 
 @Composable
 fun AdminDispositivosScreen(
@@ -311,6 +316,8 @@ fun AdminDispositivosScreen(
         )
     }
 
+
+
     if (deviceToBlock != null) {
         AlertDialog(
             onDismissRequest = { deviceToBlock = null },
@@ -420,141 +427,156 @@ fun DeviceRow(
             .fillMaxWidth()
             .clickable(onClick = onClick)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
             Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Indicador visual de Status
-                Box(
-                    modifier = Modifier
-                        .size(14.dp)
-                        .clip(CircleShape)
-                        .background(
-                            when {
-                                device.isBlocked -> BrandRed
-                                device.isOnline -> Color(0xFF34D399) // Verde vivo
-                                else -> Color.Gray
-                            }
-                        )
-                )
-                Spacer(modifier = Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = device.name.ifBlank { "Dispositivo Android" },
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        if (device.isAdmin) {
-                            Surface(
-                                color = Color(0xFF8B5CF6).copy(alpha = 0.2f),
-                                shape = RoundedCornerShape(6.dp)
-                            ) {
-                                Text(
-                                    text = "👑 ADMIN",
-                                    color = Color(0xFFA78BFA),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(4.dp))
-                        }
-                        Surface(
-                            color = when {
-                                device.isBlocked -> BrandRed.copy(alpha = 0.2f)
-                                device.isOnline -> Color(0xFF065F46)
-                                else -> Color(0xFF374151)
-                            },
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = when {
-                                    device.isBlocked -> "🔒 BLOQUEADO"
-                                    device.isOnline -> "🟢 ONLINE"
-                                    else -> "⚪ OFFLINE"
-                                },
-                                color = when {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Indicador visual de Status
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
                                     device.isBlocked -> BrandRed
-                                    device.isOnline -> Color(0xFF34D399)
-                                    else -> Color.LightGray
-                                },
-                                fontSize = 10.sp,
+                                    device.isOnline -> Color(0xFF34D399) // Verde vivo
+                                    else -> Color.Gray
+                                }
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = device.name.ifBlank { "Dispositivo Android" },
+                                color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                fontSize = 14.sp
+                            )
+                            if (device.isAdmin) {
+                                Surface(
+                                    color = Color(0xFF8B5CF6).copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = "👑 ADMIN",
+                                        color = Color(0xFFA78BFA),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            StatusBadge(device)
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "ID: ${device.maskedDeviceId} • ${device.platform} (v${device.appVersion})",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                        
+
+                    }
+                }
+
+                Box {
+                    IconButton(onClick = { expandedMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Opções", tint = Color.White)
+                    }
+                    DropdownMenu(
+                        expanded = expandedMenu,
+                        onDismissRequest = { expandedMenu = false },
+                        modifier = Modifier.background(DarkSurface)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Ver detalhes", color = Color.White) },
+                            onClick = { expandedMenu = false; onClick() },
+                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = Color.White) }
+                        )
+
+                        DropdownMenuItem(
+                            text = { Text("Copiar Device ID", color = Color.White) },
+                            onClick = { expandedMenu = false; onCopyId() },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (device.isAdmin) "Revogar Acesso Admin" else "Conceder Acesso Admin", color = Color(0xFFA78BFA)) },
+                            onClick = { expandedMenu = false; onToggleAdmin(!device.isAdmin) },
+                            leadingIcon = { Icon(Icons.Default.AdminPanelSettings, contentDescription = null, tint = Color(0xFFA78BFA)) }
+                        )
+                        if (device.isBlocked) {
+                            DropdownMenuItem(
+                                text = { Text("Desbloquear", color = Color.White) },
+                                onClick = { expandedMenu = false; onUnblock() },
+                                leadingIcon = { Icon(Icons.Default.LockOpen, contentDescription = null, tint = Color.White) }
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Bloquear", color = BrandRed) },
+                                onClick = { expandedMenu = false; onBlock() },
+                                leadingIcon = { Icon(Icons.Default.Block, contentDescription = null, tint = BrandRed) }
                             )
                         }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "ID: ${device.maskedDeviceId} • ${device.platform} (v${device.appVersion})",
-                        color = TextSecondary,
-                        fontSize = 11.sp
-                    )
-                    Text(
-                        text = "Última atividade: ${device.lastActivityFormatted}",
-                        color = if (device.isOnline) Color(0xFF34D399) else TextSecondary,
-                        fontSize = 11.sp,
-                        fontWeight = if (device.isOnline) FontWeight.SemiBold else FontWeight.Normal
-                    )
-                }
-            }
-
-            Box {
-                IconButton(onClick = { expandedMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "Opções", tint = Color.White)
-                }
-                DropdownMenu(
-                    expanded = expandedMenu,
-                    onDismissRequest = { expandedMenu = false },
-                    modifier = Modifier.background(DarkSurface)
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Ver detalhes", color = Color.White) },
-                        onClick = { expandedMenu = false; onClick() },
-                        leadingIcon = { Icon(Icons.Default.Info, contentDescription = null, tint = Color.White) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Copiar Device ID", color = Color.White) },
-                        onClick = { expandedMenu = false; onCopyId() },
-                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Color.White) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(if (device.isAdmin) "Revogar Acesso Admin" else "Conceder Acesso Admin", color = Color(0xFFA78BFA)) },
-                        onClick = { expandedMenu = false; onToggleAdmin(!device.isAdmin) },
-                        leadingIcon = { Icon(Icons.Default.AdminPanelSettings, contentDescription = null, tint = Color(0xFFA78BFA)) }
-                    )
-                    if (device.isBlocked) {
                         DropdownMenuItem(
-                            text = { Text("Desbloquear", color = Color.White) },
-                            onClick = { expandedMenu = false; onUnblock() },
-                            leadingIcon = { Icon(Icons.Default.LockOpen, contentDescription = null, tint = Color.White) }
-                        )
-                    } else {
-                        DropdownMenuItem(
-                            text = { Text("Bloquear", color = BrandRed) },
-                            onClick = { expandedMenu = false; onBlock() },
-                            leadingIcon = { Icon(Icons.Default.Block, contentDescription = null, tint = BrandRed) }
+                            text = { Text("Remover", color = BrandRed) },
+                            onClick = { expandedMenu = false; onRemove() },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = BrandRed) }
                         )
                     }
-                    DropdownMenuItem(
-                        text = { Text("Remover", color = BrandRed) },
-                        onClick = { expandedMenu = false; onRemove() },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = BrandRed) }
-                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+fun StatusBadge(device: DeviceEntity) {
+    Surface(
+        color = when {
+            device.isBlocked -> BrandRed.copy(alpha = 0.2f)
+            device.isOnline -> Color(0xFF065F46)
+            else -> Color(0xFF374151)
+        },
+        shape = RoundedCornerShape(6.dp)
+    ) {
+        Text(
+            text = when {
+                device.isBlocked -> "🔒 BLOQUEADO"
+                device.isOnline -> "🟢 ONLINE"
+                else -> "⚪ OFFLINE"
+            },
+            color = when {
+                device.isBlocked -> BrandRed
+                device.isOnline -> Color(0xFF34D399)
+                else -> Color.LightGray
+            },
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+fun formatRemainingTime(millis: Long): String {
+    if (millis <= 0) return "Expirado"
+    val days = TimeUnit.MILLISECONDS.toDays(millis)
+    val hours = TimeUnit.MILLISECONDS.toHours(millis) % 24
+    val minutes = TimeUnit.MILLISECONDS.toMinutes(millis) % 60
+    
+    return when {
+        days > 0 -> "${days}d ${hours}h"
+        hours > 0 -> "${hours}h ${minutes}m"
+        else -> "${minutes}min"
     }
 }
 
@@ -584,48 +606,40 @@ fun DeviceDetailsDialog(
                         else -> "⚪ Offline"
                     }
                 )
+                
+
+
                 DetailRow(
                     "Painel Administrativo",
-                    if (device.isAdmin) "👑 Autorizado (adminAccess = true)" else "❌ Não Autorizado (adminAccess = false)"
+                    if (device.isAdmin) "👑 Autorizado (adminAccess = true)" else "❌ Não Autorizado"
                 )
                 DetailRowWithAction("Device ID", device.deviceId, onCopy = onCopyId)
                 DetailRow("Dispositivo / Modelo", device.name)
-                DetailRow("Plataforma", device.platform)
+                DetailRow("Plataforma / SO", "${device.platform} (Android ${device.osVersion})")
                 DetailRow(
-                    "Versão do App",
+                    "Versão do RONYCINE",
                     "${device.appVersion} (${device.buildNumber})"
                 )
                 DetailRow(
                     "Estado do Push/FCM",
                     if (device.fcmToken.isNotBlank()) "✅ Ativo (${device.fcmStatus})" else "❌ Inativo/Indisponível"
                 )
-                DetailRow(
-                    "Permissão de Notificação",
-                    if (device.notificationsPermission == "CONCEDIDA") "✅ Concedida" else "❌ Negada/Inativo"
-                )
                 DetailRow("Primeira Conexão", device.firstConnectionFormatted)
                 DetailRow("Última Atividade (Heartbeat)", device.lastActivityFormatted)
 
-                Spacer(modifier = Modifier.height(4.dp))
-                OutlinedButton(
-                    onClick = { onToggleAdmin(!device.isAdmin) },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, Color(0xFFA78BFA))
-                ) {
-                    Icon(
-                        Icons.Default.AdminPanelSettings,
-                        contentDescription = null,
-                        tint = Color(0xFFA78BFA),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (device.isAdmin) "Revogar Acesso Admin" else "Conceder Acesso Admin",
-                        color = Color(0xFFA78BFA),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                Spacer(modifier = Modifier.height(10.dp))
+                
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    OutlinedButton(
+                        onClick = { onToggleAdmin(!device.isAdmin) },
+                        modifier = Modifier.fillMaxWidth(0.6f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, Color(0xFFA78BFA))
+                    ) {
+                        Icon(Icons.Default.AdminPanelSettings, null, tint = Color(0xFFA78BFA), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(if (device.isAdmin) "Revogar Acesso Admin" else "Conceder Acesso Admin", color = Color(0xFFA78BFA), fontSize = 11.sp)
+                    }
                 }
             }
         },
@@ -641,6 +655,8 @@ fun DeviceDetailsDialog(
         shape = RoundedCornerShape(16.dp)
     )
 }
+
+
 
 @Composable
 fun DetailRow(label: String, value: String) {

@@ -126,9 +126,24 @@ class MediaRepository(
     val tmdbAutoSyncProgress = _tmdbAutoSyncProgress.asStateFlow()
 
     init {
-        // Automatically start realtime centralized Firestore synchronization
-        firebaseService?.startRealtimeSync(dao)
-        startPeriodicTmdbAutoSyncScheduler()
+        repoScope.launch {
+            // Automatically start realtime centralized Firestore synchronization
+            firebaseService?.startRealtimeSync(dao)
+            
+            // Critical safety fallback for clean installations:
+            // If the local database has 0 items, proactively trigger a fast one-time Firestore get() sync 
+            // to populate the catalog immediately without waiting for the realtime snapshot listener first trigger.
+            try {
+                if (dao.getMediaCount() == 0) {
+                    android.util.Log.i("MediaRepository", "[INIT-SYNC] Banco de dados vazio detectado. Forçando carregamento imediato do Firestore...")
+                    firebaseService?.forceRealtimeSyncCheck(dao)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MediaRepository", "[INIT-SYNC] Erro na sincronização inicial preventiva: ${e.message}", e)
+            }
+
+            startPeriodicTmdbAutoSyncScheduler()
+        }
     }
 
     fun observeTmdbAutoSyncHistory(): Flow<List<TmdbAutoSyncHistoryEntity>> = dao.getAllTmdbAutoSyncHistory()
@@ -1296,24 +1311,24 @@ class MediaRepository(
 
     // --- Catalog Observables ---
     val allMedia: Flow<List<MediaEntity>> = dao.getAllMedia()
-    val animes: Flow<List<MediaEntity>> = dao.getAllMedia().map { list ->
-        list.filter { MediaClassifier.classifyMedia(it) == MediaClassifier.CATEGORY_ANIME }
-    }
-    val doramas: Flow<List<MediaEntity>> = dao.getAllMedia().map { list ->
-        list.filter { MediaClassifier.classifyMedia(it) == MediaClassifier.CATEGORY_DORAMA }
-    }
-    val movies: Flow<List<MediaEntity>> = dao.getAllMedia().map { list ->
-        list.filter { MediaClassifier.classifyMedia(it) == MediaClassifier.CATEGORY_MOVIE }
-    }
-    val series: Flow<List<MediaEntity>> = dao.getAllMedia().map { list ->
-        list.filter { MediaClassifier.classifyMedia(it) == MediaClassifier.CATEGORY_SERIES }
-    }
+    val animes: Flow<List<MediaEntity>> = dao.getMediaByCategory("anime")
+    val doramas: Flow<List<MediaEntity>> = dao.getMediaByCategory("dorama")
+    val movies: Flow<List<MediaEntity>> = dao.getMediaByType("movie")
+    val series: Flow<List<MediaEntity>> = dao.getMediaByType("tv")
     val featuredHeroMedia: Flow<List<MediaEntity>> = dao.getFeaturedHeroMedia()
     fun getMyList(profileId: String): Flow<List<MediaEntity>> = dao.getMyList(profileId)
     fun getContinueWatching(profileId: String): Flow<List<WatchHistoryEntity>> = dao.getContinueWatching(profileId).map { list ->
         list.distinctBy { it.tmdbId }
     }
     fun getWatchHistory(profileId: String): Flow<List<WatchHistoryEntity>> = dao.getWatchHistory(profileId)
+
+    val trendingMedia: Flow<List<MediaEntity>> = dao.getTrendingMedia()
+    val topRatedMedia: Flow<List<MediaEntity>> = dao.getTopRatedMedia()
+    val releases: Flow<List<MediaEntity>> = dao.getReleases()
+    val topRated: Flow<List<MediaEntity>> = dao.getTopRatedMedia()
+    val recentlyAddedMedia: Flow<List<MediaEntity>> = dao.getRecentlyAddedMedia()
+    val recentAnimes: Flow<List<MediaEntity>> = dao.getMediaByCategory("anime")
+    val recentDoramas: Flow<List<MediaEntity>> = dao.getMediaByCategory("dorama")
 
     // --- Featured Media Management Observables ---
     val activeFeaturedItems: Flow<List<FeaturedMediaItem>> = combine(
@@ -1506,21 +1521,9 @@ class MediaRepository(
 
     // --- Import Content By TMDB ID ---
     private suspend fun fetchVideosWithEnglishFallback(tmdbId: Int, type: String, ptVideos: List<com.example.data.remote.TmdbVideoDto>?): List<com.example.data.remote.TmdbVideoDto> {
-        val list = ptVideos ?: emptyList()
-        val hasGoodTrailer = list.any { it.site.equals("YouTube", ignoreCase = true) && (it.type == "Trailer" || it.type == "Teaser") }
-        if (hasGoodTrailer) {
-            return list
-        }
-        return try {
-            val enVideosResponse = if (type == "movie") {
-                api.getMovieVideos(movieId = tmdbId, apiKey = apiKey, language = "en-US")
-            } else {
-                api.getSeriesVideos(seriesId = tmdbId, apiKey = apiKey, language = "en-US")
-            }
-            list + (enVideosResponse.results ?: emptyList())
-        } catch (e: Exception) {
-            list
-        }
+        // [AUDIT RONYCINE] Trailers are definitively disabled for all catalog cards and background fetching 
+        // to ensure maximum performance and zero unwanted YouTube/TMDB background calls.
+        return emptyList()
     }
 
     suspend fun importByTmdbId(tmdbId: Int, type: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
@@ -2293,40 +2296,71 @@ class MediaRepository(
         episodeNumber: Int? = null,
         progressPercent: Float,
         positionMs: Long,
-        totalDurationMs: Long
+        totalDurationMs: Long,
+        currentTimeSeconds: Double = 0.0,
+        durationSeconds: Double = 0.0
     ) = withContext(Dispatchers.IO) {
         val isTv = mediaType == "tv" || mediaType == "serie"
-        val existing = if (isTv) {
-            dao.getWatchHistoryItemByKey(tmdbId, profileId, mediaType, seasonNumber, episodeNumber)
-        } else {
-            dao.getWatchHistoryItemByKey(tmdbId, profileId, mediaType, null, null)
-        }
+        val normalizedType = if (isTv) "tv" else "movie"
+        val existing = dao.getWatchHistoryItemByKey(
+            tmdbId = tmdbId,
+            profileId = profileId,
+            mediaType = normalizedType,
+            seasonNumber = if (isTv) seasonNumber else null,
+            episodeNumber = if (isTv) episodeNumber else null
+        )
         val idToUse = existing?.id ?: 0
-        dao.saveWatchProgress(
-            WatchHistoryEntity(
-                id = idToUse,
-                profileId = profileId,
-                tmdbId = tmdbId,
-                mediaType = mediaType,
-                title = title,
-                posterPath = posterPath,
-                seasonNumber = if (isTv) seasonNumber else null,
-                episodeNumber = if (isTv) episodeNumber else null,
-                progressPercent = progressPercent,
-                lastWatchedPositionMs = positionMs,
-                totalDurationMs = totalDurationMs,
-                watchedAt = System.currentTimeMillis()
-            )
+        val entity = WatchHistoryEntity(
+            id = idToUse,
+            profileId = profileId,
+            tmdbId = tmdbId,
+            mediaType = normalizedType,
+            title = title,
+            posterPath = posterPath,
+            seasonNumber = if (isTv) seasonNumber else null,
+            episodeNumber = if (isTv) episodeNumber else null,
+            progressPercent = progressPercent,
+            lastWatchedPositionMs = positionMs,
+            totalDurationMs = totalDurationMs,
+            currentTimeSeconds = if (currentTimeSeconds > 0.0) currentTimeSeconds else (positionMs / 1000.0),
+            durationSeconds = if (durationSeconds > 0.0) durationSeconds else (totalDurationMs / 1000.0),
+            watchedAt = System.currentTimeMillis()
+        )
+        dao.saveWatchProgress(entity)
+        firebaseService?.syncWatchProgressToCloud(entity)
+    }
+
+    suspend fun getWatchHistoryItemByKey(
+        tmdbId: Int,
+        profileId: String,
+        mediaType: String,
+        seasonNumber: Int?,
+        episodeNumber: Int?
+    ): WatchHistoryEntity? = withContext(Dispatchers.IO) {
+        val isTv = mediaType == "tv" || mediaType == "serie"
+        val normalizedType = if (isTv) "tv" else "movie"
+        dao.getWatchHistoryItemByKey(
+            tmdbId = tmdbId,
+            profileId = profileId,
+            mediaType = normalizedType,
+            seasonNumber = if (isTv) seasonNumber else null,
+            episodeNumber = if (isTv) episodeNumber else null
         )
     }
 
     suspend fun removeFromContinueWatching(item: WatchHistoryEntity) = withContext(Dispatchers.IO) {
         if (item.id > 0) {
             dao.deleteWatchHistoryById(item.id)
+        } else {
+            val isTv = item.mediaType == "tv" || item.mediaType == "serie"
+            dao.deleteWatchHistoryByKey(
+                tmdbId = item.tmdbId,
+                profileId = item.profileId,
+                seasonNumber = if (isTv) item.seasonNumber else null,
+                episodeNumber = if (isTv) item.episodeNumber else null
+            )
         }
-        if (item.tmdbId > 0) {
-            dao.deleteWatchHistoryByTmdbId(item.tmdbId)
-        }
+        firebaseService?.deleteWatchProgressFromCloud(item)
     }
 
     suspend fun clearWatchHistory() = withContext(Dispatchers.IO) {
@@ -2537,6 +2571,10 @@ class MediaRepository(
     }
 
     // --- Helper DTO Mapping ---
+    fun mapDtoToMediaEntity(dto: TmdbMediaDto, defaultType: String): MediaEntity {
+        return mapDtoToEntity(dto, defaultType)
+    }
+
     private fun mapDtoToEntity(dto: TmdbMediaDto, defaultType: String, isHero: Boolean = false): MediaEntity {
         val title = dto.title ?: dto.name ?: "Sem título"
         val originalTitle = dto.originalTitle ?: dto.originalName ?: title

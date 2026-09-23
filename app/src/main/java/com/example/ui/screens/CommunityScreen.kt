@@ -48,6 +48,7 @@ import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
 import com.example.ui.viewmodel.CommunityViewModel
 import com.google.firebase.auth.FirebaseAuth
+import com.example.ui.components.RonycineSmileLoader
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
@@ -542,7 +543,7 @@ fun MessageList(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                CircularProgressIndicator(color = BrandRed, modifier = Modifier.size(28.dp))
+                RonycineSmileLoader(color = BrandRed, size = 38.dp)
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = translateKey("community.placeholder", "Carregando mensagens..."),
@@ -1082,10 +1083,9 @@ fun MessageBubble(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 when (message.deliveryStatus) {
                                     "SENDING" -> {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(9.dp),
+                                        RonycineSmileLoader(
                                             color = Color.White.copy(alpha = 0.6f),
-                                            strokeWidth = 1.2.dp
+                                            size = 12.dp
                                         )
                                     }
                                     "FAILED" -> {
@@ -1489,10 +1489,9 @@ fun AiThinkingBubble() {
                         fontSize = 13.sp,
                         fontStyle = FontStyle.Italic
                     )
-                    CircularProgressIndicator(
+                    RonycineSmileLoader(
                         color = Color(0xFF64B5F6),
-                        modifier = Modifier.size(12.dp),
-                        strokeWidth = 1.5.dp
+                        size = 14.dp
                     )
                 }
             }

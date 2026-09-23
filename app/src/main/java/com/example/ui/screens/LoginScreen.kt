@@ -1020,24 +1020,37 @@ fun LoginScreen(
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        val target = forgotPasswordInput.trim()
-                        if (target.isBlank()) {
-                            Toast.makeText(context, "Informe seu e-mail ou @nome de usuário.", Toast.LENGTH_SHORT).show()
-                        } else {
-                            viewModel.resetPassword(target) {
-                                showForgotPasswordDialog = false
-                                Toast.makeText(context, "Link de recuperação enviado com sucesso!", Toast.LENGTH_LONG).show()
+                            val authState by viewModel.authState.collectAsState()
+                            
+                            Button(
+                                onClick = {
+                                    val target = forgotPasswordInput.trim()
+                                    viewModel.resetPassword(
+                                        emailOrUsername = target,
+                                        onFail = { error ->
+                                            Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                                        },
+                                        onSent = {
+                                            showForgotPasswordDialog = false
+                                            Toast.makeText(context, "Instruções enviadas! Verifique seu e-mail e também a pasta de SPAM.", Toast.LENGTH_LONG).show()
+                                        }
+                                    )
+                                },
+                                enabled = authState !is AuthState.Loading,
+                                colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.testTag("confirm_reset_password_button")
+                            ) {
+                                if (authState is AuthState.Loading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        color = Color.White,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Text("ENVIAR LINK", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+                                }
                             }
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.testTag("confirm_reset_password_button")
-                ) {
-                    Text("ENVIAR LINK", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                }
             },
             dismissButton = {
                 TextButton(

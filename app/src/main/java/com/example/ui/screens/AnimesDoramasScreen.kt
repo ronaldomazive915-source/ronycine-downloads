@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.local.MediaEntity
 import com.example.ui.components.MediaCard
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
@@ -139,10 +140,9 @@ fun AnimesDoramasScreen(
                                 .testTag("animes_doramas_refresh_button")
                         ) {
                             if (isLoading) {
-                                CircularProgressIndicator(
+                                RonycineSmileLoader(
                                     color = BrandRed,
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp
+                                    size = 20.dp
                                 )
                             } else {
                                 Icon(
@@ -317,7 +317,7 @@ fun AnimesDoramasScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        CircularProgressIndicator(color = BrandRed)
+                        RonycineSmileLoader(color = BrandRed, size = 48.dp)
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
                             text = "Carregando catálogo TMDB & Firestore...",
@@ -406,7 +406,7 @@ fun AnimesDoramasScreen(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.fillMaxWidth().testTag("animes_horizontal_row")
                                 ) {
-                                    items(sortedAnimes, key = { "anime_${it.tmdbId}" }) { media ->
+                                    items(sortedAnimes, key = { "anime_${it.tmdbId}" }, contentType = { "media_card" }) { media ->
                                         MediaCard(
                                             media = media,
                                             onClick = { onNavigateToDetail(media.tmdbId, media.mediaType) }
@@ -462,7 +462,7 @@ fun AnimesDoramasScreen(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.fillMaxWidth().testTag("doramas_horizontal_row")
                                 ) {
-                                    items(sortedDoramas, key = { "dorama_${it.tmdbId}" }) { media ->
+                                    items(sortedDoramas, key = { "dorama_${it.tmdbId}" }, contentType = { "media_card" }) { media ->
                                         MediaCard(
                                             media = media,
                                             onClick = { onNavigateToDetail(media.tmdbId, media.mediaType) }
@@ -503,7 +503,7 @@ fun AnimesDoramasScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 contentPadding = PaddingValues(bottom = 32.dp)
                             ) {
-                                items(sortedAnimes, key = { "anime_${it.tmdbId}" }) { media ->
+                                items(sortedAnimes, key = { "anime_${it.tmdbId}" }, contentType = { "media_card" }) { media ->
                                     MediaCard(
                                         media = media,
                                         onClick = { onNavigateToDetail(media.tmdbId, media.mediaType) }
@@ -543,7 +543,7 @@ fun AnimesDoramasScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 contentPadding = PaddingValues(bottom = 32.dp)
                             ) {
-                                items(sortedDoramas, key = { "dorama_${it.tmdbId}" }) { media ->
+                                items(sortedDoramas, key = { "dorama_${it.tmdbId}" }, contentType = { "media_card" }) { media ->
                                     MediaCard(
                                         media = media,
                                         onClick = { onNavigateToDetail(media.tmdbId, media.mediaType) }

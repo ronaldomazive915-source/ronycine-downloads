@@ -59,7 +59,7 @@ fun MoviesScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(movies, key = { it.tmdbId }) { media ->
+                items(movies, key = { it.tmdbId }, contentType = { "media_card" }) { media ->
                     MediaCard(
                         media = media,
                         onClick = { onNavigateToDetail(media.tmdbId, "movie") },

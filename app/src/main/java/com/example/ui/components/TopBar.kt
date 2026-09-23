@@ -131,11 +131,38 @@ fun TopBar(
                 .testTag("topbar_search_input")
         )
 
-        // 3. Right Actions: Notifications (🔔) + Profile (👤)
+        // 3. Right Actions: Kids Indicator + Notifications (🔔) + Profile (👤)
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            if (activeProfile?.isKidsProfile == true) {
+                Surface(
+                    color = Color(0xFF0F2A4A),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.6f)),
+                    modifier = Modifier.testTag("kids_mode_indicator")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "🧒",
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = "INFANTIL",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
+                        )
+                    }
+                }
+            }
+
             // Notifications with live badge
             IconButton(
                 onClick = onNavigateToNotifications,

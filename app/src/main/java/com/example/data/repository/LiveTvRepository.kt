@@ -1,14 +1,19 @@
 package com.example.data.repository
 
 import android.util.Log
+import com.example.data.local.ChannelEntity
 import com.example.data.remote.ApiChannel
 import com.example.data.remote.ApiEvent
 import com.example.data.remote.ApiEventEmbed
 import com.example.data.remote.ApiGuideItem
+import com.example.data.remote.EmbedTvApiService
+import com.example.data.remote.FirebaseService
 import com.example.data.remote.ReiDosEmbedsApiService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -18,29 +23,58 @@ data class LiveTvApiStats(
     val lastSync: String = "Sincronizado recentemente",
     val channelsCount: Int = 0,
     val eventsCount: Int = 0,
+    val activeChannelsCount: Int = 0,
+    val blockedDuplicatesCount: Int = 0,
     val categoriesCount: Int = 0,
     val guideStatus: String = "Ativo (EPG 24h)"
 )
 
+data class LiveTvSyncSummary(
+    val totalFoundOnApi: Int = 0,
+    val newChannelsAdded: Int = 0,
+    val existingUpdated: Int = 0,
+    val duplicatesBlocked: Int = 0,
+    val errorCount: Int = 0,
+    val isApiOnline: Boolean = true,
+    val message: String = ""
+)
+
+sealed class AdminAddChannelResult {
+    data class Success(val channel: ApiChannel) : AdminAddChannelResult()
+    data class Duplicate(val existingChannel: ApiChannel) : AdminAddChannelResult()
+    data class Error(val message: String) : AdminAddChannelResult()
+}
+
+sealed class AdminImportChannelResult {
+    data class Preview(val channel: ApiChannel) : AdminImportChannelResult()
+    data class Duplicate(val existingChannel: ApiChannel) : AdminImportChannelResult()
+    data class NotFound(val message: String) : AdminImportChannelResult()
+    data class Error(val message: String) : AdminImportChannelResult()
+}
+
 class LiveTvRepository(
-    private val apiService: ReiDosEmbedsApiService = ReiDosEmbedsApiService()
+    private val apiService: ReiDosEmbedsApiService = ReiDosEmbedsApiService(),
+    private val embedTvService: EmbedTvApiService = EmbedTvApiService()
 ) {
     private val TAG = "LiveTvRepository"
 
-    private val _cachedChannels = MutableStateFlow<List<ApiChannel>>(getFallbackChannels())
+    private val _cachedChannels = MutableStateFlow<List<ApiChannel>>(emptyList())
     val cachedChannels: StateFlow<List<ApiChannel>> = _cachedChannels.asStateFlow()
 
-    private val _cachedEvents = MutableStateFlow<List<ApiEvent>>(getFallbackEvents())
+    private val _cachedEvents = MutableStateFlow<List<ApiEvent>>(emptyList())
     val cachedEvents: StateFlow<List<ApiEvent>> = _cachedEvents.asStateFlow()
 
-    private val _cachedChannelCategories = MutableStateFlow<List<String>>(listOf("Todos", "Abertos", "Esportes", "Filmes & Séries", "Notícias", "Documentários", "Infantil", "Variedades"))
+    private val _cachedChannelCategories = MutableStateFlow<List<String>>(listOf("Todos"))
     val cachedChannelCategories: StateFlow<List<String>> = _cachedChannelCategories.asStateFlow()
 
-    private val _cachedEventCategories = MutableStateFlow<List<String>>(listOf("Todos", "Futebol", "Basquete", "Lutas / MMA", "Vôlei", "Automobilismo", "Tênis"))
+    private val _cachedEventCategories = MutableStateFlow<List<String>>(listOf("Todos"))
     val cachedEventCategories: StateFlow<List<String>> = _cachedEventCategories.asStateFlow()
 
-    private val _cachedGuide = MutableStateFlow<List<ApiGuideItem>>(getFallbackGuide())
+    private val _cachedGuide = MutableStateFlow<List<ApiGuideItem>>(emptyList())
     val cachedGuide: StateFlow<List<ApiGuideItem>> = _cachedGuide.asStateFlow()
+
+    private val _embedTvStats = MutableStateFlow(LiveTvApiStats())
+    val embedTvStats: StateFlow<LiveTvApiStats> = _embedTvStats.asStateFlow()
 
     private val _apiStats = MutableStateFlow(
         LiveTvApiStats(
@@ -54,8 +88,191 @@ class LiveTvRepository(
     )
     val apiStats: StateFlow<LiveTvApiStats> = _apiStats.asStateFlow()
 
+    private val _syncHistory = MutableStateFlow<List<String>>(emptyList())
+    val syncHistory: StateFlow<List<String>> = _syncHistory.asStateFlow()
+
     private var lastGuideFetchTime = 0L
     private val GUIDE_CACHE_DURATION_MS = 24 * 60 * 60 * 1000L // 24 hours
+
+    private fun addSyncLog(provider: String, summary: LiveTvSyncSummary) {
+        val timestamp = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
+        val log = """
+            $timestamp
+            $provider
+            ✓ Canais encontrados: ${summary.totalFoundOnApi}
+            ✓ Novos: ${summary.newChannelsAdded}
+            ✓ Atualizados: ${summary.existingUpdated}
+            ✓ Duplicados evitados: ${summary.duplicatesBlocked}
+            ✓ Erros: ${summary.errorCount}
+        """.trimIndent()
+        _syncHistory.value = listOf(log) + _syncHistory.value.take(19)
+    }
+
+    private fun normalizeKey(input: String?): String {
+        if (input == null) return ""
+        return input.lowercase(Locale.ROOT)
+            .replace(Regex("[^a-z0-9]"), "")
+            .trim()
+    }
+
+    fun getCanonicalChannelKey(channel: ApiChannel): String {
+        // Order of preference for canonical key:
+        // 1. slug (if normalized isn't empty)
+        // 2. id (if normalized isn't empty)
+        // 3. name (normalized)
+        val normSlug = normalizeKey(channel.slug)
+        if (normSlug.isNotEmpty()) return normSlug
+        val normId = normalizeKey(channel.id)
+        if (normId.isNotEmpty()) return normId
+        return normalizeKey(channel.name)
+    }
+
+    fun findExistingChannel(
+        candidates: List<ApiChannel>,
+        newChannel: ApiChannel
+    ): ApiChannel? {
+        val newKey = getCanonicalChannelKey(newChannel)
+        val newNameNorm = normalizeKey(newChannel.name)
+        val newEmbedNorm = (newChannel.embedUrl ?: "").trim().lowercase(Locale.ROOT).removeSuffix("/")
+
+        return candidates.find { existing ->
+            // Check by canonical key
+            if (getCanonicalChannelKey(existing) == newKey) return@find true
+            
+            // Check by name
+            if (normalizeKey(existing.name) == newNameNorm) return@find true
+            
+            // Check by URL
+            val existingEmbedNorm = (existing.embedUrl ?: "").trim().lowercase(Locale.ROOT).removeSuffix("/")
+            if (newEmbedNorm.isNotEmpty() && existingEmbedNorm.isNotEmpty() && newEmbedNorm == existingEmbedNorm) return@find true
+            
+            false
+        }
+    }
+
+    suspend fun syncEmbedTvChannels(): LiveTvSyncSummary = withContext(Dispatchers.IO) {
+        try {
+            val remote = embedTvService.getChannels()
+            if (remote.isEmpty()) return@withContext LiveTvSyncSummary(isApiOnline = false, message = "Nenhum canal retornado")
+
+            val currentList = _cachedChannels.value.toMutableList()
+            var newAdded = 0
+            var existingUpdated = 0
+            var duplicatesBlocked = 0
+
+            remote.forEach { remoteCh ->
+                val duplicate = findExistingChannel(currentList, remoteCh)
+                if (duplicate != null) {
+                    val index = currentList.indexOfFirst { it.id == duplicate.id }
+                    if (index >= 0) {
+                        val current = currentList[index]
+                        // Preserve original source if it's the same, or merge info
+                        val updated = current.copy(
+                            nowPlayingTitle = remoteCh.nowPlayingTitle?.takeIf { it.isNotBlank() } ?: current.nowPlayingTitle,
+                            logoUrl = remoteCh.logoUrl?.takeIf { it.isNotBlank() } ?: current.logoUrl,
+                            category = remoteCh.category?.takeIf { it.isNotBlank() } ?: current.category
+                        )
+                        currentList[index] = updated
+                        existingUpdated++
+                    } else {
+                        duplicatesBlocked++
+                    }
+                } else {
+                    currentList.add(remoteCh)
+                    newAdded++
+                }
+            }
+
+            _cachedChannels.value = currentList
+            val summary = LiveTvSyncSummary(
+                totalFoundOnApi = remote.size,
+                newChannelsAdded = newAdded,
+                existingUpdated = existingUpdated,
+                duplicatesBlocked = duplicatesBlocked
+            )
+            
+            _embedTvStats.value = _embedTvStats.value.copy(
+                isOnline = true,
+                lastSync = getCurrentTimestamp(),
+                channelsCount = currentList.count { it.sourceProvider == "embedtv" },
+                activeChannelsCount = currentList.count { it.sourceProvider == "embedtv" && it.isActive == true }
+            )
+            
+            addSyncLog("EmbedTV (Canais)", summary)
+            summary
+        } catch (e: Exception) {
+            LiveTvSyncSummary(isApiOnline = false, message = e.message ?: "Erro desconhecido")
+        }
+    }
+
+    suspend fun syncEmbedTvEvents(): LiveTvSyncSummary = withContext(Dispatchers.IO) {
+        try {
+            val remote = embedTvService.getEvents()
+            val currentEvents = _cachedEvents.value.toMutableList()
+            var newAdded = 0
+            
+            remote.forEach { event ->
+                if (currentEvents.none { it.id == event.id || it.title == event.title }) {
+                    currentEvents.add(event)
+                    newAdded++
+                }
+            }
+            
+            _cachedEvents.value = currentEvents
+            val summary = LiveTvSyncSummary(
+                totalFoundOnApi = remote.size,
+                newChannelsAdded = newAdded
+            )
+            
+            _embedTvStats.value = _embedTvStats.value.copy(
+                eventsCount = currentEvents.count { it.sourceProvider == "embedtv" }
+            )
+            
+            addSyncLog("EmbedTV (Eventos)", summary)
+            summary
+        } catch (e: Exception) {
+            LiveTvSyncSummary(isApiOnline = false, message = e.message ?: "Erro desconhecido")
+        }
+    }
+
+    suspend fun syncEmbedTvGuide(): LiveTvSyncSummary = withContext(Dispatchers.IO) {
+        try {
+            val remote = embedTvService.getGuide()
+            val currentGuide = _cachedGuide.value.toMutableList()
+            
+            // Merge guide items
+            remote.forEach { item ->
+                if (currentGuide.none { it.channelId == item.channelId && it.title == item.title && it.time == item.time }) {
+                    currentGuide.add(item)
+                }
+            }
+            
+            _cachedGuide.value = currentGuide
+            _embedTvStats.value = _embedTvStats.value.copy(
+                guideStatus = "Disponível (${remote.size} itens)"
+            )
+            
+            val summary = LiveTvSyncSummary(totalFoundOnApi = remote.size)
+            addSyncLog("EmbedTV (EPG)", summary)
+            summary
+        } catch (e: Exception) {
+            LiveTvSyncSummary(isApiOnline = false, message = e.message ?: "Erro desconhecido")
+        }
+    }
+
+    suspend fun syncAllEmbedTv(): LiveTvSyncSummary {
+        val ch = syncEmbedTvChannels()
+        val ev = syncEmbedTvEvents()
+        val ep = syncEmbedTvGuide()
+        
+        return LiveTvSyncSummary(
+            totalFoundOnApi = ch.totalFoundOnApi + ev.totalFoundOnApi + ep.totalFoundOnApi,
+            newChannelsAdded = ch.newChannelsAdded,
+            existingUpdated = ch.existingUpdated,
+            duplicatesBlocked = ch.duplicatesBlocked,
+            message = "Sincronização completa concluída"
+        )
+    }
 
     suspend fun refreshChannels(category: String? = null): List<ApiChannel> {
         return try {
@@ -73,15 +290,25 @@ class LiveTvRepository(
         }
     }
 
-    suspend fun getChannelById(channelId: String): ApiChannel? {
-        val inMemory = _cachedChannels.value.find { it.id.equals(channelId, ignoreCase = true) || it.slug.equals(channelId, ignoreCase = true) }
-        if (inMemory != null) return inMemory
+    suspend fun getChannelById(channelId: String, forceRefresh: Boolean = true): ApiChannel? {
+        if (!forceRefresh) {
+            val inMemory = _cachedChannels.value.find { it.id.equals(channelId, ignoreCase = true) || (it.slug != null && it.slug.equals(channelId, ignoreCase = true)) }
+            if (inMemory != null) return inMemory
+        }
 
         return try {
+            android.util.Log.i("RONYCINE_DIAG", "[LIVE_API_STATUS] Fetching updated data for channel $channelId")
             val remote = apiService.getChannelById(channelId)
-            remote ?: _cachedChannels.value.firstOrNull()
+            if (remote != null) {
+                android.util.Log.i("RONYCINE_DIAG", "[LIVE_API_STATUS] Channel $channelId fetched successfully. embed_url=${remote.embedUrl}")
+                remote
+            } else {
+                android.util.Log.e("RONYCINE_DIAG", "[LIVE_API_STATUS] Channel $channelId not found on API")
+                _cachedChannels.value.find { it.id.equals(channelId, ignoreCase = true) }
+            }
         } catch (e: Exception) {
-            _cachedChannels.value.firstOrNull()
+            android.util.Log.e("RONYCINE_DIAG", "[LIVE_API_STATUS] Error fetching channel $channelId: ${e.message}")
+            _cachedChannels.value.find { it.id.equals(channelId, ignoreCase = true) }
         }
     }
 
@@ -155,7 +382,7 @@ class LiveTvRepository(
         val localChannels = _cachedChannels.value.filter {
             it.name.contains(query, ignoreCase = true) ||
                     (it.category?.contains(query, ignoreCase = true) == true) ||
-                    (it.currentProgram?.contains(query, ignoreCase = true) == true)
+                    (it.nowPlayingTitle?.contains(query, ignoreCase = true) == true)
         }
         val localEvents = _cachedEvents.value.filter {
             it.title.contains(query, ignoreCase = true) ||
@@ -193,6 +420,398 @@ class LiveTvRepository(
             }
         } catch (e: Exception) {
             _cachedGuide.value
+        }
+    }
+
+    private val _totalBlockedDuplicates = MutableStateFlow(0)
+    val totalBlockedDuplicates: StateFlow<Int> = _totalBlockedDuplicates.asStateFlow()
+
+    fun findDuplicateChannel(
+        candidates: List<ApiChannel>,
+        newId: String,
+        newName: String,
+        newStreamUrl: String?,
+        newCategory: String,
+        newSlug: String? = null
+    ): ApiChannel? {
+        val normNewId = normalizeKey(newId)
+        val normNewSlug = newSlug?.let { normalizeKey(it) } ?: normNewId
+        val normNewName = normalizeKey(newName)
+        val normNewCat = normalizeKey(newCategory)
+        val normNewStream = (newStreamUrl ?: "").trim().lowercase(Locale.ROOT).removeSuffix("/")
+
+        return candidates.find { existing ->
+            val normExistingId = normalizeKey(existing.id)
+            val normExistingSlug = existing.slug?.let { normalizeKey(it) } ?: normExistingId
+            val normExistingName = normalizeKey(existing.name)
+            val normExistingCat = normalizeKey(existing.category ?: "")
+            val normExistingStream = (existing.embedUrl ?: "").trim().lowercase(Locale.ROOT).removeSuffix("/")
+
+            if (normNewId.isNotEmpty() && (normNewId == normExistingId || normNewId == normExistingSlug)) {
+                return@find true
+            }
+            if (normNewSlug.isNotEmpty() && (normNewSlug == normExistingId || normNewSlug == normExistingSlug)) {
+                return@find true
+            }
+            if (normNewStream.isNotEmpty() && normNewStream == normExistingStream) {
+                return@find true
+            }
+            if (normNewName.isNotEmpty() && normNewName == normExistingName && normNewCat == normExistingCat) {
+                return@find true
+            }
+
+            false
+        }
+    }
+
+    suspend fun syncReiDosEmbeds(): LiveTvSyncSummary {
+        return syncAllWithSummary()
+    }
+
+    suspend fun syncAllWithSummary(mediaRepository: MediaRepository? = null): LiveTvSyncSummary = withContext(Dispatchers.IO) {
+        var foundApiCount = 0
+        var newAdded = 0
+        var existingUpdated = 0
+        var duplicatesBlocked = 0
+        var errorCount = 0
+        var isOnline = true
+
+        val currentList = _cachedChannels.value.toMutableList()
+
+        try {
+            val remoteChannels = apiService.getChannels()
+            foundApiCount = remoteChannels.size
+
+            if (remoteChannels.isNotEmpty()) {
+                for (remote in remoteChannels) {
+                    val duplicate = findDuplicateChannel(
+                        candidates = currentList,
+                        newId = remote.id,
+                        newName = remote.name,
+                        newStreamUrl = remote.embedUrl,
+                        newCategory = remote.category ?: "",
+                        newSlug = remote.slug
+                    )
+
+                    if (duplicate != null) {
+                        val index = currentList.indexOfFirst { it.id == duplicate.id }
+                        if (index >= 0) {
+                            val current = currentList[index]
+                            val updated = current.copy(
+                                nowPlayingTitle = remote.nowPlayingTitle?.ifBlank { current.nowPlayingTitle } ?: current.nowPlayingTitle,
+                                logoUrl = remote.logoUrl.takeIf { !it.isNullOrBlank() } ?: current.logoUrl,
+                                category = remote.category.takeIf { !it.isNullOrBlank() } ?: current.category
+                            )
+                            currentList[index] = updated
+                            existingUpdated++
+                        } else {
+                            duplicatesBlocked++
+                        }
+                    } else {
+                        currentList.add(remote)
+                        newAdded++
+                    }
+                }
+                _cachedChannels.value = currentList
+                _totalBlockedDuplicates.value += duplicatesBlocked
+            } else {
+                isOnline = false
+            }
+
+            val remoteEvents = apiService.getEvents()
+            if (remoteEvents.isNotEmpty()) {
+                _cachedEvents.value = remoteEvents
+            }
+
+            val chCats = apiService.getChannelCategories()
+            if (chCats.isNotEmpty()) {
+                val list = mutableListOf("Todos")
+                list.addAll(chCats.filter { it.isNotBlank() && !it.equals("Todos", ignoreCase = true) })
+                _cachedChannelCategories.value = list
+            }
+
+            val evCats = apiService.getEventCategories()
+            if (evCats.isNotEmpty()) {
+                val list = mutableListOf("Todos")
+                list.addAll(evCats.filter { it.isNotBlank() && !it.equals("Todos", ignoreCase = true) })
+                _cachedEventCategories.value = list
+            }
+
+            val guide = apiService.getGuide()
+            if (guide.isNotEmpty()) {
+                _cachedGuide.value = guide
+                lastGuideFetchTime = System.currentTimeMillis()
+            }
+
+            val channelEntities = currentList.map { apiCh ->
+                ChannelEntity(
+                    id = apiCh.id,
+                    name = apiCh.name,
+                    category = apiCh.category ?: "Geral",
+                    logoUrl = apiCh.logoUrl ?: "",
+                    streamUrl = apiCh.getEffectiveEmbedUrl(),
+                    isOnline = apiCh.isActive == true,
+                    addedAt = System.currentTimeMillis()
+                )
+            }
+            if (mediaRepository != null) {
+                for (entity in channelEntities) {
+                    mediaRepository.saveLiveChannel(entity)
+                }
+            } else {
+                FirebaseService.getInstance()?.batchUpsertChannels(channelEntities)
+            }
+
+            updateStats(
+                isOnline = isOnline,
+                channels = currentList.size,
+                events = _cachedEvents.value.size,
+                categories = _cachedChannelCategories.value.size + _cachedEventCategories.value.size
+            )
+
+            val summary = LiveTvSyncSummary(
+                totalFoundOnApi = foundApiCount,
+                newChannelsAdded = newAdded,
+                existingUpdated = existingUpdated,
+                duplicatesBlocked = duplicatesBlocked,
+                errorCount = errorCount,
+                isApiOnline = isOnline,
+                message = if (isOnline) "Sincronização concluída com sucesso." else "API indisponível. Os dados existentes foram preservados."
+            )
+            addSyncLog("API Atual", summary)
+            summary
+        } catch (e: Exception) {
+            Log.e(TAG, "Sync error: ${e.message}")
+            updateStats(isOnline = false)
+            LiveTvSyncSummary(
+                totalFoundOnApi = foundApiCount,
+                newChannelsAdded = 0,
+                existingUpdated = 0,
+                duplicatesBlocked = 0,
+                errorCount = 1,
+                isApiOnline = false,
+                message = "Erro de conexão com a API. Os dados locais foram preservados."
+            )
+        }
+    }
+
+    suspend fun addChannel(
+        name: String,
+        publicId: String,
+        category: String,
+        logoUrl: String,
+        streamUrl: String,
+        description: String,
+        isActive: Boolean,
+        mediaRepository: MediaRepository? = null,
+        sourceProvider: String? = "manual"
+    ): AdminAddChannelResult = withContext(Dispatchers.IO) {
+        val cleanName = name.trim()
+        val cleanId = publicId.trim().lowercase(Locale.ROOT)
+        val cleanStream = streamUrl.trim()
+
+        if (cleanName.isBlank() || cleanId.isBlank() || cleanStream.isBlank()) {
+            return@withContext AdminAddChannelResult.Error("Preencha Nome, ID Público e URL do Stream.")
+        }
+
+        val currentList = _cachedChannels.value.toMutableList()
+        val duplicate = findDuplicateChannel(
+            candidates = currentList,
+            newId = cleanId,
+            newName = cleanName,
+            newStreamUrl = cleanStream,
+            newCategory = category
+        )
+
+        if (duplicate != null) {
+            _totalBlockedDuplicates.value += 1
+            return@withContext AdminAddChannelResult.Duplicate(duplicate)
+        }
+
+        val newChannel = ApiChannel(
+            id = cleanId,
+            name = cleanName,
+            category = category.trim().ifBlank { "Geral" },
+            logoUrl = logoUrl.trim(),
+            embedUrl = cleanStream,
+            description = description.trim(),
+            isActive = isActive,
+            slug = cleanId,
+            sourceProvider = sourceProvider ?: "manual"
+        )
+
+        currentList.add(0, newChannel)
+        _cachedChannels.value = currentList
+
+        val entity = ChannelEntity(
+            id = newChannel.id,
+            name = newChannel.name,
+            category = newChannel.category ?: "Geral",
+            logoUrl = newChannel.logoUrl ?: "",
+            streamUrl = newChannel.getEffectiveEmbedUrl(),
+            isOnline = newChannel.isActive == true,
+            addedAt = System.currentTimeMillis(),
+            sourceProvider = newChannel.sourceProvider ?: "manual"
+        )
+
+        if (mediaRepository != null) {
+            mediaRepository.saveLiveChannel(entity)
+        } else {
+            FirebaseService.getInstance()?.upsertChannelInCloud(entity)
+        }
+
+        updateStats()
+        AdminAddChannelResult.Success(newChannel)
+    }
+
+    suspend fun importChannelFromApi(
+        publicId: String,
+        mediaRepository: MediaRepository? = null,
+        provider: String = "api_atual"
+    ): AdminImportChannelResult = withContext(Dispatchers.IO) {
+        val cleanId = publicId.trim()
+        if (cleanId.isBlank()) {
+            return@withContext AdminImportChannelResult.Error("Informe um ID público válido.")
+        }
+
+        val currentList = _cachedChannels.value
+        val fetched = if (provider == "embedtv") {
+            embedTvService.getChannels().find { it.id == cleanId || it.slug == cleanId }
+        } else {
+            apiService.getChannelById(cleanId)
+        } ?: return@withContext AdminImportChannelResult.NotFound("Canal '$cleanId' não foi encontrado na API ($provider).")
+
+        val duplicate = findDuplicateChannel(
+            candidates = currentList,
+            newId = fetched.id,
+            newName = fetched.name,
+            newStreamUrl = fetched.embedUrl,
+            newCategory = fetched.category ?: "",
+            newSlug = fetched.slug
+        )
+
+        if (duplicate != null) {
+            _totalBlockedDuplicates.value += 1
+            return@withContext AdminImportChannelResult.Duplicate(duplicate)
+        }
+
+        AdminImportChannelResult.Preview(fetched.copy(sourceProvider = provider))
+    }
+
+    suspend fun saveImportedChannel(
+        channel: ApiChannel,
+        mediaRepository: MediaRepository? = null
+    ): AdminAddChannelResult = withContext(Dispatchers.IO) {
+        val currentList = _cachedChannels.value.toMutableList()
+        val duplicate = findDuplicateChannel(
+            candidates = currentList,
+            newId = channel.id,
+            newName = channel.name,
+            newStreamUrl = channel.embedUrl,
+            newCategory = channel.category ?: ""
+        )
+
+        if (duplicate != null) {
+            _totalBlockedDuplicates.value += 1
+            return@withContext AdminAddChannelResult.Duplicate(duplicate)
+        }
+
+        currentList.add(0, channel)
+        _cachedChannels.value = currentList
+
+        val entity = ChannelEntity(
+            id = channel.id,
+            name = channel.name,
+            category = channel.category ?: "Geral",
+            logoUrl = channel.logoUrl ?: "",
+            streamUrl = channel.getEffectiveEmbedUrl(),
+            isOnline = channel.isActive == true,
+            addedAt = System.currentTimeMillis(),
+            sourceProvider = channel.sourceProvider ?: "manual"
+        )
+
+        if (mediaRepository != null) {
+            mediaRepository.saveLiveChannel(entity)
+        } else {
+            FirebaseService.getInstance()?.upsertChannelInCloud(entity)
+        }
+
+        updateStats()
+        AdminAddChannelResult.Success(channel)
+    }
+
+    suspend fun deleteChannel(
+        channelId: String,
+        mediaRepository: MediaRepository? = null
+    ) = withContext(Dispatchers.IO) {
+        val currentList = _cachedChannels.value.filter { !it.id.equals(channelId, ignoreCase = true) }
+        _cachedChannels.value = currentList
+
+        if (mediaRepository != null) {
+            mediaRepository.deleteLiveChannel(channelId)
+        } else {
+            FirebaseService.getInstance()?.deleteChannelFromCloud(channelId)
+        }
+        updateStats()
+    }
+
+    suspend fun updateChannel(
+        updated: ApiChannel,
+        mediaRepository: MediaRepository? = null
+    ) = withContext(Dispatchers.IO) {
+        val currentList = _cachedChannels.value.toMutableList()
+        val index = currentList.indexOfFirst { it.id.equals(updated.id, ignoreCase = true) }
+        if (index >= 0) {
+            currentList[index] = updated
+            _cachedChannels.value = currentList
+
+            val entity = ChannelEntity(
+                id = updated.id,
+                name = updated.name,
+                category = updated.category ?: "Geral",
+                logoUrl = updated.logoUrl ?: "",
+                streamUrl = updated.getEffectiveEmbedUrl(),
+                isOnline = updated.isActive == true,
+                addedAt = System.currentTimeMillis()
+            )
+
+            if (mediaRepository != null) {
+                mediaRepository.saveLiveChannel(entity)
+            } else {
+                FirebaseService.getInstance()?.upsertChannelInCloud(entity)
+            }
+            updateStats()
+        }
+    }
+
+    suspend fun toggleChannelStatus(
+        channelId: String,
+        mediaRepository: MediaRepository? = null
+    ) = withContext(Dispatchers.IO) {
+        val currentList = _cachedChannels.value.toMutableList()
+        val index = currentList.indexOfFirst { it.id.equals(channelId, ignoreCase = true) }
+        if (index >= 0) {
+            val existing = currentList[index]
+            val toggled = existing.copy(isActive = !(existing.isActive == true))
+            currentList[index] = toggled
+            _cachedChannels.value = currentList
+
+            val entity = ChannelEntity(
+                id = toggled.id,
+                name = toggled.name,
+                category = toggled.category ?: "Geral",
+                logoUrl = toggled.logoUrl ?: "",
+                streamUrl = toggled.getEffectiveEmbedUrl(),
+                isOnline = toggled.isActive == true,
+                addedAt = System.currentTimeMillis()
+            )
+
+            if (mediaRepository != null) {
+                mediaRepository.saveLiveChannel(entity)
+            } else {
+                FirebaseService.getInstance()?.upsertChannelInCloud(entity)
+            }
+            updateStats()
         }
     }
 
@@ -242,11 +861,15 @@ class LiveTvRepository(
         events: Int? = null,
         categories: Int? = null
     ): LiveTvApiStats {
+        val totalChannels = channels ?: _cachedChannels.value.size
+        val activeCount = _cachedChannels.value.count { it.isActive == true }
         val updated = _apiStats.value.copy(
             isOnline = isOnline,
             lastSync = getCurrentTimestamp(),
-            channelsCount = channels ?: _cachedChannels.value.size,
+            channelsCount = totalChannels,
             eventsCount = events ?: _cachedEvents.value.size,
+            activeChannelsCount = activeCount,
+            blockedDuplicatesCount = _totalBlockedDuplicates.value,
             categoriesCount = categories ?: (_cachedChannelCategories.value.size + _cachedEventCategories.value.size),
             guideStatus = "Sincronizado (EPG 24h)"
         )
@@ -274,180 +897,162 @@ class LiveTvRepository(
                     id = "globo",
                     name = "Globo SP",
                     category = "Abertos",
-                    logo = "https://logodownload.org/wp-content/uploads/2013/12/rede-globo-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2013/12/rede-globo-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/globo",
-                    currentProgram = "Jornal Nacional",
-                    nextProgram = "Novela das Nove",
+                    nowPlayingTitle = "Jornal Nacional",
                     description = "Rede Globo de Televisão com programação ao vivo em alta definição."
                 ),
                 ApiChannel(
                     id = "sbt",
                     name = "SBT",
                     category = "Abertos",
-                    logo = "https://logodownload.org/wp-content/uploads/2014/04/sbt-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2014/04/sbt-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/sbt",
-                    currentProgram = "Programa do Ratinho",
-                    nextProgram = "The Noite",
+                    nowPlayingTitle = "Programa do Ratinho",
                     description = "Sistema Brasileiro de Televisão com entretenimento e programas de auditório."
                 ),
                 ApiChannel(
                     id = "record",
                     name = "Record TV",
                     category = "Abertos",
-                    logo = "https://logodownload.org/wp-content/uploads/2014/05/record-tv-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2014/05/record-tv-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/record",
-                    currentProgram = "Jornal da Record",
-                    nextProgram = "Série Bíblica",
+                    nowPlayingTitle = "Jornal da Record",
                     description = "Record TV com jornalismo, séries e variedades."
                 ),
                 ApiChannel(
                     id = "band",
                     name = "Band TV",
                     category = "Abertos",
-                    logo = "https://logodownload.org/wp-content/uploads/2014/05/band-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2014/05/band-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/band",
-                    currentProgram = "Jornal da Band",
-                    nextProgram = "Perrengue na Band",
+                    nowPlayingTitle = "Jornal da Band",
                     description = "Rede Bandeirantes com jornalismo e cobertura esportiva."
                 ),
                 ApiChannel(
                     id = "sportv",
                     name = "SporTV",
                     category = "Esportes",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/sportv-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/sportv-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/sportv",
-                    currentProgram = "Troca de Passes",
-                    nextProgram = "SporTV News",
+                    nowPlayingTitle = "Troca de Passes",
                     description = "O canal campeão com as melhores coberturas esportivas nacionais e internacionais."
                 ),
                 ApiChannel(
                     id = "sportv2",
                     name = "SporTV 2",
                     category = "Esportes",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/sportv-2-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/sportv-2-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/sportv2",
-                    currentProgram = "Vôlei Superliga",
-                    nextProgram = "Futebol Internacional",
+                    nowPlayingTitle = "Vôlei Superliga",
                     description = "Transmissões ao vivo e análises aprofundadas dos esportes olímpicos e futebol."
                 ),
                 ApiChannel(
                     id = "espn",
                     name = "ESPN Brasil",
                     category = "Esportes",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/espn-brasil-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/espn-brasil-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/espn",
-                    currentProgram = "SportsCenter",
-                    nextProgram = "Linha de Passe",
+                    nowPlayingTitle = "SportsCenter",
                     description = "Informação com credibilidade e grandes torneios mundiais de futebol e basquete."
                 ),
                 ApiChannel(
                     id = "espn4",
                     name = "ESPN 4",
                     category = "Esportes",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/espn-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/espn-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/espn4",
-                    currentProgram = "Premier League Ao Vivo",
-                    nextProgram = "NBA Action",
+                    nowPlayingTitle = "Premier League Ao Vivo",
                     description = "Futebol europeu, NBA, NFL e grandes emoções."
                 ),
                 ApiChannel(
                     id = "premiere",
                     name = "Premiere Clubes",
                     category = "Esportes",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/premiere-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/premiere-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/premiere",
-                    currentProgram = "Brasileirão Série A",
-                    nextProgram = "Aquecimento Brasileirão",
+                    nowPlayingTitle = "Brasileirão Série A",
                     description = "O melhor do futebol brasileiro ao vivo."
                 ),
                 ApiChannel(
                     id = "tnt",
                     name = "TNT",
                     category = "Filmes & Séries",
-                    logo = "https://logodownload.org/wp-content/uploads/2016/10/tnt-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2016/10/tnt-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/tnt",
-                    currentProgram = "Champions League / Filme",
-                    nextProgram = "Cine TNT",
+                    nowPlayingTitle = "Champions League / Filme",
                     description = "Filmes de grande sucesso e Champions League."
                 ),
                 ApiChannel(
                     id = "space",
                     name = "Space",
                     category = "Filmes & Séries",
-                    logo = "https://logodownload.org/wp-content/uploads/2016/10/space-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2016/10/space-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/space",
-                    currentProgram = "Filme de Ação",
-                    nextProgram = "Terror no Space",
+                    nowPlayingTitle = "Filme de Ação",
                     description = "Muita ação, suspense, ficção científica e emoção sem limites."
                 ),
                 ApiChannel(
                     id = "megapix",
                     name = "Megapix",
                     category = "Filmes & Séries",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/megapix-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/megapix-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/megapix",
-                    currentProgram = "Sessão Megapix",
-                    nextProgram = "Sucessos de Bilheteria",
+                    nowPlayingTitle = "Sessão Megapix",
                     description = "Os maiores sucessos do cinema dublados em português."
                 ),
                 ApiChannel(
                     id = "telecine_premium",
                     name = "Telecine Premium",
                     category = "Filmes & Séries",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/telecine-premium-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/telecine-premium-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/telecine-premium",
-                    currentProgram = "Estreia da Semana",
-                    nextProgram = "Sessão Superestreia",
+                    nowPlayingTitle = "Estreia da Semana",
                     description = "As maiores e mais recentes produções do cinema mundial."
                 ),
                 ApiChannel(
                     id = "telecine_action",
                     name = "Telecine Action",
                     category = "Filmes & Séries",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/telecine-action-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/telecine-action-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/telecine-action",
-                    currentProgram = "Adrenalina Máxima",
-                    nextProgram = "Noite de Ação",
+                    nowPlayingTitle = "Adrenalina Máxima",
                     description = "O canal exclusivo para quem adora filmes de ação e adrenalina."
                 ),
                 ApiChannel(
                     id = "cnn_brasil",
                     name = "CNN Brasil",
                     category = "Notícias",
-                    logo = "https://logodownload.org/wp-content/uploads/2020/03/cnn-brasil-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2020/03/cnn-brasil-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/cnn-brasil",
-                    currentProgram = "CNN 360°",
-                    nextProgram = "CNN Prime Time",
+                    nowPlayingTitle = "CNN 360°",
                     description = "Notícias 24 horas com análises políticas e econômicas em tempo real."
                 ),
                 ApiChannel(
                     id = "globonews",
                     name = "GloboNews",
                     category = "Notícias",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/globonews-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/globonews-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/globonews",
-                    currentProgram = "Edição das 18h",
-                    nextProgram = "Jornal das Dez",
+                    nowPlayingTitle = "Edição das 18h",
                     description = "Jornalismo que nunca desliga, com furos e análises exclusivas."
                 ),
                 ApiChannel(
                     id = "discovery_channel",
                     name = "Discovery Channel",
                     category = "Documentários",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/discovery-channel-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/discovery-channel-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/discovery",
-                    currentProgram = "Largados e Pelados",
-                    nextProgram = "Febre do Ouro",
+                    nowPlayingTitle = "Largados e Pelados",
                     description = "Ciência, natureza, tecnologia e sobrevivência."
                 ),
                 ApiChannel(
                     id = "cartoon_network",
                     name = "Cartoon Network",
                     category = "Infantil",
-                    logo = "https://logodownload.org/wp-content/uploads/2017/04/cartoon-network-logo-0.png",
+                    logoUrl = "https://logodownload.org/wp-content/uploads/2017/04/cartoon-network-logo-0.png",
                     embedUrl = "https://reidosembeds.online/embed/cartoon",
-                    currentProgram = "O Incrível Mundo de Gumball",
-                    nextProgram = "Jovens Titãs em Ação",
+                    nowPlayingTitle = "O Incrível Mundo de Gumball",
                     description = "Os melhores desenhos e animações para toda a família."
                 )
             )

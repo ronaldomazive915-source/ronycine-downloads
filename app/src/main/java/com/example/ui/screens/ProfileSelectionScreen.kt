@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
@@ -88,8 +89,14 @@ fun ProfileSelectionScreen(
     val catalogPosters by authViewModel.catalogPosters.collectAsState()
     var isEditMode by remember { mutableStateOf(false) }
     var selectedProfileId by remember { mutableStateOf<String?>(null) }
+    var profileForPinEntry by remember { mutableStateOf<UserProfile?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    // Ao entrar na tela de seleção de perfis, garante que a autenticação de qualquer perfil anterior seja invalidada
+    LaunchedEffect(Unit) {
+        authViewModel.lockCurrentProfile()
+    }
 
     val prefersReducedMotion = remember(context) {
         try {
@@ -333,11 +340,15 @@ fun ProfileSelectionScreen(
                                         onNavigateToEditProfile(profile)
                                     } else {
                                         if (selectedProfileId == null) {
-                                            selectedProfileId = profile.id
-                                            coroutineScope.launch {
-                                                delay(220) // Fast and delightful selection animation
-                                                authViewModel.selectProfile(profile)
-                                                onProfileSelected()
+                                            if (profile.pinHash != null) {
+                                                profileForPinEntry = profile
+                                            } else {
+                                                selectedProfileId = profile.id
+                                                coroutineScope.launch {
+                                                    delay(220) // Fast and delightful selection animation
+                                                    authViewModel.selectProfile(profile)
+                                                    onProfileSelected()
+                                                }
                                             }
                                         }
                                     }
@@ -396,6 +407,23 @@ fun ProfileSelectionScreen(
                     }
                 }
             }
+        }
+
+        // 4. PIN DIALOG
+        profileForPinEntry?.let { profile ->
+            com.example.ui.components.ProfilePinDialog(
+                profile = profile,
+                onDismissRequest = { profileForPinEntry = null },
+                onPinVerified = {
+                    profileForPinEntry = null
+                    selectedProfileId = profile.id
+                    coroutineScope.launch {
+                        delay(220)
+                        authViewModel.unlockAndSelectProfile(profile)
+                        onProfileSelected()
+                    }
+                }
+            )
         }
     }
 }
@@ -460,6 +488,47 @@ private fun CompactProfileCard(
                 showCameraBadge = false,
                 testTag = "profile_avatar_img_${profile.id}"
             )
+
+            // PIN indicator
+            if (profile.pinHash != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = 2.dp, end = 2.dp)
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(DarkSurface.copy(alpha = 0.9f))
+                        .border(1.dp, Color.White.copy(alpha = 0.1f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.Lock,
+                        contentDescription = "Protegido",
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+
+            // Kids indicator
+            if (profile.isKidsProfile) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 4.dp, end = 4.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(BrandRed)
+                        .padding(horizontal = 4.dp, vertical = 1.5.dp)
+                ) {
+                    Text(
+                        "KIDS",
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+            }
 
             // Edit Mode Overlay Icon
             if (isEditMode) {
@@ -527,6 +596,17 @@ private fun CompactProfileCard(
                 Spacer(modifier = Modifier.width(3.dp))
                 VerifiedBadge(size = 14.dp, showToastOnClick = false)
             }
+        }
+
+        if (profile.isKidsProfile) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "🧒 Infantil",
+                color = Color(0xFF38BDF8),
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center
+            )
         }
     }
 }

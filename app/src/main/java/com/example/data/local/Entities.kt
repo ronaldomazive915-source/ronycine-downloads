@@ -24,6 +24,8 @@ data class WatchHistoryEntity(
     val progressPercent: Float = 0f,
     val lastWatchedPositionMs: Long = 0,
     val totalDurationMs: Long = 0,
+    val currentTimeSeconds: Double = 0.0,
+    val durationSeconds: Double = 0.0,
     val watchedAt: Long = System.currentTimeMillis()
 )
 

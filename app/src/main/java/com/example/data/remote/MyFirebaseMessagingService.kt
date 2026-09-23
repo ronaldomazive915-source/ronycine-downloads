@@ -54,9 +54,9 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             val type = data["type"] ?: ""
             if (type.contains("UPDATE", ignoreCase = true) || type.contains("ATUALIZACAO", ignoreCase = true)) {
                 val service = FirebaseService.getInstance(applicationContext)
-                val control = service.updateControl.value
-                if (!control.enabled || control.activeVersionCode == null) {
-                    Log.d(TAG, "Update notification ignored because updateControl is DISABLED by admin.")
+                val config = service.manualUpdateConfig.value
+                if (!config.active) {
+                    Log.d(TAG, "Update notification ignored because appUpdates/current is INACTIVE.")
                     return
                 }
             }

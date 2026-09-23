@@ -54,12 +54,15 @@ class ReiDosEmbedsApiService(
                 id = obj.optString("id", channelId),
                 name = obj.optString("name", "Canal $channelId"),
                 category = obj.optString("category", "Geral"),
-                logo = obj.optString("logo", obj.optString("logo_url", "")),
+                logoUrl = obj.optString("logo_url", obj.optString("logo", "")),
+                previewUrl = obj.optString("preview_url", ""),
                 embedUrl = obj.optString("embed_url", obj.optString("url", "https://reidosembeds.online/embed/$channelId")),
                 description = obj.optString("description", ""),
-                status = obj.optString("status", "online"),
-                currentProgram = obj.optString("current_program", "Programação ao Vivo"),
-                nextProgram = obj.optString("next_program", "Transmissão 24 Horas"),
+                isActive = obj.optBoolean("is_active", true),
+                nowPlayingTitle = obj.optString("now_playing_title", ""),
+                nowPlayingProgress = obj.optInt("now_playing_progress", 0),
+                nowPlayingHasGuide = obj.optBoolean("now_playing_has_guide", false),
+                nowPlayingNextProgrammes = emptyList(), // Can be parsed if needed
                 slug = obj.optString("slug", channelId)
             )
         } catch (e: Exception) {
@@ -209,12 +212,14 @@ class ReiDosEmbedsApiService(
                 val id = item.optString("id", item.optString("slug", "ch_$i"))
                 val name = item.optString("name", "Canal $id")
                 val cat = item.optString("category", "Variedades")
-                val logo = item.optString("logo", item.optString("logo_url", item.optString("image", "")))
+                val logoUrl = item.optString("logo_url", item.optString("logo", item.optString("image", "")))
+                val previewUrl = item.optString("preview_url", "")
                 val embed = item.optString("embed_url", item.optString("url", "https://reidosembeds.online/embed/$id"))
                 val desc = item.optString("description", "")
-                val status = item.optString("status", "online")
-                val curProg = item.optString("current_program", item.optString("programa_atual", "Transmissão ao Vivo"))
-                val nextProg = item.optString("next_program", item.optString("proximo_programa", "Programação Contínua"))
+                val isActive = item.optBoolean("is_active", true)
+                val nowPlayingTitle = item.optString("now_playing_title", item.optString("current_program", ""))
+                val nowPlayingProgress = item.optInt("now_playing_progress", 0)
+                val nowPlayingHasGuide = item.optBoolean("now_playing_has_guide", false)
                 val slug = item.optString("slug", id)
 
                 list.add(
@@ -222,12 +227,14 @@ class ReiDosEmbedsApiService(
                         id = id,
                         name = name,
                         category = cat,
-                        logo = logo,
+                        logoUrl = logoUrl,
+                        previewUrl = previewUrl,
                         embedUrl = embed,
                         description = desc,
-                        status = status,
-                        currentProgram = curProg,
-                        nextProgram = nextProg,
+                        isActive = isActive,
+                        nowPlayingTitle = nowPlayingTitle,
+                        nowPlayingProgress = nowPlayingProgress,
+                        nowPlayingHasGuide = nowPlayingHasGuide,
                         slug = slug
                     )
                 )

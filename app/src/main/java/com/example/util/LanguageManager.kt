@@ -172,11 +172,13 @@ object LanguageManager {
         // --- Navigation ---
         "nav.home" to mapOf("pt-BR" to "Início", "en" to "Home", "es" to "Inicio", "fr" to "Accueil"),
         "nav.explore" to mapOf("pt-BR" to "Explorar", "en" to "Explore", "es" to "Explorar", "fr" to "Explorer"),
+        "nav.calendar" to mapOf("pt-BR" to "Calendário", "en" to "Calendar", "es" to "Calendario", "fr" to "Calendrier"),
+        "nav.ai_support" to mapOf("pt-BR" to "Suporte AI", "en" to "AI Support", "es" to "Soporte AI", "fr" to "Support IA"),
         "nav.liveTV" to mapOf("pt-BR" to "TV ao Vivo", "en" to "Live TV", "es" to "TV en Vivo", "fr" to "TV en Direct"),
         "nav.trending" to mapOf("pt-BR" to "Em Alta", "en" to "Trending", "es" to "Tendencias", "fr" to "Tendances"),
         "nav.myList" to mapOf("pt-BR" to "Minha Lista", "en" to "My List", "es" to "Mi Lista", "fr" to "Ma Liste"),
         "nav.community" to mapOf("pt-BR" to "Comunidade", "en" to "Community", "es" to "Comunidad", "fr" to "Communauté"),
-        "nav.profile" to mapOf("pt-BR" to "Meu Perfil", "en" to "My Profile", "es" to "Mi Perfil", "fr" to "Mon Profil"),
+        "nav.profile" to mapOf("pt-BR" to "Perfil", "en" to "Profile", "es" to "Perfil", "fr" to "Profil"),
         "nav.settings" to mapOf("pt-BR" to "Configurações", "en" to "Settings", "es" to "Ajustes", "fr" to "Paramètres"),
         "nav.history" to mapOf("pt-BR" to "Histórico", "en" to "History", "es" to "Historial", "fr" to "Historique"),
         "nav.downloads" to mapOf("pt-BR" to "Downloads", "en" to "Downloads", "es" to "Descargas", "fr" to "Téléchargements"),
@@ -345,16 +347,18 @@ object LanguageManager {
         "search.placeholder" to mapOf("pt-BR" to "Pesquisar filmes, séries, animes...", "en" to "Search movies, series, anime...", "es" to "Buscar películas, series, animes...", "fr" to "Rechercher films, séries, animes..."),
 
         // --- WhatsApp Group Invite ---
-        "whatsapp_invite.title" to mapOf("pt-BR" to "Entre na comunidade RONYCINE", "en" to "Join the RONYCINE community", "es" to "Únete a la comunidade RONYCINE", "fr" to "Rejoignez la comunidade RONYCINE"),
-        "whatsapp_invite.subtitle" to mapOf("pt-BR" to "Grupo Oficial no WhatsApp", "en" to "Official WhatsApp Group", "es" to "Grupo Oficial de WhatsApp", "fr" to "Groupe WhatsApp Officiel"),
-        "whatsapp_invite.description" to mapOf(
-            "pt-BR" to "Participe do nosso grupo oficial no WhatsApp e fique por dentro das novidades.",
-            "en" to "Join our official WhatsApp group and stay up to date with the latest news.",
-            "es" to "Participa en nuestro grupo oficial de WhatsApp y mantente al día con las novedades.",
-            "fr" to "Rejoignez notre groupe WhatsApp officiel et restez informé des nouveautés."
-        ),
+        "whatsapp_invite.header_title" to mapOf("pt-BR" to "Junte-se à comunidade RONYCINE", "en" to "Join the RONYCINE community", "es" to "Únete a la comunidad RONYCINE", "fr" to "Rejoignez la communauté RONYCINE"),
+        "whatsapp_invite.header_desc" to mapOf("pt-BR" to "Fique por dentro das novidades, lançamentos, atualizações e conteúdos exclusivos!", "en" to "Stay tuned for news, releases, updates, exclusive tips and more!", "es" to "¡Mantente al día con las novedades, lanzamientos, actualizaciones, consejos exclusivos e muito mais!", "fr" to "Restez informé des nouveautés, sorties, mises à jour, conseils exclusifs et bien plus encore !"),
+        "whatsapp_invite.title" to mapOf("pt-BR" to "Grupo WhatsApp", "en" to "WhatsApp Group", "es" to "Grupo WhatsApp", "fr" to "Groupe WhatsApp"),
+        "whatsapp_invite.subtitle" to mapOf("pt-BR" to "Receba novidades, lançamentos, atualizações e conteúdos exclusivos.", "en" to "Receive news, releases, updates and exclusive content.", "es" to "Recibe novedades, lanzamientos, actualizaciones y contenidos exclusivos.", "fr" to "Recevez des nouveautés, sorties, mises à jour et contenus exclusifs."),
         "whatsapp_invite.button" to mapOf("pt-BR" to "ENTRAR NO GRUPO", "en" to "JOIN GROUP", "es" to "ENTRAR AL GRUPO", "fr" to "REJOINDRE LE GROUPE"),
+        "whatsapp_invite.footer" to mapOf("pt-BR" to "Faça parte e fique sempre por dentro!", "en" to "Be part of it and always stay informed!", "es" to "¡Sé parte y mantente siempre informado!", "fr" to "Faites-en partie et restez toujours informé !"),
         "whatsapp_invite.dismiss" to mapOf("pt-BR" to "Agora não", "en" to "Not now", "es" to "Ahora no", "fr" to "Pas maintenant"),
+
+        // --- Telegram Channel Invite ---
+        "telegram_invite.title" to mapOf("pt-BR" to "Canal Telegram", "en" to "Telegram Channel", "es" to "Canal de Telegram", "fr" to "Canal Telegram"),
+        "telegram_invite.subtitle" to mapOf("pt-BR" to "Receba novidades, lançamentos, atualizações e conteúdos exclusivos.", "en" to "Receive news, releases, updates and exclusive content.", "es" to "Recibe novedades, lanzamientos, actualizaciones y contenidos exclusivos.", "fr" to "Recevez des nouveautés, sorties, mises à jour et contenus exclusifs."),
+        "telegram_invite.button" to mapOf("pt-BR" to "ENTRAR NO CANAL", "en" to "JOIN CHANNEL", "es" to "ENTRAR AL CANAL", "fr" to "REJOINDRE LE CANAL"),
 
         // --- Info / Institutional ---
         "info.title" to mapOf("pt-BR" to "Sobre o RONYCINE", "en" to "About RONYCINE", "es" to "Acerca de RONYCINE", "fr" to "À propos de RONYCINE"),

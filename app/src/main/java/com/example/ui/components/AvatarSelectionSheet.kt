@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
+import com.example.ui.components.RonycineSmileLoader
 import com.example.BuildConfig
 import com.example.data.remote.TmdbNetwork
 import com.example.ui.theme.BrandRed
@@ -468,10 +469,9 @@ fun AvatarSelectionSheet(
                                 },
                                 leadingIcon = {
                                     if (isSearching) {
-                                        CircularProgressIndicator(
+                                        RonycineSmileLoader(
                                             color = BrandRed,
-                                            strokeWidth = 2.dp,
-                                            modifier = Modifier.size(16.dp)
+                                            size = 16.dp
                                         )
                                     } else {
                                         Icon(
@@ -1011,10 +1011,9 @@ private fun PersonalPhotoSection(
                         .background(Color.Black.copy(alpha = 0.65f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(
+                    RonycineSmileLoader(
                         color = BrandRed,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(26.dp)
+                        size = 26.dp
                     )
                 }
             }

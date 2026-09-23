@@ -337,6 +337,19 @@ fun QuickMenuSheet(
 
                         item {
                             DrawerMenuItem(
+                                icon = Icons.Default.Headset,
+                                title = "Suporte AI",
+                                isSelected = currentRoute == ScreenRoute.AI_SUPPORT.route,
+                                isAccent = true,
+                                onClick = {
+                                    onDismiss()
+                                    onNavigate(ScreenRoute.AI_SUPPORT.route)
+                                }
+                            )
+                        }
+
+                        item {
+                            DrawerMenuItem(
                                 icon = Icons.Default.Person,
                                 title = "Meu Perfil",
                                 isSelected = currentRoute == ScreenRoute.PROFILE.route,

@@ -41,6 +41,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.example.data.remote.ApiChannel
 import com.example.ui.components.EmbedPlayer
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
@@ -78,8 +79,9 @@ fun LiveTvScreen(
     val isRefreshing by liveTvViewModel.isRefreshing.collectAsState()
     val errorMessage by liveTvViewModel.errorMessage.collectAsState()
 
-    // Central Active Playing Channel State (Preserved across fullscreen toggles)
-    var selectedChannel by remember { mutableStateOf<ApiChannel?>(null) }
+    // Active playing channel state from ViewModel
+    val selectedChannel by liveTvViewModel.selectedChannel.collectAsState()
+    val isLoadingChannel by liveTvViewModel.isLoadingChannel.collectAsState()
     var isFullscreen by remember { mutableStateOf(false) }
 
     // Sync local fullscreen state with parent activity
@@ -89,23 +91,19 @@ fun LiveTvScreen(
 
     // Auto-select initial channel or first available channel
     LaunchedEffect(channels, initialChannelId) {
-        if (channels.isNotEmpty()) {
-            if (selectedChannel == null) {
-                if (!initialChannelId.isNullOrBlank()) {
-                    val matched = channels.find {
-                        it.id.equals(initialChannelId, ignoreCase = true) ||
-                                (it.slug != null && it.slug.equals(initialChannelId, ignoreCase = true))
-                    }
-                    selectedChannel = matched ?: channels.firstOrNull()
+        if (channels.isNotEmpty() && selectedChannel == null) {
+            if (!initialChannelId.isNullOrBlank()) {
+                val matched = channels.find {
+                    it.id.equals(initialChannelId, ignoreCase = true) ||
+                            (it.slug != null && it.slug.equals(initialChannelId, ignoreCase = true))
+                }
+                if (matched != null) {
+                    liveTvViewModel.openLiveChannel(matched)
                 } else {
-                    selectedChannel = channels.firstOrNull()
+                    liveTvViewModel.openLiveChannel(channels.first())
                 }
             } else {
-                // If selected channel is no longer valid after refresh, fallback to first
-                val stillValid = channels.any { it.id == selectedChannel?.id }
-                if (!stillValid) {
-                    selectedChannel = channels.firstOrNull()
-                }
+                liveTvViewModel.openLiveChannel(channels.first())
             }
         }
     }
@@ -140,7 +138,7 @@ fun LiveTvScreen(
                 val numberString = String.format("%03d", originalIndex)
                 val nameMatch = ch.name.lowercase().contains(q)
                 val catMatch = (ch.category ?: "").lowercase().contains(q)
-                val progMatch = (ch.currentProgram ?: "").lowercase().contains(q)
+                val progMatch = (ch.nowPlayingTitle ?: "").lowercase().contains(q)
                 val numMatch = numberString.contains(q) || originalIndex.toString() == q
 
                 nameMatch || catMatch || progMatch || numMatch
@@ -154,7 +152,7 @@ fun LiveTvScreen(
                 list = list.filter {
                     (it.category ?: "").lowercase().contains("24") ||
                             it.name.lowercase().contains("24") ||
-                            (it.currentProgram ?: "").lowercase().contains("24")
+                            (it.nowPlayingTitle ?: "").lowercase().contains("24")
                 }
             } else if (selectedCategory.equals("Jogos do Dia", ignoreCase = true) || selectedCategory.equals("Esportes", ignoreCase = true)) {
                 list = list.filter {
@@ -324,13 +322,29 @@ fun LiveTvScreen(
                 Modifier.fillMaxSize()
             } else {
                 Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-            }
+            },
+            contentAlignment = Alignment.Center
         ) {
             LiveTVPlayer(
                 channel = selectedChannel,
                 isFullscreen = isFullscreen,
                 onToggleFullscreen = { isFullscreen = !isFullscreen }
             )
+            
+            if (isLoadingChannel) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.7f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = BrandRed, modifier = Modifier.size(32.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Carregando canal...", color = Color.White, fontSize = 12.sp)
+                    }
+                }
+            }
         }
 
         // ==========================================
@@ -406,7 +420,7 @@ fun LiveTvScreen(
                                             }
                                         }
                                         Text(
-                                            text = currentSelected.currentProgram ?: "Programação 24h",
+                                            text = currentSelected.nowPlayingTitle ?: "Programação 24h",
                                             color = Color.Gray,
                                             fontSize = 10.5.sp,
                                             maxLines = 1,
@@ -684,8 +698,8 @@ fun LiveTvScreen(
                             isSelected = isSelected,
                             isFavorite = isFavorite,
                             onClick = {
-                                // Selecting channel updates active player stream, keeping layout stable
-                                selectedChannel = channel
+                                // Selecting channel updates active player stream via ViewModel
+                                liveTvViewModel.openLiveChannel(channel)
                             },
                             onFavoriteToggle = {
                                 liveTvViewModel.toggleFavorite(channel.id)
@@ -714,7 +728,7 @@ fun LiveTVPlayer(
     var channelHasError by remember { mutableStateOf(false) }
 
     val currentUrl = remember(channel, retryCount) {
-        channel?.getEffectiveEmbedUrl() ?: ""
+        channel?.embedUrl ?: ""
     }
 
     // System bars & landscape orientation for fullscreen mode
@@ -793,7 +807,7 @@ fun LiveTVPlayer(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    CircularProgressIndicator(color = BrandRed, modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
+                    RonycineSmileLoader(color = BrandRed, size = 42.dp)
                     Spacer(modifier = Modifier.height(10.dp))
                     Text(
                         text = "CARREGANDO CANAL...",
@@ -817,10 +831,9 @@ fun LiveTVPlayer(
                         verticalArrangement = Arrangement.Center,
                         modifier = Modifier.padding(16.dp)
                     ) {
-                        CircularProgressIndicator(
+                        RonycineSmileLoader(
                             color = BrandRed,
-                            modifier = Modifier.size(32.dp),
-                            strokeWidth = 3.dp
+                            size = 48.dp
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
@@ -1049,7 +1062,7 @@ fun CompactChannelCard(
                     Spacer(modifier = Modifier.height(1.dp))
 
                     Text(
-                        text = channel.currentProgram ?: (channel.category ?: "Programação 24h"),
+                        text = channel.nowPlayingTitle ?: (channel.category ?: "Programação 24h"),
                         color = Color.Gray,
                         fontSize = 10.sp,
                         maxLines = 1,

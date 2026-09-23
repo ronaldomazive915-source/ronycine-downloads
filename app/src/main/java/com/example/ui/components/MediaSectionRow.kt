@@ -1,16 +1,19 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -18,6 +21,10 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.MediaEntity
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.TextSecondary
+import com.example.util.directionLockedHorizontalScroll
+
+private val AccentShape = RoundedCornerShape(2.dp)
+private val ViewAllShape = RoundedCornerShape(4.dp)
 
 @Composable
 fun MediaSectionRow(
@@ -51,15 +58,8 @@ fun MediaSectionRow(
                     modifier = Modifier
                         .width(3.dp)
                         .height(14.dp)
-                        .padding(vertical = 1.dp)
-                ) {
-                    androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawRoundRect(
-                            color = BrandRed,
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(2f, 2f)
-                        )
-                    }
-                }
+                        .background(BrandRed, AccentShape)
+                )
 
                 Text(
                     text = title.uppercase(),
@@ -73,8 +73,9 @@ fun MediaSectionRow(
             if (onViewAllClick != null) {
                 Row(
                     modifier = Modifier
+                        .clip(ViewAllShape)
                         .clickable { onViewAllClick() }
-                        .padding(start = 8.dp, top = 2.dp, bottom = 2.dp),
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
@@ -94,11 +95,20 @@ fun MediaSectionRow(
             }
         }
 
-        // Horizontal Row of Media Cards
+        // Horizontal Row of Media Cards (Native optimized scroll)
+        var isScrollEnabled by remember { mutableStateOf(true) }
+
         LazyRow(
+            userScrollEnabled = isScrollEnabled,
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+            modifier = Modifier
+                .padding(top = 2.dp, bottom = 4.dp)
+                .directionLockedHorizontalScroll { enabled ->
+                    if (isScrollEnabled != enabled) {
+                        isScrollEnabled = enabled
+                    }
+                }
         ) {
             items(
                 items = items,

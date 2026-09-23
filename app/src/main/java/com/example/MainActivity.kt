@@ -39,6 +39,7 @@ import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.PlayFilmeTheme
 import com.example.ui.viewmodel.AdminViewModel
 import com.example.ui.viewmodel.AnimesDoramasViewModel
+import com.example.ui.viewmodel.CalendarViewModel
 import com.example.ui.viewmodel.MainViewModel
 import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.CommunityViewModel
@@ -130,10 +131,17 @@ class MainActivity : ComponentActivity() {
         mainViewModel.updatePushStatus(hasPermission, token)
     }
 
+    private fun parseDeepLinkAction(uri: android.net.Uri?): String? {
+        val parsed = com.example.util.ContentShareHelper.handleSharedContentLink(uri)
+        return parsed?.watchRoute
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         intent.getStringExtra("actionUrl")?.let {
+            pendingActionUrl.value = it
+        } ?: parseDeepLinkAction(intent.data)?.let {
             pendingActionUrl.value = it
         }
     }
@@ -147,8 +155,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Capture push actionUrl if present
+        // Capture push actionUrl or deep link if present
         intent?.getStringExtra("actionUrl")?.let {
+            pendingActionUrl.value = it
+        } ?: parseDeepLinkAction(intent?.data)?.let {
             pendingActionUrl.value = it
         }
 
@@ -213,50 +223,55 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
+                val handleNavigateToWatch: (Int, String, Int?, Int?) -> Unit = remember {
+                    { tmdbId, type, season, episode ->
+                        val route = if (season != null && episode != null) {
+                            "watch/$tmdbId/$type?season=$season&episode=$episode"
+                        } else {
+                            "watch/$tmdbId/$type"
+                        }
+                        mainViewModel.requestPlayback(
+                            tmdbId = tmdbId,
+                            mediaType = type,
+                            seasonNumber = season,
+                            episodeNumber = episode,
+                            watchRoute = route,
+                            onAllowed = {
+                                navController.navigate(route)
+                            }
+                        )
+                    }
+                }
+
                 val pushActionUrl by pendingActionUrl.collectAsState()
 
-                 LaunchedEffect(pushActionUrl, navBackStackEntry) {
+                LaunchedEffect(pushActionUrl, navBackStackEntry) {
                     val url = pushActionUrl
                     if (url != null) {
                         try {
                             if (runCatching { navController.graph }.getOrNull() == null) {
                                 return@LaunchedEffect
                             }
-                            val isApkUrl = url.endsWith(".apk") || url.contains("/updates/") || url.contains("appVersions") || url.contains(".apk?") || url == "update"
+                            val isApkUrl = url.endsWith(".apk") || url.contains("/updates/") || url.contains("appVersions") || url.contains(".apk?") || url == "update" || url == "update_screen"
                             if (isApkUrl) {
-                                val active = mainViewModel.activeAppVersion.value
-                                val targetVer = if (active != null) {
-                                    active
-                                } else {
-                                    com.example.data.remote.AppVersionEntity(
-                                        id = "custom_${System.currentTimeMillis()}",
-                                        versionName = "Nova Versão",
-                                        versionCode = 10000,
-                                        apkUrl = if (url == "update") "" else url,
-                                        releaseNotes = "Nova atualização recebida via notificação.",
-                                        published = true,
-                                        status = "PUBLISHED"
-                                    )
-                                }
-                                mainViewModel.triggerForceUpdateDialog(targetVer)
-                            } else if (url.startsWith("movie/")) {
-                                val tmdbId = url.substringAfter("movie/").toIntOrNull()
-                                if (tmdbId != null) navController.navigate("detail/$tmdbId/movie")
-                            } else if (url.startsWith("tv/")) {
-                                val tmdbId = url.substringAfter("tv/").toIntOrNull()
-                                if (tmdbId != null) {
-                                    navController.navigate("detail/$tmdbId/tv")
-                                } else {
-                                    navController.navigate(ScreenRoute.TV_LIVE.route)
-                                }
-                            } else if (url.startsWith("watch/")) {
-                                navController.navigate(url)
+                                navController.navigate(ScreenRoute.UPDATE_SCREEN.route)
                             } else if (url == "livetv" || url == "tv") {
                                 navController.navigate(ScreenRoute.TV_LIVE.route)
                             } else {
-                                val id = url.toIntOrNull()
-                                if (id != null) {
-                                    navController.navigate("detail/$id/movie")
+                                val parsed = com.example.util.ContentShareHelper.handleSharedContentLink(url)
+                                if (parsed != null) {
+                                    handleNavigateToWatch(
+                                        parsed.tmdbId,
+                                        parsed.mediaType,
+                                        parsed.seasonNumber,
+                                        parsed.episodeNumber
+                                    )
+                                } else {
+                                    android.widget.Toast.makeText(
+                                        this@MainActivity,
+                                        "Conteúdo não encontrado.",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
                                 }
                             }
                         } catch (e: Exception) {
@@ -285,25 +300,62 @@ class MainActivity : ComponentActivity() {
                 
                 var navigationInitiated by remember { mutableStateOf(false) }
 
+                // Removido sistema de 3 dias
+                
+                LaunchedEffect(currentUser, activeProfile) {
+                    if (currentUser != null) {
+                        // 1. Handle legacy playback routes if any
+                        val pendingRoute = mainViewModel.consumePendingPlaybackRoute()
+                        if (!pendingRoute.isNullOrBlank()) {
+                            navController.navigate(pendingRoute)
+                        }
+
+                        // 2. Handle generic PendingActions that might require a profile
+                        if (activeProfile != null) {
+                            val action = mainViewModel.consumePendingAction()
+                            when (action) {
+                                is com.example.ui.viewmodel.PendingAction.Navigate -> {
+                                    navController.navigate(action.route)
+                                }
+                                is com.example.ui.viewmodel.PendingAction.ToggleMyList -> {
+                                    mainViewModel.toggleMyList(action.tmdbId, action.type)
+                                }
+                                is com.example.ui.viewmodel.PendingAction.Reaction -> {
+                                    // Player handles its own local state, but we could sync here if needed
+                                }
+                                else -> {}
+                            }
+                        }
+                    } else {
+                        // Critical: Clear pending actions if login cancelled (Requirement 10)
+                        mainViewModel.consumePendingAction()
+                        mainViewModel.clearPendingDownloadIntent()
+                    }
+                }
+
                 LaunchedEffect(currentUser, activeProfile, userProfiles, profilesLoaded, navBackStackEntry?.destination?.route, isDeviceBlocked) {
-                    if (currentUser != null && profilesLoaded && !navigationInitiated && !isDeviceBlocked) {
+                    if (currentUser != null && profilesLoaded && !isDeviceBlocked) {
                         val hasGraph = runCatching { navController.graph }.getOrNull() != null
                         if (!hasGraph) return@LaunchedEffect
 
-                        if (activeProfile == null) {
+                        val currentRouteName = navBackStackEntry?.destination?.route ?: ""
+                        val isSpecialScreen = currentRouteName == ScreenRoute.PROFILE_SELECTION.route ||
+                                currentRouteName == ScreenRoute.CREATE_PROFILE.route ||
+                                currentRouteName == ScreenRoute.LOGIN.route ||
+                                currentRouteName == "login" || currentRouteName == "register" ||
+                                currentRouteName == "forgot_password" || currentRouteName == "reset_password"
+
+                        if (activeProfile == null && !isSpecialScreen) {
                             try {
                                 if (userProfiles.isEmpty()) {
-                                    // Se logado mas sem perfis, vai para criação
                                     navController.navigate(ScreenRoute.CREATE_PROFILE.route) {
                                         popUpTo(0) { inclusive = true }
                                     }
                                 } else {
-                                    // Se logado mas sem perfil selecionado, vai para seleção
                                     navController.navigate(ScreenRoute.PROFILE_SELECTION.route) {
                                         popUpTo(0) { inclusive = true }
                                     }
                                 }
-                                navigationInitiated = true
                             } catch (e: Exception) {
                                 android.util.Log.e("MainActivity", "Error navigating to profile setup: ${e.message}")
                             }
@@ -441,18 +493,19 @@ class MainActivity : ComponentActivity() {
                     val hideBottomBar = isAuthOrProfileScreen ||
                         currentRoute.startsWith("watch") ||
                         currentRoute.startsWith("detail") ||
+                        currentRoute.startsWith("streaming") ||
                         currentRoute == "admin" ||
                         currentRoute == "notifications" ||
                         currentRoute == "settings" ||
-                        currentRoute == "community" ||
-                        currentRoute == ScreenRoute.COMMUNITY.route ||
                         isTvFullscreen
 
                     val hideTopBar = hideBottomBar ||
                         currentRoute == ScreenRoute.SEARCH.route ||
                         currentRoute == "search" ||
-                        currentRoute == ScreenRoute.COMMUNITY.route ||
-                        currentRoute == "community"
+                        currentRoute == ScreenRoute.CALENDAR.route ||
+                        currentRoute == "calendar" ||
+                        currentRoute == ScreenRoute.AI_SUPPORT.route ||
+                        currentRoute == "ai_support"
 
                     var showQuickMenuSheet by remember { mutableStateOf(false) }
                     var showWhatsAppInviteModal by remember { mutableStateOf(false) }
@@ -584,13 +637,7 @@ class MainActivity : ComponentActivity() {
                                     onNavigateToDetail = { tmdbId, type ->
                                         navController.navigate("detail/$tmdbId/$type")
                                     },
-                                    onNavigateToWatch = { tmdbId, type, season, episode ->
-                                        if (season != null && episode != null) {
-                                            navController.navigate("watch/$tmdbId/$type?season=$season&episode=$episode")
-                                        } else {
-                                            navController.navigate("watch/$tmdbId/$type")
-                                        }
-                                    },
+                                    onNavigateToWatch = handleNavigateToWatch,
                                     onNavigateToLiveTv = {
                                         navController.navigate(ScreenRoute.TV_LIVE.route)
                                     },
@@ -685,6 +732,46 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            composable(ScreenRoute.CALENDAR.route) {
+                                val viewModel: CalendarViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
+                                    factory = object : androidx.lifecycle.ViewModelProvider.Factory {
+                                        override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                                            return CalendarViewModel(application) as T
+                                        }
+                                    }
+                                )
+                                CalendarScreen(
+                                    viewModel = viewModel,
+                                    onNavigateBack = {
+                                        if (!navController.popBackStack()) {
+                                            navController.navigate(ScreenRoute.HOME.route)
+                                        }
+                                    },
+                                    onNavigateToDetail = { tmdbId, type ->
+                                        navController.navigate("detail/$tmdbId/$type")
+                                    }
+                                )
+                            }
+
+                            composable(ScreenRoute.AI_SUPPORT.route) {
+                                AiSupportScreen(
+                                    mainViewModel = mainViewModel,
+                                    authViewModel = authViewModel,
+                                    onNavigateBack = {
+                                        if (!navController.popBackStack()) {
+                                            navController.navigate(ScreenRoute.HOME.route)
+                                        }
+                                    },
+                                    onNavigateToDetail = { tmdbId, type ->
+                                        navController.navigate("detail/$tmdbId/$type")
+                                    },
+                                    onNavigateToWatch = handleNavigateToWatch,
+                                    onNavigate = { route ->
+                                        navController.navigate(route)
+                                    }
+                                )
+                            }
+
                             composable(ScreenRoute.COMMUNITY.route) {
                                 val viewModel: CommunityViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
                                     factory = object : androidx.lifecycle.ViewModelProvider.Factory {
@@ -721,22 +808,48 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            composable(ScreenRoute.DOWNLOADS.route) {
+                                DownloadsScreen(
+                                    onBack = { navController.popBackStack() },
+                                    onNavigateToExplore = {
+                                        navController.navigate(ScreenRoute.SEARCH.route) {
+                                            popUpTo(ScreenRoute.HOME.route) { saveState = true }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    }
+                                )
+                            }
+
                             composable(ScreenRoute.PROFILE.route) {
                                 ProfileScreen(
                                     viewModel = mainViewModel,
                                     authViewModel = authViewModel,
                                     onNavigateToHistory = { navController.navigate("history") },
                                     onNavigateToMyList = { navController.navigate(ScreenRoute.MY_LIST.route) },
-                                    onNavigateToDownloads = { navController.navigate("downloads") },
                                     onNavigateToSettings = { navController.navigate("settings") },
                                     onNavigateToAdmin = { navController.navigate("admin") },
                                     onNavigateToLogin = { navController.navigate(ScreenRoute.LOGIN.route) },
-                                    onNavigateToProfileSelection = { navController.navigate(ScreenRoute.PROFILE_SELECTION.route) },
+                                    onNavigateToProfileSelection = {
+                                        authViewModel.lockCurrentProfile()
+                                        navController.navigate(ScreenRoute.PROFILE_SELECTION.route) {
+                                            popUpTo(0) { inclusive = true }
+                                        }
+                                    },
                                     onNavigateToCreateProfile = {
                                         authViewModel.setProfileToEdit(null)
                                         navController.navigate(ScreenRoute.CREATE_PROFILE.route)
                                     },
-                                    onNavigateToInfo = { navController.navigate("info") }
+                                    onNavigateToInfo = { navController.navigate("info") },
+                                    onNavigateToUpdateScreen = { navController.navigate(ScreenRoute.UPDATE_SCREEN.route) },
+                                    onNavigateToDownloads = { navController.navigate(ScreenRoute.DOWNLOADS.route) }
+                                )
+                            }
+
+                            composable(ScreenRoute.UPDATE_SCREEN.route) {
+                                UpdateScreen(
+                                    viewModel = mainViewModel,
+                                    onBack = { navController.popBackStack() }
                                 )
                             }
 
@@ -752,8 +865,21 @@ class MainActivity : ComponentActivity() {
                                         navController.navigate(ScreenRoute.CREATE_PROFILE.route)
                                     },
                                     onProfileSelected = {
-                                        navController.navigate(ScreenRoute.HOME.route) {
-                                            popUpTo(0) { inclusive = true }
+                                        val pendingIntent = mainViewModel.pendingDownloadIntent.value
+                                        if (pendingIntent != null) {
+                                            if (pendingIntent.isPlayer) {
+                                                navController.navigate("watch/${pendingIntent.tmdbId}/${pendingIntent.type}?season=${pendingIntent.season ?: -1}&episode=${pendingIntent.episode ?: -1}") {
+                                                    popUpTo(0) { inclusive = true }
+                                                }
+                                            } else {
+                                                navController.navigate("detail/${pendingIntent.tmdbId}/${pendingIntent.type}") {
+                                                    popUpTo(0) { inclusive = true }
+                                                }
+                                            }
+                                        } else {
+                                            navController.navigate(ScreenRoute.HOME.route) {
+                                                popUpTo(0) { inclusive = true }
+                                            }
                                         }
                                     }
                                 )
@@ -800,7 +926,6 @@ class MainActivity : ComponentActivity() {
                                     viewModel = mainViewModel,
                                     authViewModel = authViewModel,
                                     onNavigateBack = { navController.popBackStack() },
-                                    onNavigateToDownloads = { navController.navigate("downloads") },
                                     onNavigateToInfo = { navController.navigate("info") }
                                 )
                             }
@@ -812,22 +937,6 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            composable("downloads") {
-                                DownloadsScreen(
-                                    viewModel = mainViewModel,
-                                    onNavigateBack = { navController.popBackStack() },
-                                    onNavigateToWatch = { tmdbId, type, season, episode ->
-                                        if (season != null && episode != null) {
-                                            navController.navigate("watch/$tmdbId/$type?season=$season&episode=$episode")
-                                        } else {
-                                            navController.navigate("watch/$tmdbId/$type")
-                                        }
-                                    },
-                                    onNavigateToExplore = {
-                                        navController.navigate(ScreenRoute.SEARCH.route)
-                                    }
-                                )
-                            }
 
                             composable(ScreenRoute.REQUEST.route) {
                                 RequestScreen(
@@ -839,13 +948,7 @@ class MainActivity : ComponentActivity() {
                             composable("history") {
                                 HistoryScreen(
                                     viewModel = mainViewModel,
-                                    onNavigateToWatch = { tmdbId, type, season, episode ->
-                                        if (season != null && episode != null) {
-                                            navController.navigate("watch/$tmdbId/$type?season=$season&episode=$episode")
-                                        } else {
-                                            navController.navigate("watch/$tmdbId/$type")
-                                        }
-                                    }
+                                    onNavigateToWatch = handleNavigateToWatch
                                 )
                             }
 
@@ -884,7 +987,25 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onNavigateToLiveTv = {
                                         navController.navigate(ScreenRoute.TV_LIVE.route)
+                                    },
+                                    onNavigateToUpdateScreen = {
+                                        navController.navigate(ScreenRoute.UPDATE_SCREEN.route)
                                     }
+                                )
+                            }
+
+                            composable(
+                                route = "streaming/{serviceName}",
+                                arguments = listOf(navArgument("serviceName") { type = NavType.StringType })
+                            ) { backStackEntry ->
+                                val serviceName = backStackEntry.arguments?.getString("serviceName") ?: "Netflix"
+                                StreamingServiceDetailsScreen(
+                                    serviceName = serviceName,
+                                    viewModel = mainViewModel,
+                                    onNavigateToDetail = { tmdbId, type ->
+                                        navController.navigate("detail/$tmdbId/$type")
+                                    },
+                                    onNavigateBack = { navController.popBackStack() }
                                 )
                             }
 
@@ -901,16 +1022,17 @@ class MainActivity : ComponentActivity() {
                                     tmdbId = tmdbId,
                                     mediaType = type,
                                     viewModel = mainViewModel,
+                                    authViewModel = authViewModel,
                                     onNavigateBack = { navController.popBackStack() },
-                                    onNavigateToWatch = { id, watchType, s, e ->
-                                        if (s != null && e != null) {
-                                            navController.navigate("watch/$id/$watchType?season=$s&episode=$e")
-                                        } else {
-                                            navController.navigate("watch/$id/$watchType")
-                                        }
-                                    },
+                                    onNavigateToWatch = handleNavigateToWatch,
                                     onNavigateToDetail = { id, watchType ->
                                         navController.navigate("detail/$id/$watchType")
+                                    },
+                                    onNavigateToDownloads = {
+                                        navController.navigate(ScreenRoute.DOWNLOADS.route)
+                                    },
+                                    onNavigateToLogin = {
+                                        navController.navigate(ScreenRoute.LOGIN.route)
                                     }
                                 )
                             }
@@ -944,9 +1066,13 @@ class MainActivity : ComponentActivity() {
                                     seasonNumber = season,
                                     episodeNumber = episode,
                                     viewModel = mainViewModel,
+                                    authViewModel = authViewModel,
                                     onNavigateBack = { navController.popBackStack() },
                                     onNavigateToDetail = { id, watchType ->
                                         navController.navigate("detail/$id/$watchType")
+                                    },
+                                    onNavigateToLogin = {
+                                        navController.navigate(ScreenRoute.LOGIN.route)
                                     }
                                 )
                             }
@@ -974,23 +1100,10 @@ class MainActivity : ComponentActivity() {
                         onDismiss = { activeInAppNotification = null },
                         onClick = { notif ->
                             mainViewModel.markNotificationAsRead(notif.id)
-                            val isUpdateType = notif.type == "APP_UPDATE" || notif.type == "ATUALIZACAO"
-                            if (isUpdateType || notif.actionUrl == "update") {
-                                val active = mainViewModel.activeAppVersion.value
-                                val targetVer = if (active != null) {
-                                    active
-                                } else {
-                                    com.example.data.remote.AppVersionEntity(
-                                        id = "custom_${System.currentTimeMillis()}",
-                                        versionName = if (notif.title.contains("v")) notif.title.substringAfter("v").substringBefore(" ") else "Nova Versão",
-                                        versionCode = 10000,
-                                        apkUrl = if (notif.actionUrl == "update") "" else (notif.actionUrl ?: ""),
-                                        releaseNotes = notif.message,
-                                        published = true,
-                                        status = "PUBLISHED"
-                                    )
-                                }
-                                mainViewModel.triggerForceUpdateDialog(targetVer)
+                            activeInAppNotification = null
+                            val isUpdateNotif = notif.type == "APP_UPDATE" || notif.type == "ATUALIZACAO" || notif.actionUrl == "update_screen" || notif.actionUrl == "update"
+                            if (isUpdateNotif) {
+                                navController.navigate(ScreenRoute.UPDATE_SCREEN.route)
                             } else if (notif.actionUrl != null) {
                                 val url = notif.actionUrl
                                 if (url.startsWith("movie/")) {
@@ -1058,6 +1171,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
             }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Segurança: Se o perfil ativo possuir senha/PIN, tranca ao colocar o app em segundo plano
+        val active = authViewModel.activeProfile.value
+        if (active != null && !active.pinHash.isNullOrBlank()) {
+            android.util.Log.d("MainActivity", "[SECURITY] App em segundo plano. Bloqueando perfil protegido: ${active.name}")
+            authViewModel.lockCurrentProfile()
         }
     }
 }

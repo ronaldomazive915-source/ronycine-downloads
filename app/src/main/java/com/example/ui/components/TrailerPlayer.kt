@@ -12,6 +12,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.example.ui.components.RonycineSmileLoader
 import com.example.util.WebViewUtils
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -659,10 +660,9 @@ fun HeroTrailerPlayer(
                     .background(Color.Black.copy(alpha = 0.85f)),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(
+                RonycineSmileLoader(
                     color = BrandRed,
-                    strokeWidth = 2.dp,
-                    modifier = Modifier.size(28.dp)
+                    size = 28.dp
                 )
             }
         }

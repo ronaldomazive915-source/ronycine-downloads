@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
@@ -85,7 +86,10 @@ fun AdminSystemStatusScreen(
                         modifier = Modifier.height(36.dp)
                     ) {
                         if (isTestingServices) {
-                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                            RonycineSmileLoader(
+                                color = Color.White,
+                                size = 16.dp
+                            )
                         } else {
                             Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))

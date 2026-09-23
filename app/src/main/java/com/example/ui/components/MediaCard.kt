@@ -1,24 +1,22 @@
 package com.example.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.NonRestartableComposable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -36,15 +34,25 @@ import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.TextSecondary
 import com.example.util.MediaClassifier
 
+// Stable pre-allocated constants to avoid allocations during scrolling
+private val PosterCardShape = RoundedCornerShape(8.dp)
+private val BadgeShape = RoundedCornerShape(bottomEnd = 6.dp)
+private val LockBadgeShape = RoundedCornerShape(topEnd = 6.dp)
+private val PosterBorder = BorderStroke(1.dp, CardBorder.copy(alpha = 0.4f))
+private val PosterGradient = Brush.verticalGradient(
+    listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f))
+)
+private val ColorAnime = Color(0xFFE11D48)
+private val ColorDorama = Color(0xFF7C3AED)
+private val ColorSeries = Color(0xFF2563EB)
+private val ColorRestricted = Color(0xFFEF4444).copy(alpha = 0.9f)
+
 /**
- * Modern compact Media Card for movies and TV series.
- * Features:
- * - 2:3 aspect ratio poster with downsampled memory-safe cache.
- * - Circular percentage rating badge positioned in the top-right corner.
- * - Discreet type badge (FILME / SÉRIE) in the top-left corner.
- * - Uniform 2-line title layout with ellipsis.
- * - Year and media type / genre subtitle (e.g. "2026 • Filme").
- * - Fluid touch scale feedback using zero-cost graphicsLayer.
+ * Ultra-optimized, lightweight Media Card for movies, series, animes, and doramas.
+ * - Zero extra state allocations during scroll.
+ * - Fixed memory-safe downsampled image dimensions (size: 240x360).
+ * - Pre-compiled static shapes, brushes, and colors.
+ * - Hardware accelerated layout with zero layout shifts.
  */
 @Composable
 fun MediaCard(
@@ -53,9 +61,6 @@ fun MediaCard(
     modifier: Modifier = Modifier.width(115.dp),
     posterHeight: Dp? = null
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-
     val category = remember(media.mediaCategory, media.genres, media.title) {
         MediaClassifier.classifyMedia(media)
     }
@@ -69,10 +74,10 @@ fun MediaCard(
     }
     val badgeColor = remember(category) {
         when (category) {
-            MediaClassifier.CATEGORY_ANIME -> Color(0xFFE11D48)
-            MediaClassifier.CATEGORY_DORAMA -> Color(0xFF7C3AED)
+            MediaClassifier.CATEGORY_ANIME -> ColorAnime
+            MediaClassifier.CATEGORY_DORAMA -> ColorDorama
             MediaClassifier.CATEGORY_MOVIE -> BrandRed
-            else -> Color(0xFF2563EB)
+            else -> ColorSeries
         }
     }
 
@@ -83,34 +88,28 @@ fun MediaCard(
     val imageRequest = remember(imageUrl) {
         ImageRequest.Builder(context)
             .data(imageUrl)
-            .size(340, 510)
-            .crossfade(false)
+            .size(240, 360)
+            .crossfade(200)
+            .placeholder(android.R.drawable.progress_horizontal) // Simple native placeholder
+            .error(android.R.drawable.ic_menu_report_image)
             .build()
     }
 
     Column(
         modifier = modifier
-            .graphicsLayer {
-                val s = if (isPressed) 0.96f else 1f
-                scaleX = s
-                scaleY = s
-            }
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
+            .clip(PosterCardShape)
+            .clickable(onClick = onClick)
             .testTag("media_card_${media.tmdbId}")
     ) {
-        // Poster Card with 2:3 aspect ratio
-        Card(
+        // Poster Card with strictly defined 2:3 aspect ratio (preventing layout shifts)
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (posterHeight != null) Modifier.height(posterHeight) else Modifier.aspectRatio(2f / 3f))
-                .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, CardBorder.copy(alpha = 0.4f), RoundedCornerShape(8.dp)),
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                .then(if (posterHeight != null) Modifier.height(posterHeight) else Modifier.aspectRatio(2f / 3f)),
+            shape = PosterCardShape,
+            color = DarkSurface,
+            border = PosterBorder,
+            shadowElevation = 2.dp
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AsyncImage(
@@ -128,17 +127,13 @@ fun MediaCard(
                         .fillMaxWidth()
                         .height(36.dp)
                         .align(Alignment.BottomCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.65f))
-                            )
-                        )
+                        .background(PosterGradient)
                 )
 
                 // Type Badge (Top Left)
                 Surface(
                     color = badgeColor.copy(alpha = 0.92f),
-                    shape = RoundedCornerShape(bottomEnd = 6.dp),
+                    shape = BadgeShape,
                     modifier = Modifier.align(Alignment.TopStart)
                 ) {
                     Text(
@@ -166,8 +161,8 @@ fun MediaCard(
                 // Restricted +18 Badge (Bottom Left)
                 if (media.restricted18) {
                     Surface(
-                        color = Color(0xFFEF4444).copy(alpha = 0.9f),
-                        shape = RoundedCornerShape(topEnd = 6.dp),
+                        color = ColorRestricted,
+                        shape = LockBadgeShape,
                         modifier = Modifier.align(Alignment.BottomStart)
                     ) {
                         Row(
@@ -217,10 +212,7 @@ fun MediaCard(
             }
         }
         val subtitle = remember(media.releaseYear, categoryLabel) {
-            when {
-                media.releaseYear.isNotBlank() -> "${media.releaseYear} • $categoryLabel"
-                else -> categoryLabel
-            }
+            if (media.releaseYear.isNotBlank()) "${media.releaseYear} • $categoryLabel" else categoryLabel
         }
 
         Text(

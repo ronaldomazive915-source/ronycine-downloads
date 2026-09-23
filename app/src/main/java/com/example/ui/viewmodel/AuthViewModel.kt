@@ -120,6 +120,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         _usernameCheckState.value = UsernameCheckState.Idle
     }
 
+    val profileSession = firebaseService.profileSession
+
     fun setProfileToEdit(profile: UserProfile?) {
         _currentProfileToEdit.value = profile
     }
@@ -128,7 +130,48 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         firebaseService.selectProfile(profile)
     }
 
-    fun createProfile(name: String, presetUrl: String? = null, image: ByteArray? = null) {
+    /**
+     * Desbloqueia e ativa um perfil protegido por PIN após verificação bem-sucedida.
+     */
+    fun unlockAndSelectProfile(profile: UserProfile) {
+        firebaseService.unlockAndSelectProfile(profile)
+    }
+
+    /**
+     * Bloqueia o perfil atual e invalida a autenticação temporária.
+     */
+    fun lockCurrentProfile() {
+        firebaseService.lockCurrentProfile()
+    }
+
+    /**
+     * Limpa a autenticação do perfil ativo.
+     */
+    fun clearProfileAuthentication() {
+        firebaseService.clearProfileAuthentication()
+    }
+
+    /**
+     * Ação de troca de perfil: limpa credenciais temporárias e bloqueia a sessão.
+     */
+    fun switchProfile() {
+        firebaseService.clearProfileAuthentication()
+    }
+
+    /**
+     * Verifica se o PIN fornecido é válido para o perfil selecionado.
+     */
+    fun verifyProfilePin(profile: UserProfile, pin: String): Boolean {
+        return com.example.util.SecurityUtils.verifyPin(pin, profile.pinHash)
+    }
+
+    fun createProfile(
+        name: String,
+        presetUrl: String? = null,
+        image: ByteArray? = null,
+        isKidsProfile: Boolean = false,
+        pin: String? = null
+    ) {
         viewModelScope.launch {
             val trimmedName = name.trim()
             val currentProfiles = userProfiles.value
@@ -166,8 +209,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             var photoUrl: String? = null
             var avatarType = if (presetUrl != null) "PRESET" else "DEFAULT"
             var avatarId = ""
+            
+            val pinHash = if (!pin.isNullOrBlank()) com.example.util.SecurityUtils.hashPin(pin) else null
 
-            firebaseService.createProfile(trimmedName, avatarUrl, avatarType, photoUrl, avatarId)
+            firebaseService.createProfile(trimmedName, avatarUrl, avatarType, photoUrl, avatarId, isKidsProfile, pinHash)
                 .onSuccess { profile ->
                     android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] Perfil criado no Firestore: ${profile.id}")
                     if (image != null) {
@@ -188,12 +233,20 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                                 firebaseService.updateProfile(finalProfile)
                                     .onSuccess {
                                         android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] ✓ Perfil atualizado com foto.")
-                                        firebaseService.selectProfile(finalProfile)
+                                        if (!finalProfile.pinHash.isNullOrBlank()) {
+                                            firebaseService.unlockAndSelectProfile(finalProfile)
+                                        } else {
+                                            firebaseService.selectProfile(finalProfile)
+                                        }
                                         _profileOpState.value = ProfileOpState.Success("Perfil criado com sucesso!", finalProfile)
                                     }
                                     .onFailure { error ->
                                         android.util.Log.e("PROFILE_PHOTO", "[PROFILE PHOTO ERROR] stage: FIRESTORE_UPDATE, code: ${error.hashCode()}, message: ${error.message}")
-                                        firebaseService.selectProfile(profile)
+                                        if (!profile.pinHash.isNullOrBlank()) {
+                                            firebaseService.unlockAndSelectProfile(profile)
+                                        } else {
+                                            firebaseService.selectProfile(profile)
+                                        }
                                         _profileOpState.value = ProfileOpState.Error("Foto enviada, mas não foi possível atualizar o perfil. Tente novamente.")
                                     }
                             }
@@ -203,7 +256,11 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                             }
                     } else {
                         android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] ✓ Perfil criado (sem foto customizada).")
-                        firebaseService.selectProfile(profile)
+                        if (!profile.pinHash.isNullOrBlank()) {
+                            firebaseService.unlockAndSelectProfile(profile)
+                        } else {
+                            firebaseService.selectProfile(profile)
+                        }
                         _profileOpState.value = ProfileOpState.Success("Perfil criado com sucesso!", profile)
                     }
                 }
@@ -218,7 +275,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         profile: UserProfile,
         newName: String,
         presetUrl: String? = null,
-        newImage: ByteArray? = null
+        newImage: ByteArray? = null,
+        isKidsProfile: Boolean = profile.isKidsProfile,
+        pin: String? = null,
+        clearPin: Boolean = false
     ) {
         viewModelScope.launch {
             val trimmedName = newName.trim()
@@ -260,12 +320,20 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
             }
+            
+            val finalPinHash = when {
+                clearPin -> null
+                !pin.isNullOrBlank() -> com.example.util.SecurityUtils.hashPin(pin)
+                else -> profile.pinHash
+            }
 
             val updated = profile.copy(
                 name = trimmedName,
                 avatarUrl = finalAvatarUrl,
                 photoUrl = finalPhotoUrl,
                 avatarType = finalAvatarType,
+                isKidsProfile = isKidsProfile,
+                pinHash = finalPinHash,
                 updatedAt = System.currentTimeMillis()
             )
 
@@ -273,7 +341,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             firebaseService.updateProfile(updated)
                 .onSuccess {
                     android.util.Log.d("PROFILE_PHOTO", "[PROFILE PHOTO] ✓ Perfil atualizado.")
-                    firebaseService.selectProfile(updated)
+                    if (activeProfile.value?.id == updated.id) {
+                        if (!updated.pinHash.isNullOrBlank()) {
+                            firebaseService.unlockAndSelectProfile(updated)
+                        } else {
+                            firebaseService.selectProfile(updated)
+                        }
+                    }
                     _profileOpState.value = ProfileOpState.Success("Perfil atualizado com sucesso!", updated)
                 }
                 .onFailure { error ->
@@ -512,13 +586,15 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun resetPassword(emailOrUsername: String, onSent: () -> Unit = {}) {
+    fun resetPassword(emailOrUsername: String, onFail: (String) -> Unit = {}, onSent: () -> Unit = {}) {
         val trimmed = emailOrUsername.trim()
         if (trimmed.isBlank()) {
-            _authState.value = AuthState.Error("Informe seu e-mail ou @nome de usuário.")
+            val error = "Informe seu e-mail ou @nome de usuário."
+            _authState.value = AuthState.Error(error)
+            onFail(error)
             return
         }
-
+    
         viewModelScope.launch {
             _authState.value = AuthState.Loading
             firebaseService.resetPassword(trimmed)
@@ -527,12 +603,15 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     onSent()
                 }
                 .onFailure { error ->
-                    _authState.value = AuthState.Error(mapAuthError(error))
+                    val errorMessage = mapAuthError(error)
+                    _authState.value = AuthState.Error(errorMessage)
+                    onFail(errorMessage)
                 }
         }
     }
 
     fun signOut() {
+        lockCurrentProfile()
         firebaseService.signOut()
     }
 
@@ -543,18 +622,24 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private fun mapAuthError(error: Throwable): String {
         val message = error.message ?: ""
         return when {
+            // Erros de Recuperação de Senha
+            message.contains("Nenhuma conta encontrada", true) -> "Nenhuma conta foi encontrada com este e-mail/usuário no RONYCINE."
+            message.contains("TOO_MANY_ATTEMPTS", true) || message.contains("too-many-requests") -> "Muitas tentativas seguidas. Por favor, aguarde alguns minutos antes de tentar novamente."
+            
+            // Erros de Login e Credenciais
             message.contains("user-not-found") || 
             message.contains("wrong-password") || 
             message.contains("INVALID_LOGIN_CREDENTIALS") ||
             message.contains("invalid-credential") ||
             message.contains("incorrect, malformed or has expired") -> "E-mail/usuário ou senha incorretos."
+            
+            // Erros de Cadastro e E-mail
             message.contains("email-already-in-use") -> "Este e-mail já possui uma conta cadastrada."
             message.contains("invalid-email") || message.contains("badly formatted") -> "E-mail com formato inválido."
             message.contains("network-request-failed") -> "Sem conexão com a internet."
             message.contains("weak-password") -> "A senha é muito fraca (mínimo 6 caracteres)."
-            message.contains("too-many-requests") -> "Muitas tentativas malsucedidas. Tente novamente mais tarde."
             message.contains("user-disabled") -> "Esta conta foi desativada."
-            message.contains("operation-not-allowed") -> "O login com e-mail e senha não está habilitado no Firebase Console."
+            message.contains("operation-not-allowed") -> "Operação não permitida. Contate o suporte."
             message.contains("reservado") || message.contains("já está em uso") || message.contains("caracteres") -> message
             else -> error.localizedMessage ?: "Não foi possível completar a operação."
         }

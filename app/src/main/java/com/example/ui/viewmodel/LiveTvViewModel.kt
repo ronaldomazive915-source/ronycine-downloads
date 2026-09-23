@@ -69,6 +69,56 @@ class LiveTvViewModel(application: Application) : AndroidViewModel(application) 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    // Active playing channel
+    private val _selectedChannel = MutableStateFlow<ApiChannel?>(null)
+    val selectedChannel: StateFlow<ApiChannel?> = _selectedChannel.asStateFlow()
+
+    private val _isLoadingChannel = MutableStateFlow(false)
+    val isLoadingChannel: StateFlow<Boolean> = _isLoadingChannel.asStateFlow()
+
+    fun openLiveChannel(channel: ApiChannel) {
+        viewModelScope.launch {
+            _selectedChannel.value = null // DESTROY old WebView immediately
+            _isLoadingChannel.value = true
+            android.util.Log.i("RONYCINE_DIAG", "[PLAYER_CLICK] User selected channel: ${channel.name} (ID: ${channel.id})")
+            
+            // 1. Get fresh data (including embed_url)
+            val updated = repository.getChannelById(channel.id, forceRefresh = true)
+            
+            if (updated != null) {
+                if (updated.isActive == false) {
+                    android.util.Log.w("RONYCINE_DIAG", "[CHANNEL_INACTIVE] Channel ${updated.name} is inactive.")
+                    _errorMessage.value = "Este canal está indisponível no momento."
+                } else if (updated.embedUrl.isNullOrBlank()) {
+                    android.util.Log.e("RONYCINE_DIAG", "[EMBED_MISSING] Channel ${updated.name} has no embed URL.")
+                    _errorMessage.value = "Não foi possível carregar o player deste canal."
+                } else {
+                    android.util.Log.i("RONYCINE_DIAG", "[LIVE_EMBED_STATUS] Opening channel ${updated.name} with URL: ${updated.embedUrl}")
+                    _selectedChannel.value = updated
+                }
+            } else {
+                _errorMessage.value = "Erro ao carregar dados do canal."
+            }
+            _isLoadingChannel.value = false
+        }
+    }
+
+    fun closePlayer() {
+        android.util.Log.i("RONYCINE_DIAG", "[PLAYER_STOP] Stopping live player")
+        _selectedChannel.value = null
+    }
+
+    fun retryChannel(channelId: String) {
+        viewModelScope.launch {
+            _selectedChannel.value = null // Stop previous
+            delay(300)
+            val base = channels.value.find { it.id == channelId }
+            if (base != null) {
+                openLiveChannel(base)
+            }
+        }
+    }
+
     init {
         loadFavorites()
         loadInitialData()
@@ -95,9 +145,8 @@ class LiveTvViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             channels.collect { allChannels ->
                 if (allChannels.isNotEmpty()) {
-                    // For now, take top 10 as first 10, or deterministic based on name length/id
-                    // In a real app, this would come from a specific popularity API or local analytics
-                    _topChannels.value = allChannels.shuffled(java.util.Random(123)).take(10)
+                    // Filter active channels for top 10
+                    _topChannels.value = allChannels.filter { it.isActive != false }.take(10)
                 }
             }
         }

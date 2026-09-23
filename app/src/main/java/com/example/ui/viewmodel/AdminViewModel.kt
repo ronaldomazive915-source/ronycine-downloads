@@ -47,32 +47,28 @@ import com.example.data.repository.TmdbAutoSyncConfig
 import com.example.data.repository.TmdbAutoSyncProgress
 import android.net.Uri
 
-enum class AdminSection(val title: String, val iconName: String) {
-    ESTATISTICAS("Visão Geral", "Dashboard"),
-    CATALOGO("Catálogo", "Movie"),
-    IMPORTACAO("Importar Filmes & Séries", "Download"),
-    IMPORTACAO_MASSA("Importação em Massa", "CloudSync"),
-    TOP_10("TOP 10", "Whatshot"),
-    DESTAQUES("Conteúdo em Destaque", "Star"),
-    TV_AO_VIVO("TV ao Vivo", "LiveTv"),
-    SINCRONIZACAO_AUTOMATICA("Sincronização Automática", "AutoMode"),
-    USUARIOS("Usuários", "Group"),
-    PERFIS("Perfis", "AccountCircle"),
-    DISPOSITIVOS("Dispositivos", "Smartphone"),
-    ADMINISTRADORES("Administradores", "AdminPanelSettings"),
-    NOTIFICACOES("Notificações", "Notifications"),
-    PEDIDOS("Pedidos de Filmes e Séries", "AddBox"),
-    ATUALIZACOES_APP("Versões do Aplicativo", "Update"),
-    ATUALIZACOES("Atualizações", "CloudSync"),
-    CONTROLE_REMOTO("Controle por Dispositivo", "SettingsRemote"),
-    ALTERACOES_PENDENTES("Alterações Pendentes", "PendingActions"),
-    SINCRONIZACAO("Status da Sincronização", "Sync"),
-    PLAYERS("Gerenciador de Players", "PlayCircleOutline"),
-    CONFIGURACOES("Configurações", "Settings"),
-    CINE_CONFIG("Configurações do Cine", "SmartToy"),
-    LOGS("Logs do Sistema", "History"),
-    HISTORICO("Histórico", "ManageHistory"),
-    STATUS_SISTEMA("Status do Sistema", "CheckCircle")
+enum class AdminSection(val title: String, val iconName: String, val permissionKey: String) {
+    ESTATISTICAS("Visão Geral", "Dashboard", "dashboard"),
+    CATALOGO("Catálogo", "Movie", "catalog"),
+    IMPORTACAO("Importar Filmes", "Download", "importFilme"),
+    IMPORTACAO_MASSA("Importação em Massa", "CloudSync", "importacaoMassa"),
+    TOP_10("TOP 10", "Whatshot", "top10"),
+    DESTAQUES("Conteúdo em Destaque", "Star", "destaques"),
+    TV_AO_VIVO("TV ao Vivo", "LiveTv", "tvAoVivo"),
+    SINCRONIZACAO_AUTOMATICA("Sincronização Automática", "AutoMode", "sincronizarCatalogo"),
+    USUARIOS("Usuários", "Group", "users"),
+    PERFIS("Perfis", "AccountCircle", "users"),
+    DISPOSITIVOS("Dispositivos", "Smartphone", "dispositivos"),
+    ADMINISTRADORES("Administradores", "AdminPanelSettings", "administradores"),
+    NOTIFICACOES("Notificações", "Notifications", "notificacoes"),
+    PEDIDOS("Pedidos de Filmes e Séries", "AddBox", "pedidosTmdb"),
+    ATUALIZACOES("Atualização Atual", "CloudSync", "atualizacoes"),
+    SINCRONIZACAO("Status da Sincronização", "Sync", "sincronizarCatalogo"),
+    PLAYERS("Gerenciador de Players", "PlayCircleOutline", "players"),
+    CONFIGURACOES("Configurações", "Settings", "configuracoes"),
+    CINE_CONFIG("Configurações do Cine", "SmartToy", "configuracoes"),
+    LOGS("Logs do Sistema", "History", "auditoria"),
+    STATUS_SISTEMA("Status do Sistema", "CheckCircle", "dashboard")
 }
 
 class AdminViewModel(application: Application) : AndroidViewModel(application) {
@@ -84,15 +80,43 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     // Auth state - supports custom administrator password (fallback is "200419")
     private val _isAdminLoggedIn = MutableStateFlow(false)
     val isAdminLoggedIn: StateFlow<Boolean> = _isAdminLoggedIn.asStateFlow()
+
+    private val _isAuthLoading = MutableStateFlow(false)
+    val isAuthLoading: StateFlow<Boolean> = _isAuthLoading.asStateFlow()
     
     private var cachedAdminPassword = "200419"
 
     private val _shareAppConfig = MutableStateFlow(MediaRepository.ShareAppConfigData())
     val shareAppConfig: StateFlow<MediaRepository.ShareAppConfigData> = _shareAppConfig.asStateFlow()
 
-    // --- Users & Profiles State ---
+    private val _currentUser = firebaseService.currentUser
+    val currentUser: StateFlow<com.example.data.remote.UserEntity?> = _currentUser
+
     val allUsers: StateFlow<List<com.example.data.remote.UserEntity>> = firebaseService.allUsers
     val allGlobalProfiles: StateFlow<List<com.example.data.remote.UserProfile>> = firebaseService.allGlobalProfiles
+    val manualUpdateConfig: StateFlow<com.example.data.remote.AppUpdate> = firebaseService.manualUpdateConfig
+
+    /**
+     * Check if current admin user has a specific permission.
+     * Shows an error message if permission is denied.
+     */
+    private fun requirePermission(permissionKey: String, showMessage: Boolean = true): Boolean {
+        val user = _currentUser.value
+        val hasPerm = user?.hasPermission(permissionKey) == true
+        if (!hasPerm && showMessage) {
+            _catalogActionMessage.value = "🔒 ACESSO NEGADO: Sem permissão ($permissionKey)"
+            Log.w("AdminViewModel", "Permission denied for action: $permissionKey (User: ${user?.email})")
+        }
+        return hasPerm
+    }
+
+    fun publishManualUpdate(config: com.example.data.remote.ManualUpdateConfig, onResult: (Boolean, String) -> Unit) {
+        if (!requirePermission("atualizacoes")) return
+        viewModelScope.launch {
+            val result = firebaseService.publishManualUpdate(config)
+            onResult(result.isSuccess, if (result.isSuccess) "Atualização publicada!" else result.exceptionOrNull()?.message ?: "Erro desconhecido")
+        }
+    }
 
     fun updateUserStatus(userId: String, status: String) {
         viewModelScope.launch {
@@ -101,8 +125,16 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setUserRole(userId: String, role: String) {
+        if (!requirePermission("manageAdmins")) return
         viewModelScope.launch {
             firebaseService.updateUserRole(userId, role)
+        }
+    }
+
+    fun updateUserPermissions(userId: String, permissions: com.example.data.remote.UserPermissions) {
+        if (!requirePermission("managePermissions")) return
+        viewModelScope.launch {
+            firebaseService.updateUserPermissions(userId, permissions)
         }
     }
 
@@ -151,6 +183,15 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             firebaseService.currentUser.collect { user ->
                 if (user?.role == "FOUNDER" || user?.role == "ADMIN") {
                     _isAdminLoggedIn.value = true
+                } else {
+                    _isAdminLoggedIn.value = false
+                }
+            }
+        }
+        viewModelScope.launch {
+            firebaseService.isAdminAuthorized.collect { isAuth ->
+                if (!isAuth) {
+                    _isAdminLoggedIn.value = false
                 }
             }
         }
@@ -158,6 +199,19 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         firebaseService.startListeningAuditLogs()
         firebaseService.startPlayerSourcesListener()
         seedDefaultPlayers()
+    }
+
+    fun refreshAuthorization() {
+        viewModelScope.launch {
+            _isAuthLoading.value = true
+            try {
+                firebaseService.refreshUserAuthorization()
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "[AUTH_DIAGNOSTIC] ADMIN_LOAD_ERROR: ${e.message}")
+            } finally {
+                _isAuthLoading.value = false
+            }
+        }
     }
 
     private val _tmdbAutoSyncConfig = MutableStateFlow(TmdbAutoSyncConfig())
@@ -205,7 +259,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun logoutAdmin() {
         _isAdminLoggedIn.value = false
-        _currentSection.value = AdminSection.IMPORTACAO
+        _currentSection.value = AdminSection.ESTATISTICAS
     }
 
     // --- AUTOMATIC NOTIFICATIONS CONFIGURATION ---
@@ -267,8 +321,11 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         player: String,
         color: String,
         enabled: Boolean = true,
+        officialApiKey: String? = null,
+        officialProEndpoint: String? = null,
         onResult: (Boolean) -> Unit = {}
     ) {
+        if (!requirePermission("configurarPlayers")) return
         viewModelScope.launch {
             if (_isSavingPlayerConfig.value) return@launch
             _isSavingPlayerConfig.value = true
@@ -278,10 +335,15 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             val cleanPlayer = player.trim().lowercase()
 
             val currentAdminEmail = firebaseService.currentUser.value?.email ?: "admin@ronycine.app"
+            val currentMega = playerConfig.value.megaEmbed
             val newMegaConfig = com.example.data.remote.MegaEmbedPlayerConfig(
                 enabled = enabled,
                 player = cleanPlayer,
-                color = cleanColor
+                color = cleanColor,
+                imdbSeriesFormat = currentMega.imdbSeriesFormat,
+                playbackMode = if (!officialApiKey.isNullOrBlank() || !officialProEndpoint.isNullOrBlank()) "official_ad_free" else currentMega.playbackMode,
+                officialApiKey = officialApiKey ?: currentMega.officialApiKey,
+                officialProEndpoint = officialProEndpoint ?: currentMega.officialProEndpoint
             )
 
             val success = firebaseService.updateMegaEmbedConfig(newMegaConfig, currentAdminEmail)
@@ -299,13 +361,72 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 addAuditLog("Atualizou MegaEmbed: Player=$displayName, Cor=#$cleanColor, Ativo=$enabled", "Gerenciador de Players")
                 firebaseService.addAuditLogRemote("MEGAEMBED_CONFIG_UPDATED", cleanPlayer)
 
-                _playerSaveStatusMessage.value = "Player atualizado com sucesso"
+                _playerSaveStatusMessage.value = "Configuração salva com sucesso"
                 onResult(true)
             } else {
-                _playerSaveStatusMessage.value = "Falha ao salvar configuração no Firestore"
+                _playerSaveStatusMessage.value = "Falha ao salvar no Firestore"
                 onResult(false)
             }
             _isSavingPlayerConfig.value = false
+        }
+    }
+
+    fun saveMegaEmbedOfficialCredentials(
+        apiKey: String,
+        proEndpoint: String,
+        onResult: (Boolean) -> Unit = {}
+    ) {
+        val current = playerConfig.value.megaEmbed
+        saveMegaEmbedSettings(
+            player = current.player,
+            color = current.color,
+            enabled = current.enabled,
+            officialApiKey = apiKey.trim(),
+            officialProEndpoint = proEndpoint.trim(),
+            onResult = onResult
+        )
+    }
+
+    fun saveAccentColor(color: String) {
+        val currentConfig = playerConfig.value
+        saveMegaEmbedSettings(
+            player = currentConfig.megaEmbed.player,
+            color = color,
+            enabled = currentConfig.megaEmbed.enabled
+        )
+    }
+
+    fun saveDefaultPlayerOption(playerCode: String) {
+        viewModelScope.launch {
+            val cleanCode = playerCode.trim().lowercase()
+            val currentConfig = playerConfig.value
+            
+            // Se for um dos sub-players do MegaEmbed (mgeb, redeflixapi, vidsrc)
+            val isMegaEmbedSubPlayer = cleanCode == "mgeb" || cleanCode == "redeflixapi" || cleanCode == "vidsrc"
+            
+            if (isMegaEmbedSubPlayer) {
+                // 1. Configura o MegaEmbed internamente
+                saveMegaEmbedSettings(
+                    player = if (cleanCode == "mgeb") currentConfig.megaEmbed.player else cleanCode,
+                    color = currentConfig.megaEmbed.color,
+                    enabled = true
+                )
+                
+                // 2. Garante que o 'mgeb' é o player padrão global
+                val mgebSource = playerSources.value.find { it.id == "mgeb" || it.name.contains("MegaEmbed", ignoreCase = true) }
+                if (mgebSource != null && currentConfig.defaultPlayerId != mgebSource.id) {
+                    setDefaultPlayer(mgebSource.id)
+                }
+            } else {
+                // Caso seja outro player da lista de fontes (VidSrc_Pro, etc)
+                val targetSource = playerSources.value.find { 
+                    it.id.equals(cleanCode, ignoreCase = true) || 
+                    it.name.contains(cleanCode, ignoreCase = true) 
+                }
+                if (targetSource != null) {
+                    setDefaultPlayer(targetSource.id)
+                }
+            }
         }
     }
 
@@ -344,6 +465,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun savePlayerSource(source: com.example.data.remote.PlayerSource) {
+        if (!requirePermission("players")) return
         viewModelScope.launch {
             firebaseService.upsertPlayerSourceInCloud(source)
             addAuditLog("Salvou player: ${source.name}", "Gerenciador de Players")
@@ -379,12 +501,44 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _togglingPlayerIds = MutableStateFlow<Set<String>>(emptySet())
+    val togglingPlayerIds: StateFlow<Set<String>> = _togglingPlayerIds.asStateFlow()
+
     fun togglePlayerEnabled(playerId: String, enabled: Boolean) {
+        if (_togglingPlayerIds.value.contains(playerId)) return
+        
         viewModelScope.launch {
-            firebaseService.togglePlayerEnabled(playerId, enabled)
-            val action = if (enabled) "Ativou" else "Desativou"
-            addAuditLog("$action player: $playerId", "Gerenciador de Players")
-            firebaseService.addAuditLogRemote(if (enabled) "PLAYER_ENABLED" else "PLAYER_DISABLED", playerId)
+            _togglingPlayerIds.value += playerId
+            try {
+                val activePlayers = playerSources.value.filter { it.enabled }
+                if (!enabled && activePlayers.size <= 1 && activePlayers.any { it.id == playerId }) {
+                    _playerSaveStatusMessage.value = "É necessário manter pelo menos um player ativo."
+                    _togglingPlayerIds.value -= playerId
+                    return@launch
+                }
+
+                firebaseService.togglePlayerEnabled(playerId, enabled)
+                
+                // Se estamos desativando o player principal atual, precisamos trocar para outro ativo
+                val currentConfig = playerConfig.value
+                if (!enabled && currentConfig.defaultPlayerId == playerId) {
+                    val nextActive = playerSources.value.find { it.enabled && it.id != playerId }
+                    if (nextActive != null) {
+                        setDefaultPlayer(nextActive.id)
+                    }
+                }
+
+                val action = if (enabled) "Ativou" else "Desativou"
+                _playerSaveStatusMessage.value = "Player $action com sucesso"
+                addAuditLog("$action player: $playerId", "Gerenciador de Players")
+                val auditAction = if (enabled) "PLAYER_ENABLED" else "PLAYER_DISABLED"
+                firebaseService.addAuditLogRemote(auditAction, playerId)
+                
+                // Aguarda um pouco para refletir a mudança no Firestore
+                delay(500)
+            } finally {
+                _togglingPlayerIds.value -= playerId
+            }
         }
     }
 
@@ -410,12 +564,31 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setAppAdsEnabled(enabled: Boolean) {
+        if (!requirePermission("players") && !requirePermission("configurarPlayers")) {
+            _playerSaveStatusMessage.value = "Permissão negada para alterar configurações de publicidade."
+            return
+        }
+        viewModelScope.launch {
+            val success = firebaseService.updateAdsEnabled(enabled)
+            if (success) {
+                val msg = if (enabled) "Publicidade central do app ativada (ads.enabled = true)" else "Publicidade central do app desativada (ads.enabled = false)"
+                _playerSaveStatusMessage.value = msg
+                addAuditLog(msg, "Gerenciador de Players")
+                firebaseService.addAuditLogRemote("ADS_CONFIG_UPDATED", if (enabled) "ENABLED" else "DISABLED")
+            } else {
+                _playerSaveStatusMessage.value = "Erro ao atualizar configuração de publicidade"
+            }
+        }
+    }
+
     fun seedDefaultPlayers() {
         viewModelScope.launch {
             // Give it time for the initial listener snapshot
             delay(1200)
             val currentSources = playerSources.value
             val mgebExists = currentSources.any { it.id == "mgeb" || it.name.contains("mgeb", ignoreCase = true) || it.name.contains("megaembed", ignoreCase = true) }
+            val redeflixExists = currentSources.any { it.id == "redeflixapi" || it.name.contains("redeflix", ignoreCase = true) }
             val vidsrcExists = currentSources.any { it.id == "vidsrc" || it.name.contains("vidsrc", ignoreCase = true) }
 
             if (!mgebExists) {
@@ -427,11 +600,31 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     language = "Dublado",
                     movieTmdbUrl = "https://mgeb.top/embed/{tmdb_id}",
                     tvTmdbUrl = "https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}",
+                    internalPlayer = "megaplay",
                     playerColor = "#fb542b",
                     isDefault = true,
-                    enabled = true
+                    enabled = true,
+                    providerOrigin = "MegaEmbed"
                 )
                 firebaseService.upsertPlayerSourceInCloud(mgeb)
+            }
+
+            if (!redeflixExists) {
+                val redeflix = com.example.data.remote.PlayerSource(
+                    id = "redeflixapi",
+                    name = "RedeFlixApi",
+                    type = "Iframe / WebView",
+                    priority = 2,
+                    language = "Dublado",
+                    movieTmdbUrl = "https://redeflixapi.store/filme/{tmdbId}",
+                    tvTmdbUrl = "https://redeflixapi.store/serie/{tmdbId}/{seasonNumber}/{episodeNumber}",
+                    internalPlayer = "redeflixapi",
+                    playerColor = "#E50914",
+                    isDefault = false,
+                    enabled = true,
+                    providerOrigin = "RedeFlixApi"
+                )
+                firebaseService.upsertPlayerSourceInCloud(redeflix)
             }
 
             if (!vidsrcExists) {
@@ -439,12 +632,13 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     id = "vidsrc",
                     name = "VidSrc",
                     type = "Embed",
-                    priority = 2,
+                    priority = 3,
                     language = "Legendado",
                     movieTmdbUrl = "https://vidsrc.tw/embed/movie/{tmdb_id}",
                     tvTmdbUrl = "https://vidsrc.tw/embed/tv/{tmdb_id}/{season_number}/{episode_number}",
                     isDefault = false,
-                    enabled = true
+                    enabled = true,
+                    providerOrigin = "VidSrc"
                 )
                 firebaseService.upsertPlayerSourceInCloud(vidsrc)
             }
@@ -1209,6 +1403,10 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     val currentSection: StateFlow<AdminSection> = _currentSection.asStateFlow()
 
     fun selectSection(section: AdminSection) {
+        if (!requirePermission(section.permissionKey)) {
+            // Already shows snackbar via requirePermission
+            return
+        }
         _currentSection.value = section
     }
 
@@ -1489,6 +1687,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     val isSeriesUpdateRunning: StateFlow<Boolean> = _isSeriesUpdateRunning.asStateFlow()
 
     fun reimportOrUpdateSeries(tmdbId: Int) {
+        if (!requirePermission("importSerie")) return
         if (_isSeriesUpdateRunning.value) {
             Log.w("AdminViewModel", "[UPDATE SERIES] Atualização de série já em andamento.")
             return
@@ -1747,6 +1946,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startMassImportForSelectedCandidates(config: ImportConfig = ImportConfig(concurrentWorkers = 2)) {
+        if (!requirePermission("importacaoMassa")) return
         if (_isBulkImportRunning.value) {
             Log.w("AdminViewModel", "[BULK] Importação já está em execução. Ignorando clique duplo.")
             return
@@ -1822,6 +2022,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         ids: List<Pair<Int, String>>,
         config: ImportConfig
     ) {
+        if (!requirePermission("importacaoMassa")) return
         viewModelScope.launch {
             try {
                 val jobId = mediaRepository.createMassImportJob(type, source, ids, config)
@@ -1920,6 +2121,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveMegaEmbedConfig(config: MegaEmbedConfig) {
+        if (!requirePermission("configurarPlayers")) return
         viewModelScope.launch {
             mediaRepository.saveMegaEmbedConfig(config)
             _megaEmbedConfig.value = config
@@ -1939,6 +2141,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun runMegaEmbedSync() {
+        if (!requirePermission("sincronizarCatalogo")) return
         viewModelScope.launch {
             _isSyncingMegaEmbed.value = true
             val result = mediaRepository.syncMegaEmbedCatalog()
@@ -2027,6 +2230,8 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     fun confirmImportSelectedMedia() {
         val entity = _selectedPreviewMedia.value ?: return
+        val permissionKey = if (entity.mediaType == "movie") "importFilme" else "importSerie"
+        if (!requirePermission(permissionKey)) return
 
         viewModelScope.launch {
             _isImportingSingle.value = true
@@ -2329,6 +2534,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     fun updateFeaturedMode(mode: String) {
+        if (!requirePermission("catalog")) return
         viewModelScope.launch {
             val current = featuredConfig.value
             val updated = current.copy(mode = mode, source = if (mode == "automatic") "TMDB" else "MANUAL")
@@ -2338,6 +2544,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun saveFeaturedConfig(config: com.example.data.remote.FeaturedConfigEntity) {
+        if (!requirePermission("catalog")) return
         viewModelScope.launch {
             firebaseService.updateFeaturedConfigInCloud(config)
             _catalogActionMessage.value = "Configurações de destaque salvas com sucesso!"

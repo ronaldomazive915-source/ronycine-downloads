@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -46,17 +47,22 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.data.local.DownloadEntity
 import com.example.ui.components.DownloadOptionsBottomSheet
+import com.example.ui.components.ContentShareBottomSheet
+import com.example.ui.viewmodel.DownloadState
 import com.example.ui.components.EmbedAudioSource
 import com.example.ui.components.EmbedPlayer
 import com.example.ui.components.EmbedUrlBuilder
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
+import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.RatingYellow
 import com.example.ui.viewmodel.MainViewModel
+import com.example.ui.viewmodel.AuthViewModel
+import com.example.ui.viewmodel.PendingDownloadIntent
 import kotlinx.coroutines.delay
 
 /**
@@ -125,6 +131,12 @@ fun PlayerCircularRatingBubble(
     }
 }
 
+data class NextEpisodeTarget(
+    val seasonNumber: Int,
+    val episodeNumber: Int,
+    val title: String? = null
+)
+
 @Composable
 fun PlayerScreen(
     tmdbId: Int,
@@ -132,16 +144,26 @@ fun PlayerScreen(
     seasonNumber: Int? = null,
     episodeNumber: Int? = null,
     viewModel: MainViewModel,
+    authViewModel: AuthViewModel,
     onNavigateBack: () -> Unit,
     onNavigateToDetail: ((Int, String) -> Unit)? = null,
+    onNavigateToLogin: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val activity = context as? Activity
 
+    // Active Episode Tracking
+    var currentSeasonNum by remember(seasonNumber) { mutableIntStateOf(seasonNumber ?: 1) }
+    var currentEpisodeNum by remember(episodeNumber) { mutableIntStateOf(episodeNumber ?: 1) }
+
     // Load main media details & episodes
-    LaunchedEffect(tmdbId, mediaType) {
+    LaunchedEffect(tmdbId, mediaType, currentSeasonNum) {
+        android.util.Log.i("RONYCINE_DIAG", "[PLAYER_REQUEST_STARTED] PlayerScreen carregando detalhes. tmdbId=$tmdbId, mediaType=$mediaType")
         viewModel.loadMediaDetails(tmdbId, mediaType)
+        if (mediaType == "tv" || mediaType == "serie") {
+            viewModel.loadSeasonEpisodes(tmdbId, currentSeasonNum)
+        }
     }
 
     val media by viewModel.selectedMedia.collectAsState()
@@ -150,38 +172,30 @@ fun PlayerScreen(
     val allMediaList by viewModel.allMedia.collectAsState()
     val myList by viewModel.myList.collectAsState()
     val autoplayEnabled by viewModel.autoplayEnabled.collectAsState()
+    val isAccessRestricted by viewModel.isAccessRestricted.collectAsState()
+    val activeProfile by viewModel.activeProfile.collectAsState()
+    val currentUser by authViewModel.currentUser.collectAsState()
+    val pendingDownloadIntent by viewModel.pendingDownloadIntent.collectAsState()
+
+    LaunchedEffect(pendingDownloadIntent, media, currentUser) {
+        val intent = pendingDownloadIntent
+        if (intent != null && media != null && intent.tmdbId == tmdbId && intent.isPlayer) {
+            if (currentUser != null) {
+                viewModel.resolveDownload(
+                    type = mediaType,
+                    tmdbId = tmdbId,
+                    season = intent.season,
+                    episode = intent.episode,
+                    mediaTitle = intent.mediaTitle
+                )
+                viewModel.clearPendingDownloadIntent()
+            }
+        }
+    }
 
     val isInMyList = myList.any { it.tmdbId == tmdbId }
 
-    // Active Episode Tracking
-    var currentSeasonNum by remember(seasonNumber) { mutableIntStateOf(seasonNumber ?: 1) }
-    var currentEpisodeNum by remember(episodeNumber) { mutableIntStateOf(episodeNumber ?: 1) }
-
-    // Observe local download for current content
-    val currentDownload by viewModel.observeDownloadForEpisode(
-        tmdbId = tmdbId,
-        seasonNumber = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
-        episodeNumber = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null
-    ).collectAsState(initial = null)
-
-    val isLocalDownloadAvailable = currentDownload?.status == DownloadEntity.STATUS_COMPLETED &&
-            !currentDownload?.localFilePath.isNullOrBlank() &&
-            java.io.File(currentDownload?.localFilePath ?: "").exists()
-
-    // Fullscreen state
-    var isFullscreen by remember { mutableStateOf(false) }
-
-    // Download options modal state
-    var showDownloadOptionsSheet by remember { mutableStateOf(false) }
-
-    // Synopsis expand state
-    var isSynopsisExpanded by remember { mutableStateOf(false) }
-
-    // User reaction states
-    var isLiked by remember { mutableStateOf(false) }
-    var isDisliked by remember { mutableStateOf(false) }
-    
-    // Player Load ID for race condition prevention
+    // Player Load ID & Audio Source Selection
     var playerLoadId by remember { mutableIntStateOf(0) }
 
     val currentAppLanguage by viewModel.appLanguage.collectAsState()
@@ -191,29 +205,167 @@ fun PlayerScreen(
         com.example.util.LanguageManager.resolvePreferredPlaybackMode(currentAppLanguage, currentPreferredPlayerLanguage)
     }
 
-    // Audio Source Selection: DUBLADO (mgeb.top - default) / LEGENDADO (vidsrc)
     var selectedAudioSource by remember(defaultPlaybackMode) { mutableStateOf(defaultPlaybackMode) }
-    
-    // Fallback source index
+    var selectedPlayerSourceId by remember { mutableStateOf<String?>(null) }
     var fallbackSourceIndex by remember { mutableIntStateOf(0) }
+
+    // Next Episode Button State
+    var showNextEpisodeButton by remember { mutableStateOf(false) }  // Shown during last 120s and on ended
+    var nextEpisodeTarget by remember { mutableStateOf<NextEpisodeTarget?>(null) }
+    var remainingSecondsUntilEnd by remember { mutableIntStateOf(0) }
+    var currentVideoDuration by remember { mutableDoubleStateOf(0.0) }
+
+    LaunchedEffect(currentSeasonNum, currentEpisodeNum, playerLoadId, selectedAudioSource) {
+        showNextEpisodeButton = false
+        nextEpisodeTarget = null
+        remainingSecondsUntilEnd = 0
+    }
+
+    val downloadState by viewModel.downloadState.collectAsState()
+    var showDownloadSheet by remember { mutableStateOf(false) }
+    var downloadTargetUrl by remember { mutableStateOf("") }
+    var downloadTargetFileName by remember { mutableStateOf("") }
+    var showShareSheet by remember { mutableStateOf(false) }
+
+    val activeEpisode = remember(episodes, currentSeasonNum, currentEpisodeNum) {
+        episodes.firstOrNull { it.seasonNumber == currentSeasonNum && it.episodeNumber == currentEpisodeNum }
+    }
+
+    if (showShareSheet && media != null) {
+        ContentShareBottomSheet(
+            media = media!!,
+            seasonNumber = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
+            episodeNumber = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
+            episodeTitle = activeEpisode?.title,
+            onDismiss = { showShareSheet = false }
+        )
+    }
+
+    if (showDownloadSheet) {
+        DownloadOptionsBottomSheet(
+            url = downloadTargetUrl,
+            fileName = downloadTargetFileName,
+            tmdbId = tmdbId.toString(),
+            title = media?.title ?: "Conteúdo RONYCINE",
+            subTitle = if (mediaType == "tv" || mediaType == "serie") "S${currentSeasonNum}E${currentEpisodeNum}" else null,
+            posterPath = media?.posterPath,
+            mediaType = mediaType,
+            seasonNumber = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
+            episodeNumber = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
+            viewModel = viewModel,
+            onDismiss = { 
+                showDownloadSheet = false
+                viewModel.resetDownloadState()
+            },
+            onNavigateToLogin = onNavigateToLogin
+        )
+    }
+
+    LaunchedEffect(downloadState) {
+        if (downloadState is DownloadState.Ready) {
+            downloadTargetUrl = (downloadState as DownloadState.Ready).url
+            downloadTargetFileName = (downloadState as DownloadState.Ready).fileName
+            showDownloadSheet = true
+        } else if (downloadState is DownloadState.Error) {
+            val errMsg = (downloadState as DownloadState.Error).message
+            android.widget.Toast.makeText(context, errMsg, android.widget.Toast.LENGTH_SHORT).show()
+            viewModel.resetDownloadState()
+        }
+    }
+
+    // Fullscreen state
+    var isFullscreen by remember { mutableStateOf(false) }
+
+    // Synopsis expand state
+    var isSynopsisExpanded by remember { mutableStateOf(false) }
+
+    // User reaction states
+    var isLiked by remember { mutableStateOf(false) }
+    var isDisliked by remember { mutableStateOf(false) }
 
     // Validate TMDB ID
     val isValidId = EmbedUrlBuilder.isValidTmdbId(tmdbId)
 
-    // Automatically save watch history when playback starts or episode changes
-    LaunchedEffect(tmdbId, mediaType, currentSeasonNum, currentEpisodeNum, media) {
+    var initialResumePosition by remember { mutableDoubleStateOf(0.0) }
+    var lastSavedTimeSeconds by remember { mutableDoubleStateOf(0.0) }
+    var lastSavedTimestamp by remember { mutableLongStateOf(0L) }
+    var currentVideoPosition by remember { mutableDoubleStateOf(0.0) }
+
+    // Load real saved progress on entry or when episode changes
+    LaunchedEffect(tmdbId, mediaType, currentSeasonNum, currentEpisodeNum) {
         if (isValidId) {
-            viewModel.saveWatchProgress(
+            val isTv = mediaType == "tv" || mediaType == "serie"
+            val saved = viewModel.getWatchHistoryItemSync(
                 tmdbId = tmdbId,
                 mediaType = mediaType,
-                title = media?.title ?: "Conteúdo RONYCINE",
-                posterPath = media?.posterPath,
-                seasonNumber = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
-                episodeNumber = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
-                progressPercent = 0.5f,
-                positionMs = 300000L,
-                totalDurationMs = 600000L
+                seasonNumber = if (isTv) currentSeasonNum else null,
+                episodeNumber = if (isTv) currentEpisodeNum else null
             )
+            if (saved != null && saved.progressPercent < 95.0f) {
+                val sec = if (saved.currentTimeSeconds > 0.0) {
+                    saved.currentTimeSeconds
+                } else if (saved.lastWatchedPositionMs > 0) {
+                    saved.lastWatchedPositionMs / 1000.0
+                } else 0.0
+
+                if (sec > 2.0) {
+                    initialResumePosition = sec
+                    android.util.Log.i("CONTINUE WATCHING", "[CONTINUE WATCHING] Retomando em: $sec segundos (tmdbId=$tmdbId)")
+                }
+            }
+        }
+    }
+
+    val persistProgress: (currentTime: Double, duration: Double, force: Boolean) -> Unit = { ct, dur, force ->
+        if (isValidId && dur > 0.0 && !dur.isNaN() && !dur.isInfinite() && !ct.isNaN() && !ct.isInfinite()) {
+            val now = System.currentTimeMillis()
+            if (force || (now - lastSavedTimestamp >= 3000L) || Math.abs(ct - lastSavedTimeSeconds) >= 5.0) {
+                lastSavedTimestamp = now
+                lastSavedTimeSeconds = ct
+                val rawPercentage = ((ct / dur) * 100.0).toFloat().coerceIn(0f, 100f)
+                val isTv = mediaType == "tv" || mediaType == "serie"
+                val contentId = if (isTv) "tv_${tmdbId}_s${currentSeasonNum}_e${currentEpisodeNum}" else "movie_${tmdbId}"
+                val type = if (isTv) "episode" else "movie"
+
+                android.util.Log.i(
+                    "CONTINUE WATCHING",
+                    """
+                    [CONTINUE WATCHING]
+                    contentId: $contentId
+                    type: $type
+                    tmdbId: $tmdbId
+                    season: ${if (isTv) currentSeasonNum else "N/A"}
+                    episode: ${if (isTv) currentEpisodeNum else "N/A"}
+                    currentTime: $ct
+                    duration: $dur
+                    percentage: $rawPercentage%
+                    updatedAt: $now
+                    saveResult: SUCCESS
+                    """.trimIndent()
+                )
+
+                viewModel.saveWatchProgress(
+                    tmdbId = tmdbId,
+                    mediaType = mediaType,
+                    title = media?.title ?: "Conteúdo RONYCINE",
+                    posterPath = media?.posterPath,
+                    seasonNumber = if (isTv) currentSeasonNum else null,
+                    episodeNumber = if (isTv) currentEpisodeNum else null,
+                    progressPercent = rawPercentage,
+                    positionMs = (ct * 1000).toLong(),
+                    totalDurationMs = (dur * 1000).toLong(),
+                    currentTimeSeconds = ct,
+                    durationSeconds = dur
+                )
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (currentVideoDuration > 0.0 && currentVideoPosition > 0.0) {
+                persistProgress(currentVideoPosition, currentVideoDuration, true)
+            }
         }
     }
 
@@ -225,102 +377,124 @@ fun PlayerScreen(
     val playerSources by viewModel.playerSources.collectAsState()
     val playerConfig by viewModel.playerConfig.collectAsState()
 
-    val originalEmbedUrl = remember(mediaType, tmdbId, currentSeasonNum, currentEpisodeNum, selectedAudioSource, playerSources, playerConfig, media, fallbackSourceIndex) {
-        val currentMedia = media
-        if (currentMedia != null) {
-            if (selectedAudioSource == EmbedAudioSource.LEGENDADO) {
-                // LEGENDADO uses VidSrc exclusively
+    val accentColor = remember(playerConfig.megaEmbed.color) {
+        try {
+            if (playerConfig.megaEmbed.color.startsWith("#")) {
+                Color(android.graphics.Color.parseColor(playerConfig.megaEmbed.color))
+            } else if (playerConfig.megaEmbed.color.isNotBlank() && playerConfig.megaEmbed.color != "Padrão") {
+                // Handle named colors if any, or just hex
+                Color(android.graphics.Color.parseColor(playerConfig.megaEmbed.color))
+            } else {
+                Color(0xFFfb542b) // Ronycine orange default
+            }
+        } catch (e: Exception) {
+            Color(0xFFfb542b)
+        }
+    }
+
+    var attemptedPlayerIds by remember(tmdbId, mediaType, currentSeasonNum, currentEpisodeNum, selectedAudioSource) {
+        mutableStateOf(setOf<String>())
+    }
+
+    val originalEmbedUrl = remember(mediaType, tmdbId, currentSeasonNum, currentEpisodeNum, selectedAudioSource, selectedPlayerSourceId, playerSources, playerConfig, fallbackSourceIndex, attemptedPlayerIds) {
+        if (selectedAudioSource == EmbedAudioSource.LEGENDADO) {
+            // LEGENDADO uses VidSrc exclusively
+            com.example.util.PlayerUtils.buildPlayerUrl(
+                provider = "vidsrc",
+                mediaType = mediaType,
+                tmdbId = tmdbId,
+                season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
+                episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
+                audio = "Legendado",
+                dsLang = playerConfig.subtitledPlayer.defaultLanguage.ifBlank { "pt" }
+            )
+        } else {
+            val audioLabel = "Dublado"
+            
+            // 1. Find the master default player from config (excluding R2)
+            val masterDefault = playerSources.find { it.id == playerConfig.defaultPlayerId && it.enabled && !it.id.equals("r2", ignoreCase = true) }
+            
+            // 2. Filter compatible players by language and priority (excluding R2)
+            val compatibleSources = playerSources
+                .filter { it.enabled && it.language.equals(audioLabel, ignoreCase = true) && !it.id.equals("r2", ignoreCase = true) }
+                .sortedBy { it.priority }
+            
+            // 3. Selection Logic considering attemptedPlayerIds
+            val unattempted = compatibleSources.filter { !attemptedPlayerIds.contains(it.id) }
+            
+            val source = if (selectedPlayerSourceId != null && !attemptedPlayerIds.contains(selectedPlayerSourceId)) {
+                compatibleSources.find { it.id == selectedPlayerSourceId }
+            } else if (unattempted.isNotEmpty()) {
+                if (masterDefault != null && unattempted.any { it.id == masterDefault.id }) {
+                    masterDefault
+                } else {
+                    unattempted.first()
+                }
+            } else if (compatibleSources.isNotEmpty()) {
+                compatibleSources.first()
+            } else {
+                null
+            }
+            
+            if (source != null) {
+                android.util.Log.i("RONYCINE_DIAG", "[PLAYER_URL_CREATED] URL final decidida para o player '${source.name}' (ID: ${source.id})")
+                android.util.Log.d("RONYCINE_PLAYER", "PLAY_SOURCE: Usando player '${source.name}' (ID: ${source.id}) [DefaultId: ${playerConfig.defaultPlayerId}, MegaEmbedPlayer: ${playerConfig.megaEmbed.player}]")
                 com.example.util.PlayerUtils.buildPlayerUrl(
-                    provider = "vidsrc",
+                    source = source,
                     mediaType = mediaType,
                     tmdbId = tmdbId,
                     season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
                     episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
-                    audio = "Legendado",
-                    dsLang = playerConfig.subtitledPlayer.defaultLanguage.ifBlank { "pt" }
+                    megaEmbedConfig = playerConfig.megaEmbed
                 )
             } else {
-                val audioLabel = "Dublado"
-                
-                // 1. Find the master default player from config
-                val masterDefault = playerSources.find { it.id == playerConfig.defaultPlayerId && it.enabled }
-                
-                // 2. Filter compatible players by language and priority
-                val compatibleSources = playerSources
-                    .filter { it.enabled && it.language.equals(audioLabel, ignoreCase = true) }
-                    .sortedBy { it.priority }
-                
-                // 3. Final Selection Logic
-                val source = if (fallbackSourceIndex > 0) {
-                    // If user is cycling through fallbacks, use the priority list
-                    compatibleSources.getOrNull(fallbackSourceIndex)
-                } else {
-                    // Initial load: 
-                    // A) Check if the master default player is compatible with current language
-                    if (masterDefault != null && masterDefault.language.equals(audioLabel, ignoreCase = true)) {
-                        masterDefault
-                    } else {
-                        // B) Otherwise use the first compatible player by priority
-                        compatibleSources.firstOrNull()
-                    }
-                }
-                
-                if (source != null) {
-                    android.util.Log.d("RONYCINE_PLAYER", "PLAY_SOURCE: Usando player '${source.name}' (ID: ${source.id}) [DefaultId: ${playerConfig.defaultPlayerId}, MegaEmbedPlayer: ${playerConfig.megaEmbed.player}]")
-                    com.example.util.PlayerUtils.buildPlayerUrl(
-                        source = source,
-                        media = currentMedia,
-                        season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
-                        episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
-                        megaEmbedConfig = playerConfig.megaEmbed
-                    )
-                } else {
-                    // Fallback to legacy builder if absolutely no dynamic sources found
-                    android.util.Log.w("RONYCINE_PLAYER", "PLAY_SOURCE: Nenhuma fonte dinâmica encontrada para $audioLabel. Usando fallback legando.")
-                    EmbedUrlBuilder.buildUrl(
-                        mediaType = mediaType,
-                        tmdbId = tmdbId,
-                        season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
-                        episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
-                        audioSource = EmbedAudioSource.DUBLADO,
-                        player = playerConfig.megaEmbed.player,
-                        color = playerConfig.megaEmbed.color
-                    )
-                }
+                // Fallback to legacy builder if absolutely no dynamic sources found
+                android.util.Log.w("RONYCINE_PLAYER", "PLAY_SOURCE: Nenhuma fonte dinâmica encontrada para $audioLabel. Usando fallback padrão.")
+                EmbedUrlBuilder.buildUrl(
+                    mediaType = mediaType,
+                    tmdbId = tmdbId,
+                    season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
+                    episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
+                    audioSource = EmbedAudioSource.DUBLADO,
+                    player = playerConfig.megaEmbed.player,
+                    color = playerConfig.megaEmbed.color
+                )
             }
-        } else {
-            ""
         }
     }
 
+    // Requirement 2: Audit log before opening player
+    LaunchedEffect(originalEmbedUrl, selectedPlayerSourceId, selectedAudioSource) {
+        val audioLabel = if (selectedAudioSource == EmbedAudioSource.DUBLADO) "Dublado" else "Legendado"
+        val masterDefault = playerSources.find { it.id == playerConfig.defaultPlayerId && it.enabled }
+        val activeSource = playerSources.find { it.id == selectedPlayerSourceId }
+            ?: playerSources.firstOrNull { it.enabled && it.language.equals(audioLabel, ignoreCase = true) }
+
+        android.util.Log.i(
+            "RONYCINE_PLAYER",
+            "PLAYER_AUDIT: provider=${activeSource?.name ?: "MegaEmbed"}, defaultPlayer=${masterDefault?.id ?: playerConfig.defaultPlayerId}, enabled=${activeSource?.enabled ?: true}, tmdbId=$tmdbId, contentType=$mediaType, season=${if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else "N/A"}, episode=${if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else "N/A"}, generatedUrl=$originalEmbedUrl"
+        )
+    }
+
     val handleBackNavigation = {
-        val webView = activeWebView
-        if (webView != null) {
-            val canGoBack = webView.canGoBack()
-            // Check if URL has drifted from the expected original video embed domain
-            val isRedirected = currentWebViewUrl.isNotBlank() && 
+        if (isFullscreen) {
+            android.util.Log.i("RONYCINE_PLAYER", "PLAYER_BACK: Exiting fullscreen mode without navigating away")
+            isFullscreen = false
+        } else {
+            val webView = activeWebView
+            val isRedirected = webView != null && currentWebViewUrl.isNotBlank() && 
                     currentWebViewUrl != "about:blank" && 
                     !currentWebViewUrl.startsWith(originalEmbedUrl.substringBefore("?")) &&
                     !currentWebViewUrl.contains("superflix") && 
                     !currentWebViewUrl.contains("embed")
 
-            if (canGoBack) {
-                android.util.Log.i("RONYCINE_PLAYER", "PLAYER_BACK: Navigating back within WebView history")
-                webView.goBack()
-            } else if (isRedirected) {
+            if (isRedirected && webView != null) {
                 android.util.Log.i("RONYCINE_PLAYER", "PLAYER_RESTORE: Ad redirect detected, restoring original url=$originalEmbedUrl")
                 webView.loadUrl(originalEmbedUrl)
-            } else if (isFullscreen) {
-                android.util.Log.i("RONYCINE_PLAYER", "PLAYER_BACK: Exiting fullscreen mode")
-                isFullscreen = false
             } else {
                 android.util.Log.i("RONYCINE_PLAYER", "PLAYER_BACK: Exiting Player screen")
                 onNavigateBack()
             }
-        } else if (isFullscreen) {
-            isFullscreen = false
-        } else {
-            onNavigateBack()
         }
     }
 
@@ -358,6 +532,8 @@ fun PlayerScreen(
             try {
                 if (isFullscreen) {
                     activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                } else {
+                    activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                 }
             } catch (_: Exception) {}
             try {
@@ -404,6 +580,54 @@ fun PlayerScreen(
         }
     }
 
+    fun computeNextEpisodeTarget(): NextEpisodeTarget? {
+        if (mediaType != "tv" && mediaType != "serie") return null
+
+        val currentSeasonEps = episodes.filter { it.seasonNumber == currentSeasonNum }
+        
+        if (currentSeasonEps.isNotEmpty()) {
+            val maxEpInCurrentSeason = currentSeasonEps.maxOf { it.episodeNumber }
+            if (currentEpisodeNum < maxEpInCurrentSeason) {
+                val nextEpEntity = currentSeasonEps.find { it.episodeNumber == currentEpisodeNum + 1 }
+                return NextEpisodeTarget(
+                    seasonNumber = currentSeasonNum,
+                    episodeNumber = currentEpisodeNum + 1,
+                    title = nextEpEntity?.title
+                )
+            }
+            
+            // Check if there is a next season
+            val totalSeasons = media?.seasonsCount ?: currentSeasonNum
+            if (currentSeasonNum < totalSeasons) {
+                return NextEpisodeTarget(
+                    seasonNumber = currentSeasonNum + 1,
+                    episodeNumber = 1,
+                    title = "T${currentSeasonNum + 1} E1"
+                )
+            }
+            
+            // Last episode of last season -> No next episode exists
+            return null
+        } else {
+            // Fallback if episode list isn't populated in memory yet
+            val totalSeasons = media?.seasonsCount ?: 1
+            val nextEpNumber = currentEpisodeNum + 1
+            
+            if (currentSeasonNum < totalSeasons) {
+                return NextEpisodeTarget(
+                    seasonNumber = currentSeasonNum,
+                    episodeNumber = nextEpNumber
+                )
+            } else if (currentSeasonNum == totalSeasons) {
+                return NextEpisodeTarget(
+                    seasonNumber = currentSeasonNum,
+                    episodeNumber = nextEpNumber
+                )
+            }
+            return null
+        }
+    }
+
     // Recommendations (similar media)
     val recommendations = remember(allMediaList, tmdbId) {
         allMediaList.filter { it.tmdbId != tmdbId }.take(10)
@@ -412,11 +636,8 @@ fun PlayerScreen(
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val screenWidthDp = configuration.screenWidthDp
     val screenHeightDp = configuration.screenHeightDp
-    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-    val playerHeight = remember(screenHeightDp, screenWidthDp, isLandscape) {
-        if (isLandscape) {
-            (screenHeightDp * 0.70f).coerceIn(200f, 320f).dp
-        } else if (screenWidthDp >= 600) {
+    val playerHeight = remember(screenHeightDp, screenWidthDp) {
+        if (screenWidthDp >= 600) {
             (screenHeightDp * 0.50f).coerceIn(380f, 560f).dp
         } else {
             // Mobile: significantly increased height downward, occupying a large, cinematic portion of the screen (~46%)
@@ -431,12 +652,79 @@ fun PlayerScreen(
         }
     }
 
+    // --- PROTECTION: RESTRICTED ACCESS FOR KIDS PROFILE ---
+    if (isAccessRestricted || (activeProfile != null && activeProfile!!.isKidsProfile && media != null && !com.example.util.ContentAccessManager.canProfileAccessContent(activeProfile, media!!))) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(DarkBackground)
+                .testTag("kids_restricted_player_screen"),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(32.dp)
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = BrandRed.copy(alpha = 0.12f),
+                    modifier = Modifier.size(96.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Bloqueado",
+                            tint = BrandRed,
+                            modifier = Modifier.size(44.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = "CONTEÚDO NÃO DISPONÍVEL",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Este filme ou série não está disponível no perfil infantil.",
+                    color = TextSecondary,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(28.dp))
+
+                Button(
+                    onClick = onNavigateBack,
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text(
+                        text = "Voltar ao catálogo",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+        return
+    }
+
     // --- PROFESSIONAL STREAMING PLAYER SCREEN LAYOUT ---
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(DarkBackground)
-            .testTag("clean_playmoz_player_screen")
+            .testTag("clean_player_screen")
     ) {
         Column(
             modifier = Modifier.fillMaxSize()
@@ -452,19 +740,15 @@ fun PlayerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Surface(
-                        color = if (isLocalDownloadAvailable) Color(0xFF065F46) else BrandRed,
+                        color = accentColor,
                         shape = RoundedCornerShape(4.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
-                            if (isLocalDownloadAvailable) {
-                                Icon(Icons.Default.DownloadDone, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
-                                Spacer(modifier = Modifier.width(3.dp))
-                            }
                             Text(
-                                text = if (isLocalDownloadAvailable) "OFFLINE" else "RONYCINE",
+                                text = "RONYCINE",
                                 color = Color.White,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Black
@@ -609,43 +893,103 @@ fun PlayerScreen(
                             title = media?.title ?: "RONYCINE",
                             isFullscreen = isFullscreen,
                             autoplayEnabled = autoplayEnabled,
+                            initialPositionSeconds = initialResumePosition,
                             onToggleFullscreen = {
                                 isFullscreen = !isFullscreen
                                 showFullscreenControls = true
                                 android.util.Log.i("RONYCINE_PLAYER", "PLAYER_FULLSCREEN: changed isFullscreen=$isFullscreen")
                             },
                             onAudioSourceChange = { 
+                                val mode = it.name.lowercase()
+                                android.util.Log.i("RONYCINE_DIAG", "[AUDIO_TRACK_SELECTED] Usuário alterou áudio para: $mode")
+                                android.util.Log.i("RONYCINE_DIAG", "[LANGUAGE_CHANGED] Nova preferência salva: $mode")
+                                
+                                viewModel.setPreferredPlayerLanguage(mode)
                                 selectedAudioSource = it 
                                 fallbackSourceIndex = 0 // Reset fallback index on manual language change
                                 playerLoadId++
                             },
                             onPlaybackProgress = { currentTime, duration, event ->
-                                if (isValidId && duration > 0) {
-                                    val progress = (currentTime / duration).toFloat().coerceIn(0f, 1f)
-                                    viewModel.saveWatchProgress(
-                                        tmdbId = tmdbId,
-                                        mediaType = mediaType,
-                                        title = media?.title ?: "Conteúdo RONYCINE",
-                                        posterPath = media?.posterPath,
-                                        seasonNumber = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
-                                        episodeNumber = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
-                                        progressPercent = progress,
-                                        positionMs = (currentTime * 1000).toLong(),
-                                        totalDurationMs = (duration * 1000).toLong()
-                                    )
-                                }
-                            },
+                                if (isValidId && duration > 0 && !duration.isNaN() && !duration.isInfinite()) {
+                                    if (currentVideoDuration == 0.0) {
+                                        android.util.Log.i("RONYCINE_DIAG", "[VIDEO_METADATA_LOADED] Duração do vídeo: $duration")
+                                        android.util.Log.i("RONYCINE_DIAG", "[VIDEO_CAN_PLAY] Player pronto para reprodução.")
+                                    }
+                                    if (currentVideoPosition == 0.0 && currentTime > 0.1) {
+                                        android.util.Log.i("RONYCINE_DIAG", "[PLAYBACK_STARTED] Reprodução iniciada em: $currentTime")
+                                    }
+
+                                    currentVideoDuration = duration
+                                    currentVideoPosition = currentTime
+                                    
+                                    if (event == "ended" || event == "completed") {
+                                        persistProgress(duration, duration, true)
+                                    } else if (event == "pause") {
+                                        persistProgress(currentTime, duration, true)
+                                    } else {
+                                        persistProgress(currentTime, duration, false)
+                                    }
+
+                                    // REGRA PRINCIPAL: Botão Próximo Episódio nos últimos 2 minutos (120s)
+                                    if (mediaType == "tv" || mediaType == "serie") {
+                                        val timeRemaining = duration - currentTime
+                                         
+                                         if (timeRemaining <= 120.0 && timeRemaining >= 0.0) {
+                                             val target = nextEpisodeTarget ?: computeNextEpisodeTarget()
+                                             if (target != null) {
+                                                 nextEpisodeTarget = target
+                                                 showNextEpisodeButton = true
+                                                 remainingSecondsUntilEnd = timeRemaining.toInt()
+                                                 android.util.Log.d("RONYCINE_PLAYER", "SHOW_NEXT_BUTTON: remainingTime=${timeRemaining}s <= 120s, target=S${target.seasonNumber}E${target.episodeNumber}")
+                                             } else {
+                                                 showNextEpisodeButton = false
+                                             }
+                                         } else if (timeRemaining > 125.0) {
+                                             showNextEpisodeButton = false
+                                         }
+                                     }
+                                 }
+
+                                 if (event == "ended" || event == "completed") {
+                                     android.util.Log.i("RONYCINE_PLAYER", "ON_PLAYER_ENDED: mediaType=$mediaType, S$currentSeasonNum E$currentEpisodeNum")
+                                     if (mediaType == "tv" || mediaType == "serie") {
+                                         val target = nextEpisodeTarget ?: computeNextEpisodeTarget()
+                                         if (target != null) {
+                                             nextEpisodeTarget = target
+                                             showNextEpisodeButton = true // Mantém botão visível ao encerrar
+                                         }
+                                     }
+                                 }
+                             },
                             onTryAgain = {
-                                // Logic for fallback to next source
+                                playerLoadId++
+                            },
+                            onTryAnotherPlayer = {
                                 val audioLabel = if (selectedAudioSource == EmbedAudioSource.DUBLADO) "Dublado" else "Legendado"
-                                val compatibleSourcesCount = playerSources.count { it.enabled && it.language.equals(audioLabel, ignoreCase = true) }
+                                val compatibleSources = playerSources.filter { 
+                                    it.enabled && 
+                                    it.language.equals(audioLabel, ignoreCase = true) && 
+                                    !it.id.equals("r2", ignoreCase = true) 
+                                }.sortedBy { it.priority }
                                 
-                                if (fallbackSourceIndex + 1 < compatibleSourcesCount) {
-                                    fallbackSourceIndex++
-                                    android.util.Log.i("RONYCINE_PLAYER", "PLAYER_FALLBACK: Trying next source index=$fallbackSourceIndex")
+                                val currentSourceId = selectedPlayerSourceId ?: compatibleSources.firstOrNull()?.id
+                                if (currentSourceId != null) {
+                                    attemptedPlayerIds = attemptedPlayerIds + currentSourceId
+                                }
+                                
+                                val nextUnattempted = compatibleSources.firstOrNull { !attemptedPlayerIds.contains(it.id) }
+                                if (nextUnattempted != null) {
+                                    selectedPlayerSourceId = nextUnattempted.id
+                                    android.util.Log.i("RONYCINE_DIAG", "PLAYER_SWITCH: Mudando para provedor ${nextUnattempted.name} (${nextUnattempted.id})")
+                                    android.widget.Toast.makeText(context, "Alternando para ${nextUnattempted.name}...", android.widget.Toast.LENGTH_SHORT).show()
                                 } else {
-                                    // Loop back or just retry current
-                                    fallbackSourceIndex = 0
+                                    // NO AUTOMATIC SWITCH TO LEGENDADO
+                                    // If we are here, all sources for the SELECTED language failed.
+                                    android.util.Log.e("RONYCINE_DIAG", "PLAYER_FAILURE: Todas as fontes para $audioLabel foram esgotadas.")
+                                    android.widget.Toast.makeText(context, "Não foi possível carregar fontes ${audioLabel.lowercase()}s. Tente novamente ou escolha legendado manualmente.", android.widget.Toast.LENGTH_LONG).show()
+                                    
+                                    // Optional: We can reset attemptedPlayerIds to allow the user to try again with the same sources
+                                    attemptedPlayerIds = emptySet()
                                 }
                                 playerLoadId++
                             },
@@ -658,6 +1002,67 @@ fun PlayerScreen(
                             playerLoadId = playerLoadId,
                             modifier = Modifier.fillMaxSize()
                         )
+                    }
+                }
+
+                // NEXT EPISODE BUTTON - Pequeno e Flutuante (Canto inferior direito)
+                val currentTarget = nextEpisodeTarget
+                if (!showAgeGate && showNextEpisodeButton && currentTarget != null && (mediaType == "tv" || mediaType == "serie")) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .testTag("next_episode_button_container"),
+                        contentAlignment = Alignment.BottomEnd
+                    ) {
+                        Surface(
+                            onClick = {
+                                showNextEpisodeButton = false
+                                val target = nextEpisodeTarget ?: computeNextEpisodeTarget()
+                                if (target != null) {
+                                    val nextS = target.seasonNumber
+                                    val nextE = target.episodeNumber
+                                    if (nextS != currentSeasonNum) {
+                                        currentSeasonNum = nextS
+                                        viewModel.loadSeasonEpisodes(tmdbId, nextS)
+                                    }
+                                    currentEpisodeNum = nextE
+                                    nextEpisodeTarget = null
+                                    playerLoadId++
+                                    android.util.Log.i("RONYCINE_PLAYER", "PLAY_NEXT_EPISODE_CLICK: Navigating to S${nextS} E${nextE}")
+                                }
+                            },
+                            color = Color.Black.copy(alpha = 0.85f),
+                            shape = RoundedCornerShape(20.dp),
+                            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.85f)),
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .padding(
+                                    end = 20.dp,
+                                    bottom = if (isFullscreen) 32.dp else 24.dp
+                                )
+                                .testTag("next_episode_mini_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "PRÓXIMO EP.",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.NavigateNext,
+                                    contentDescription = "Próximo Episódio",
+                                    tint = accentColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -695,11 +1100,17 @@ fun PlayerScreen(
 
                             val isDub = selectedAudioSource == EmbedAudioSource.DUBLADO
                             Surface(
-                                color = if (isDub) BrandRed else Color(0xFF14141A),
+                                color = if (isDub) accentColor else Color(0xFF14141A),
                                 shape = RoundedCornerShape(4.dp),
-                                border = BorderStroke(1.dp, if (isDub) BrandRed else Color(0xFF282834)),
+                                border = BorderStroke(1.dp, if (isDub) accentColor else Color(0xFF282834)),
                                 modifier = Modifier
-                                    .clickable { selectedAudioSource = EmbedAudioSource.DUBLADO }
+                                    .clickable { 
+                                        if (selectedAudioSource != EmbedAudioSource.DUBLADO) {
+                                            selectedAudioSource = EmbedAudioSource.DUBLADO
+                                            fallbackSourceIndex = 0
+                                            playerLoadId++
+                                        }
+                                    }
                                     .testTag("audio_dublado_chip")
                             ) {
                                 Row(
@@ -721,11 +1132,17 @@ fun PlayerScreen(
 
                             val isLeg = selectedAudioSource == EmbedAudioSource.LEGENDADO
                             Surface(
-                                color = if (isLeg) BrandRed else Color(0xFF14141A),
+                                color = if (isLeg) accentColor else Color(0xFF14141A),
                                 shape = RoundedCornerShape(4.dp),
-                                border = BorderStroke(1.dp, if (isLeg) BrandRed else Color(0xFF282834)),
+                                border = BorderStroke(1.dp, if (isLeg) accentColor else Color(0xFF282834)),
                                 modifier = Modifier
-                                    .clickable { selectedAudioSource = EmbedAudioSource.LEGENDADO }
+                                    .clickable { 
+                                        if (selectedAudioSource != EmbedAudioSource.LEGENDADO) {
+                                            selectedAudioSource = EmbedAudioSource.LEGENDADO
+                                            fallbackSourceIndex = 0
+                                            playerLoadId++
+                                        }
+                                    }
                                     .testTag("audio_legendado_chip")
                             ) {
                                 Row(
@@ -744,45 +1161,137 @@ fun PlayerScreen(
                                     )
                                 }
                             }
+
+                            // Server/Source selector when multiple Dublado sources are available
+                            val dubSources = remember(playerSources) {
+                                playerSources.filter { it.enabled && it.language.equals("Dublado", ignoreCase = true) }.sortedBy { it.priority }
+                            }
+                            if (isDub && dubSources.size > 1) {
+                                var showServerMenu by remember { mutableStateOf(false) }
+                                val effectiveCurrentSourceId = selectedPlayerSourceId 
+                                    ?: (if (dubSources.any { it.id == playerConfig.defaultPlayerId }) playerConfig.defaultPlayerId else dubSources.firstOrNull()?.id)
+                                val activeSourceName = dubSources.find { it.id == effectiveCurrentSourceId }?.name 
+                                    ?: "Servidor"
+                                
+                                Box {
+                                    Surface(
+                                        color = Color(0xFF1C1C26),
+                                        shape = RoundedCornerShape(4.dp),
+                                        border = BorderStroke(1.dp, Color(0xFF323246)),
+                                        modifier = Modifier
+                                            .clickable { showServerMenu = true }
+                                            .testTag("player_source_selector_chip")
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(
+                                                text = activeSourceName,
+                                                color = Color(0xFFE0E0E8),
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            Icon(
+                                                Icons.Default.ArrowDropDown,
+                                                contentDescription = "Trocar servidor",
+                                                tint = Color.White.copy(alpha = 0.7f),
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = showServerMenu,
+                                        onDismissRequest = { showServerMenu = false },
+                                        modifier = Modifier.background(Color(0xFF181822))
+                                    ) {
+                                        dubSources.forEach { src ->
+                                            val isCurrent = (src.id == effectiveCurrentSourceId)
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(
+                                                            text = src.name,
+                                                            color = if (isCurrent) accentColor else Color.White,
+                                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                                            fontSize = 12.sp
+                                                        )
+                                                        if (isCurrent) {
+                                                            Spacer(modifier = Modifier.width(6.dp))
+                                                            Icon(
+                                                                Icons.Default.Check,
+                                                                contentDescription = null,
+                                                                tint = accentColor,
+                                                                modifier = Modifier.size(14.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                },
+                                                onClick = {
+                                                    selectedPlayerSourceId = src.id
+                                                    fallbackSourceIndex = 0
+                                                    playerLoadId++
+                                                    showServerMenu = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
 
-                        // Right utilities: Download & Fullscreen
+                        // Right utilities: Fullscreen
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
+                            // [ ↓ Baixar ] (NOVO)
                             IconButton(
                                 onClick = {
-                                    if (media != null) {
-                                        if (currentDownload?.status == DownloadEntity.STATUS_DOWNLOADING) {
-                                            viewModel.pauseDownload(currentDownload!!.id)
-                                        } else if (currentDownload?.status == DownloadEntity.STATUS_PAUSED) {
-                                            viewModel.resumeDownload(currentDownload!!.id)
-                                        } else if (currentDownload?.status == DownloadEntity.STATUS_COMPLETED) {
-                                            // Already downloaded
-                                        } else {
-                                            showDownloadOptionsSheet = true
-                                        }
+                                    val calculatedTitle = if (mediaType == "tv" || mediaType == "serie") {
+                                        "${media?.title} S${currentSeasonNum}E${currentEpisodeNum}"
+                                    } else {
+                                        media?.title
                                     }
+                                    viewModel.requireAuthenticationForDownload(
+                                        isAuthenticated = currentUser != null,
+                                        pendingIntent = PendingDownloadIntent(
+                                            type = mediaType,
+                                            tmdbId = tmdbId,
+                                            season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
+                                            episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
+                                            mediaTitle = calculatedTitle,
+                                            isPlayer = true
+                                        ),
+                                        onNavigateToLogin = onNavigateToLogin,
+                                        onAlreadyAuthenticated = {
+                                            if (media != null) {
+                                                viewModel.resolveDownload(
+                                                    type = mediaType,
+                                                    tmdbId = tmdbId,
+                                                    season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
+                                                    episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
+                                                    mediaTitle = calculatedTitle
+                                                )
+                                            }
+                                        }
+                                    )
                                 },
                                 modifier = Modifier
                                     .size(32.dp)
                                     .testTag("player_control_download")
                             ) {
-                                when (currentDownload?.status) {
-                                    DownloadEntity.STATUS_DOWNLOADING -> {
-                                        CircularProgressIndicator(
-                                            color = Color(0xFF38BDF8),
-                                            strokeWidth = 2.dp,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    DownloadEntity.STATUS_COMPLETED -> {
-                                        Icon(Icons.Default.DownloadDone, contentDescription = "Offline", tint = Color(0xFF34D399), modifier = Modifier.size(18.dp))
-                                    }
-                                    else -> {
-                                        Icon(Icons.Default.Download, contentDescription = "Baixar", tint = Color(0xFFAAAAAA), modifier = Modifier.size(18.dp))
-                                    }
+                                val isResolvingThis = downloadState is DownloadState.Resolving && 
+                                    (downloadState as DownloadState.Resolving).tmdbId == tmdbId && 
+                                    (downloadState as DownloadState.Resolving).season == (if (mediaType == "tv") currentSeasonNum else null) &&
+                                    (downloadState as DownloadState.Resolving).episode == (if (mediaType == "tv") currentEpisodeNum else null)
+                                
+                                if (isResolvingThis) {
+                                    RonycineSmileLoader(color = Color(0xFF38BDF8), size = 20.dp)
+                                } else {
+                                    Icon(Icons.Default.Download, contentDescription = "Baixar", tint = Color(0xFFAAAAAA), modifier = Modifier.size(18.dp))
                                 }
                             }
 
@@ -865,9 +1374,9 @@ fun PlayerScreen(
                             }
 
                             Surface(
-                                color = BrandRed.copy(alpha = 0.15f),
+                                color = accentColor.copy(alpha = 0.15f),
                                 shape = RoundedCornerShape(4.dp),
-                                border = BorderStroke(1.dp, BrandRed.copy(alpha = 0.4f))
+                                border = BorderStroke(1.dp, accentColor.copy(alpha = 0.4f))
                             ) {
                                 Text(
                                     text = "4K",
@@ -921,13 +1430,22 @@ fun PlayerScreen(
                         ) {
                             // Minha Lista
                             OutlinedButton(
-                                onClick = { viewModel.toggleMyList(tmdbId, mediaType) },
+                                onClick = { 
+                                    viewModel.requireAuthentication(
+                                        isAuthenticated = currentUser != null,
+                                        onNavigateToLogin = onNavigateToLogin,
+                                        pendingAction = com.example.ui.viewmodel.PendingAction.ToggleMyList(tmdbId, mediaType),
+                                        onAlreadyAuthenticated = {
+                                            viewModel.toggleMyList(tmdbId, mediaType)
+                                        }
+                                    )
+                                },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (isInMyList) BrandRed.copy(alpha = 0.12f) else Color(0xFF14141A),
-                                    contentColor = if (isInMyList) BrandRed else Color.White
+                                    containerColor = if (isInMyList) accentColor.copy(alpha = 0.12f) else Color(0xFF14141A),
+                                    contentColor = if (isInMyList) accentColor else Color.White
                                 ),
-                                border = BorderStroke(1.dp, if (isInMyList) BrandRed else Color(0xFF2A2A36)),
+                                border = BorderStroke(1.dp, if (isInMyList) accentColor else Color(0xFF2A2A36)),
                                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                                 modifier = Modifier
                                     .weight(1f)
@@ -937,7 +1455,7 @@ fun PlayerScreen(
                                 Icon(
                                     imageVector = if (isInMyList) Icons.Default.Check else Icons.Default.Add,
                                     contentDescription = null,
-                                    tint = if (isInMyList) BrandRed else Color.White,
+                                    tint = if (isInMyList) accentColor else Color.White,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
@@ -952,15 +1470,22 @@ fun PlayerScreen(
                             // Gostei
                             OutlinedButton(
                                 onClick = {
-                                    isLiked = !isLiked
-                                    if (isLiked) isDisliked = false
+                                    viewModel.requireAuthentication(
+                                        isAuthenticated = currentUser != null,
+                                        onNavigateToLogin = onNavigateToLogin,
+                                        pendingAction = com.example.ui.viewmodel.PendingAction.Reaction(tmdbId, mediaType, isLike = true),
+                                        onAlreadyAuthenticated = {
+                                            isLiked = !isLiked
+                                            if (isLiked) isDisliked = false
+                                        }
+                                    )
                                 },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (isLiked) BrandRed.copy(alpha = 0.12f) else Color(0xFF14141A),
-                                    contentColor = if (isLiked) BrandRed else Color.White
+                                    containerColor = if (isLiked) accentColor.copy(alpha = 0.12f) else Color(0xFF14141A),
+                                    contentColor = if (isLiked) accentColor else Color.White
                                 ),
-                                border = BorderStroke(1.dp, if (isLiked) BrandRed else Color(0xFF2A2A36)),
+                                border = BorderStroke(1.dp, if (isLiked) accentColor else Color(0xFF2A2A36)),
                                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                                 modifier = Modifier
                                     .weight(1f)
@@ -970,7 +1495,7 @@ fun PlayerScreen(
                                 Icon(
                                     imageVector = Icons.Default.ThumbUp,
                                     contentDescription = null,
-                                    tint = if (isLiked) BrandRed else Color.White,
+                                    tint = if (isLiked) accentColor else Color.White,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
@@ -980,15 +1505,22 @@ fun PlayerScreen(
                             // Não gostei
                             OutlinedButton(
                                 onClick = {
-                                    isDisliked = !isDisliked
-                                    if (isDisliked) isLiked = false
+                                    viewModel.requireAuthentication(
+                                        isAuthenticated = currentUser != null,
+                                        onNavigateToLogin = onNavigateToLogin,
+                                        pendingAction = com.example.ui.viewmodel.PendingAction.Reaction(tmdbId, mediaType, isLike = false),
+                                        onAlreadyAuthenticated = {
+                                            isDisliked = !isDisliked
+                                            if (isDisliked) isLiked = false
+                                        }
+                                    )
                                 },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (isDisliked) BrandRed.copy(alpha = 0.12f) else Color(0xFF14141A),
-                                    contentColor = if (isDisliked) BrandRed else Color.White
+                                    containerColor = if (isDisliked) accentColor.copy(alpha = 0.12f) else Color(0xFF14141A),
+                                    contentColor = if (isDisliked) accentColor else Color.White
                                 ),
-                                border = BorderStroke(1.dp, if (isDisliked) BrandRed else Color(0xFF2A2A36)),
+                                border = BorderStroke(1.dp, if (isDisliked) accentColor else Color(0xFF2A2A36)),
                                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                                 modifier = Modifier
                                     .weight(1f)
@@ -998,7 +1530,7 @@ fun PlayerScreen(
                                 Icon(
                                     imageVector = Icons.Default.ThumbDown,
                                     contentDescription = null,
-                                    tint = if (isDisliked) BrandRed else Color.White,
+                                    tint = if (isDisliked) accentColor else Color.White,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(3.dp))
@@ -1007,17 +1539,7 @@ fun PlayerScreen(
 
                             // Partilhar
                             OutlinedButton(
-                                onClick = {
-                                    val sendIntent = Intent().apply {
-                                        action = Intent.ACTION_SEND
-                                        putExtra(Intent.EXTRA_TEXT, "Assista ${media?.title ?: "este conteúdo"} no RONYCINE!")
-                                        type = "text/plain"
-                                    }
-                                    val shareIntent = Intent.createChooser(sendIntent, null)
-                                    try {
-                                        context.startActivity(shareIntent)
-                                    } catch (_: Exception) {}
-                                },
+                                onClick = { showShareSheet = true },
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.outlinedButtonColors(
                                     containerColor = Color(0xFF14141A),
@@ -1066,7 +1588,7 @@ fun PlayerScreen(
                             ) {
                                 Text(
                                     text = if (isSynopsisExpanded) "Mostrar menos ↑" else "Mostrar mais ↓",
-                                    color = BrandRed,
+                                    color = accentColor,
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1119,13 +1641,13 @@ fun PlayerScreen(
                                             )
                                         }
                                         Surface(
-                                            color = BrandRed.copy(alpha = 0.2f),
+                                            color = accentColor.copy(alpha = 0.2f),
                                             shape = RoundedCornerShape(4.dp),
-                                            border = BorderStroke(1.dp, BrandRed.copy(alpha = 0.5f))
+                                            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.5f))
                                         ) {
                                             Text(
                                                 text = "T${currentSeasonNum}:E${currentEpisodeNum}",
-                                                color = BrandRed,
+                                                color = accentColor,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1157,9 +1679,9 @@ fun PlayerScreen(
                                 (1..totalSeasons).forEach { seasonNum ->
                                     val isSel = selectedSeason == seasonNum
                                     Surface(
-                                        color = if (isSel) BrandRed else Color(0xFF14141A),
+                                        color = if (isSel) accentColor else Color(0xFF14141A),
                                         shape = RoundedCornerShape(6.dp),
-                                        border = BorderStroke(1.dp, if (isSel) BrandRed else Color(0xFF2E2E38)),
+                                        border = BorderStroke(1.dp, if (isSel) accentColor else Color(0xFF2E2E38)),
                                         modifier = Modifier
                                             .clickable { viewModel.loadSeasonEpisodes(tmdbId, seasonNum) }
                                             .testTag("season_chip_$seasonNum")
@@ -1196,12 +1718,12 @@ fun PlayerScreen(
                                                     val epNumberFormatted = String.format("%02d", ep.episodeNumber)
                                                     Card(
                                                         colors = CardDefaults.cardColors(
-                                                            containerColor = if (isCurrentEp) BrandRed.copy(alpha = 0.15f) else DarkSurface
+                                                            containerColor = if (isCurrentEp) accentColor.copy(alpha = 0.15f) else DarkSurface
                                                         ),
                                                         shape = RoundedCornerShape(8.dp),
                                                         border = androidx.compose.foundation.BorderStroke(
                                                             1.dp,
-                                                            if (isCurrentEp) BrandRed else CardBorder
+                                                            if (isCurrentEp) accentColor else CardBorder
                                                         ),
                                                         modifier = Modifier
                                                             .fillMaxWidth()
@@ -1222,8 +1744,8 @@ fun PlayerScreen(
                                                                 modifier = Modifier
                                                                     .size(32.dp)
                                                                     .clip(RoundedCornerShape(4.dp))
-                                                                    .background(if (isCurrentEp) BrandRed else Color(0xFF222222))
-                                                                    .border(1.dp, if (isCurrentEp) BrandRed else CardBorder, RoundedCornerShape(4.dp)),
+                                                                    .background(if (isCurrentEp) accentColor else Color(0xFF222222))
+                                                                    .border(1.dp, if (isCurrentEp) accentColor else CardBorder, RoundedCornerShape(4.dp)),
                                                                 contentAlignment = Alignment.Center
                                                             ) {
                                                                 Text(
@@ -1251,7 +1773,7 @@ fun PlayerScreen(
                                                                 val durationStr = if (ep.duration.isNotBlank()) ep.duration else "45 min"
                                                                 Text(
                                                                     text = "S${String.format("%02d", ep.seasonNumber)} · $durationStr",
-                                                                    color = if (isCurrentEp) BrandRed else Color.Gray,
+                                                                    color = if (isCurrentEp) accentColor else Color.Gray,
                                                                     fontSize = 9.sp,
                                                                     fontWeight = FontWeight.Medium,
                                                                     maxLines = 1
@@ -1368,24 +1890,4 @@ fun PlayerScreen(
     }
 }
 
-    // Modal de opções de download (Interno ou Externo com 1DM, ADM, Chooser)
-    if (showDownloadOptionsSheet && media != null) {
-        val currentEp = if (mediaType == "tv" || mediaType == "serie") {
-            episodes.firstOrNull { it.seasonNumber == currentSeasonNum && it.episodeNumber == currentEpisodeNum }
-        } else null
-
-        DownloadOptionsBottomSheet(
-            media = media!!,
-            episode = currentEp,
-            customUrl = currentEp?.videoUrl,
-            onDismiss = { showDownloadOptionsSheet = false },
-            onStartInternalDownload = { m, ep, url ->
-                if (ep != null) {
-                    viewModel.startEpisodeDownload(m, ep, url)
-                } else {
-                    viewModel.startMovieDownload(m, url)
-                }
-            }
-        )
-    }
 }

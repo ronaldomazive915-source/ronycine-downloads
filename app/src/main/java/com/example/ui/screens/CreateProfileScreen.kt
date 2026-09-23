@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -61,6 +62,9 @@ fun CreateProfileScreen(
     val coroutineScope = rememberCoroutineScope()
 
     var name by remember { mutableStateOf(profileToEdit?.name ?: "") }
+    var isKidsProfile by remember { mutableStateOf(profileToEdit?.isKidsProfile ?: false) }
+    var pin by remember { mutableStateOf("") }
+    var hasPin by remember { mutableStateOf(profileToEdit?.pinHash != null) }
     var localErrorMsg by remember { mutableStateOf<String?>(null) }
     var selectedPresetUrl by remember { mutableStateOf<String?>(profileToEdit?.avatarUrl) }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -319,6 +323,187 @@ fun CreateProfileScreen(
                     )
                 }
 
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Kids Mode Toggle - Professional & Clean Design
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            if (isKidsProfile) Color(0xFF0F2338) else DarkSurface.copy(alpha = 0.5f)
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isKidsProfile) Color(0xFF38BDF8).copy(alpha = 0.5f) else Color.White.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(14.dp)
+                        )
+                        .clickable(enabled = profileOpState !is ProfileOpState.Loading) { 
+                            isKidsProfile = !isKidsProfile 
+                        }
+                        .padding(16.dp)
+                        .testTag("kids_profile_toggle_card")
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "🧒",
+                                fontSize = 20.sp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Modo infantil",
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Clear ON/OFF Switch with feedback
+                        Switch(
+                            checked = isKidsProfile,
+                            onCheckedChange = { isKidsProfile = it },
+                            enabled = profileOpState !is ProfileOpState.Loading,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = Color(0xFF0284C7),
+                                uncheckedThumbColor = Color.LightGray,
+                                uncheckedTrackColor = DarkSurface
+                            ),
+                            modifier = Modifier.testTag("kids_profile_switch")
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "Mostrar somente conteúdos apropriados para crianças.",
+                        color = TextSecondary,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Dynamic status feedback indicator
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (isKidsProfile) Color(0xFF38BDF8) else Color.Gray)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = if (isKidsProfile) "Modo infantil ativado" else "Modo infantil desativado",
+                            color = if (isKidsProfile) Color(0xFF38BDF8) else TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = if (isKidsProfile) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // PIN Toggle & Input
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkSurface.copy(alpha = 0.5f))
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Proteger com PIN",
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Exigir senha de 4 dígitos para acessar este perfil.",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Switch(
+                            checked = hasPin,
+                            onCheckedChange = { 
+                                hasPin = it 
+                                if (!it) pin = ""
+                            },
+                            enabled = profileOpState !is ProfileOpState.Loading,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = BrandRed,
+                                uncheckedThumbColor = Color.Gray,
+                                uncheckedTrackColor = DarkSurface
+                            )
+                        )
+                    }
+
+                    AnimatedVisibility(
+                        visible = hasPin,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            OutlinedTextField(
+                                value = pin,
+                                onValueChange = { 
+                                    if (it.length <= 4 && it.all { char -> char.isDigit() }) {
+                                        pin = it
+                                        localErrorMsg = null
+                                    }
+                                },
+                                label = { Text("PIN de 4 dígitos", color = Color.Gray) },
+                                modifier = Modifier.fillMaxWidth(),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword
+                                ),
+                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = Color.White,
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = BrandRed,
+                                    unfocusedBorderColor = Color(0xFF33333C),
+                                    focusedLabelColor = BrandRed,
+                                    unfocusedLabelColor = Color.Gray,
+                                    cursorColor = BrandRed,
+                                    focusedContainerColor = DarkBackground.copy(alpha = 0.3f),
+                                    unfocusedContainerColor = DarkBackground.copy(alpha = 0.3f)
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                singleLine = true,
+                                enabled = profileOpState !is ProfileOpState.Loading
+                            )
+                            if (isEditing && profileToEdit?.pinHash != null && pin.isEmpty()) {
+                                Text(
+                                    text = "Deixe em branco para manter o PIN atual.",
+                                    color = TextSecondary,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Error Message Handling (Local or OpState)
                 val activeError = localErrorMsg ?: (profileOpState as? ProfileOpState.Error)?.message
                 if (activeError != null) {
@@ -375,17 +560,30 @@ fun CreateProfileScreen(
                         localErrorMsg = null
 
                         if (isEditing && profileToEdit != null) {
+                            if (hasPin && pin.isNotEmpty() && pin.length < 4) {
+                                localErrorMsg = "O PIN deve ter 4 dígitos."
+                                return@Button
+                            }
                             authViewModel.updateProfile(
                                 profile = profileToEdit,
                                 newName = trimmed,
                                 presetUrl = selectedPresetUrl,
-                                newImage = selectedImageBytes
+                                newImage = selectedImageBytes,
+                                isKidsProfile = isKidsProfile,
+                                pin = if (hasPin && pin.length == 4) pin else null,
+                                clearPin = !hasPin
                             )
                         } else {
+                            if (hasPin && pin.length < 4) {
+                                localErrorMsg = "O PIN deve ter 4 dígitos."
+                                return@Button
+                            }
                             authViewModel.createProfile(
                                 name = trimmed,
                                 presetUrl = selectedPresetUrl,
-                                image = selectedImageBytes
+                                image = selectedImageBytes,
+                                isKidsProfile = isKidsProfile,
+                                pin = if (hasPin && pin.length == 4) pin else null
                             )
                         }
                     },

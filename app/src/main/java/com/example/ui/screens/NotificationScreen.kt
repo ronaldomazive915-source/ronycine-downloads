@@ -44,6 +44,7 @@ fun NotificationScreen(
     onNavigateBack: () -> Unit,
     onNavigateToDetail: (Int, String) -> Unit,
     onNavigateToLiveTv: () -> Unit,
+    onNavigateToUpdateScreen: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val notifications by viewModel.allNotifications.collectAsState()
@@ -224,23 +225,9 @@ fun NotificationScreen(
                         onAction = { actionUrl ->
                             viewModel.markNotificationAsRead(notif.id)
                             val isUpdateType = notif.type == "APP_UPDATE" || notif.type == "ATUALIZACAO"
-                            val isApkUrl = actionUrl != null && (actionUrl.endsWith(".apk") || actionUrl.contains("/updates/") || actionUrl.contains("appVersions") || actionUrl.contains(".apk?") || actionUrl == "update")
+                            val isApkUrl = actionUrl != null && (actionUrl.endsWith(".apk") || actionUrl.contains("/updates/") || actionUrl.contains("appVersions") || actionUrl.contains(".apk?") || actionUrl == "update" || actionUrl == "update_screen")
                             if (isUpdateType || isApkUrl) {
-                                val active = viewModel.activeAppVersion.value
-                                val targetVer = if (active != null) {
-                                    active
-                                } else {
-                                    com.example.data.remote.AppVersionEntity(
-                                        id = "custom_${System.currentTimeMillis()}",
-                                        versionName = if (notif.title.contains("v")) notif.title.substringAfter("v").substringBefore(" ") else "Nova Versão",
-                                        versionCode = 10000,
-                                        apkUrl = if (actionUrl == "update") "" else (actionUrl ?: ""),
-                                        releaseNotes = notif.message,
-                                        published = true,
-                                        status = "PUBLISHED"
-                                    )
-                                }
-                                viewModel.triggerForceUpdateDialog(targetVer)
+                                onNavigateToUpdateScreen()
                             } else {
                                 handleNotificationAction(actionUrl, onNavigateToDetail, onNavigateToLiveTv)
                             }

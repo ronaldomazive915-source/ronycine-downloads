@@ -16,7 +16,7 @@ data class FeaturedMediaEntity(
     val mediaTmdbId: Int,
     val mediaType: String, // "movie" or "tv"
     val trailerUrl: String = "",
-    val autoPlayTrailer: Boolean = true,
+    val autoPlayTrailer: Boolean = false,
     val displayOrder: Int = 0,
     val isActive: Boolean = true,
     val createdAt: Long = System.currentTimeMillis(),

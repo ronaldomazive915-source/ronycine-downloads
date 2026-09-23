@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
@@ -321,10 +322,9 @@ fun ImageCropDialog(
                             .testTag("confirm_crop_button")
                     ) {
                         if (isProcessing) {
-                            CircularProgressIndicator(
+                            RonycineSmileLoader(
                                 color = Color.White,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(20.dp)
+                                size = 20.dp
                             )
                         } else {
                             Row(

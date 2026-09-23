@@ -38,6 +38,12 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+
+import com.example.ui.theme.RatingYellow
+
 @Composable
 fun AdminDashboardScreen(
     adminViewModel: AdminViewModel,
@@ -53,6 +59,7 @@ fun AdminDashboardScreen(
     val syncMessage by adminViewModel.catalogActionMessage.collectAsState()
     val syncStatus by adminViewModel.syncStatus.collectAsState()
     val auditLogs by adminViewModel.remoteAuditLogs.collectAsState()
+    val currentUser by adminViewModel.currentUser.collectAsState()
 
     val scope = rememberCoroutineScope()
     var isManualSyncing by remember { mutableStateOf(false) }
@@ -186,6 +193,7 @@ fun AdminDashboardScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val canViewCatalog = currentUser?.hasPermission("catalog") == true
                     CompactMetricCard(
                         title = "FILMES",
                         value = movieCount.toString(),
@@ -193,7 +201,7 @@ fun AdminDashboardScreen(
                         icon = Icons.Default.Movie,
                         iconTint = BrandRed,
                         modifier = Modifier.weight(1f),
-                        onClick = { onNavigateSection(AdminSection.CATALOGO) }
+                        onClick = { if (canViewCatalog) onNavigateSection(AdminSection.CATALOGO) }
                     )
                     CompactMetricCard(
                         title = "SÉRIES",
@@ -202,7 +210,7 @@ fun AdminDashboardScreen(
                         icon = Icons.Default.Tv,
                         iconTint = Color(0xFF3B82F6),
                         modifier = Modifier.weight(1f),
-                        onClick = { onNavigateSection(AdminSection.CATALOGO) }
+                        onClick = { if (canViewCatalog) onNavigateSection(AdminSection.CATALOGO) }
                     )
                     CompactMetricCard(
                         title = "EPISÓDIOS",
@@ -211,7 +219,7 @@ fun AdminDashboardScreen(
                         icon = Icons.Default.VideoLibrary,
                         iconTint = Color(0xFFA855F7),
                         modifier = Modifier.weight(1f),
-                        onClick = { onNavigateSection(AdminSection.CATALOGO) }
+                        onClick = { if (canViewCatalog) onNavigateSection(AdminSection.CATALOGO) }
                     )
                 }
 
@@ -220,6 +228,9 @@ fun AdminDashboardScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    val canViewUsers = currentUser?.hasPermission("users") == true
+                    val canViewDevices = currentUser?.hasPermission("dispositivos") == true
+                    
                     CompactMetricCard(
                         title = "USUÁRIOS",
                         value = totalUsers.toString(),
@@ -227,7 +238,7 @@ fun AdminDashboardScreen(
                         icon = Icons.Default.Group,
                         iconTint = Color(0xFFF59E0B),
                         modifier = Modifier.weight(1f),
-                        onClick = { onNavigateSection(AdminSection.USUARIOS) }
+                        onClick = { if (canViewUsers) onNavigateSection(AdminSection.USUARIOS) }
                     )
                     CompactMetricCard(
                         title = "DISPOSITIVOS",
@@ -236,7 +247,7 @@ fun AdminDashboardScreen(
                         icon = Icons.Default.Smartphone,
                         iconTint = Color(0xFF64748B),
                         modifier = Modifier.weight(1f),
-                        onClick = { onNavigateSection(AdminSection.DISPOSITIVOS) }
+                        onClick = { if (canViewDevices) onNavigateSection(AdminSection.DISPOSITIVOS) }
                     )
                     CompactMetricCard(
                         title = "ONLINE",
@@ -245,7 +256,7 @@ fun AdminDashboardScreen(
                         icon = Icons.Default.Circle,
                         iconTint = Color(0xFF10B981),
                         modifier = Modifier.weight(1f),
-                        onClick = { onNavigateSection(AdminSection.DISPOSITIVOS) }
+                        onClick = { if (canViewDevices) onNavigateSection(AdminSection.DISPOSITIVOS) }
                     )
                     CompactMetricCard(
                         title = "OFFLINE",
@@ -254,7 +265,7 @@ fun AdminDashboardScreen(
                         icon = Icons.Default.PowerSettingsNew,
                         iconTint = Color.Gray,
                         modifier = Modifier.weight(1f),
-                        onClick = { onNavigateSection(AdminSection.DISPOSITIVOS) }
+                        onClick = { if (canViewDevices) onNavigateSection(AdminSection.DISPOSITIVOS) }
                     )
                 }
             }
@@ -298,12 +309,14 @@ fun AdminDashboardScreen(
                         title = "+ IMPORTAR FILME",
                         icon = Icons.Default.Add,
                         modifier = Modifier.weight(1f),
+                        hasPermission = currentUser?.hasPermission("importFilme") == true,
                         onClick = { onNavigateSection(AdminSection.IMPORTACAO) }
                     )
                     QuickActionButton(
                         title = "+ IMPORTAR SÉRIE",
                         icon = Icons.Default.VideoCall,
                         modifier = Modifier.weight(1f),
+                        hasPermission = currentUser?.hasPermission("importSerie") == true,
                         onClick = { onNavigateSection(AdminSection.IMPORTACAO) }
                     )
                 }
@@ -316,6 +329,7 @@ fun AdminDashboardScreen(
                         title = "IMPORTAÇÃO EM MASSA",
                         icon = Icons.Default.CloudSync,
                         modifier = Modifier.weight(1f),
+                        hasPermission = currentUser?.hasPermission("importacaoMassa") == true,
                         onClick = { onNavigateSection(AdminSection.IMPORTACAO_MASSA) }
                     )
                     QuickActionButton(
@@ -323,6 +337,7 @@ fun AdminDashboardScreen(
                         icon = Icons.Default.Whatshot,
                         modifier = Modifier.weight(1f),
                         highlight = true,
+                        hasPermission = currentUser?.hasPermission("top10") == true,
                         onClick = { onNavigateSection(AdminSection.TOP_10) }
                     )
                 }
@@ -335,12 +350,14 @@ fun AdminDashboardScreen(
                         title = "DESTAQUES HOME",
                         icon = Icons.Default.Star,
                         modifier = Modifier.weight(1f),
+                        hasPermission = currentUser?.hasPermission("destaques") == true,
                         onClick = { onNavigateSection(AdminSection.DESTAQUES) }
                     )
                     QuickActionButton(
                         title = "CATÁLOGO COMPLETO",
                         icon = Icons.Default.Movie,
                         modifier = Modifier.weight(1f),
+                        hasPermission = currentUser?.hasPermission("catalog") == true,
                         onClick = { onNavigateSection(AdminSection.CATALOGO) }
                     )
                 }
@@ -353,6 +370,7 @@ fun AdminDashboardScreen(
                         title = "TV AO VIVO",
                         icon = Icons.Default.LiveTv,
                         modifier = Modifier.weight(1f),
+                        hasPermission = currentUser?.hasPermission("tvAoVivo") == true,
                         onClick = { onNavigateSection(AdminSection.TV_AO_VIVO) }
                     )
                     QuickActionButton(
@@ -362,6 +380,7 @@ fun AdminDashboardScreen(
                         containerColor = BrandRed,
                         contentColor = Color.White,
                         enabled = !isManualSyncing && !isSyncing,
+                        hasPermission = currentUser?.hasPermission("sincronizarCatalogo") == true,
                         onClick = {
                             if (!isManualSyncing && !isSyncing) {
                                 isManualSyncing = true
@@ -583,21 +602,40 @@ fun QuickActionButton(
     modifier: Modifier = Modifier,
     highlight: Boolean = false,
     enabled: Boolean = true,
+    hasPermission: Boolean = true,
     containerColor: Color = Color(0xFF1E1E24),
     contentColor: Color = Color.White,
     onClick: () -> Unit
 ) {
+    val finalEnabled = enabled && hasPermission
+    val finalContentColor = if (hasPermission) {
+        if (highlight) BrandRed else contentColor
+    } else {
+        Color.Gray.copy(alpha = 0.6f)
+    }
+
     Button(
-        onClick = onClick,
-        enabled = enabled,
+        onClick = { if (hasPermission) onClick() },
+        enabled = enabled, // Mantenho enabled original para o estado visual do botão, mas controlo o clique e cores
         shape = RoundedCornerShape(8.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (highlight) BrandRed.copy(alpha = 0.15f) else containerColor,
-            contentColor = if (highlight) BrandRed else contentColor,
+            containerColor = if (hasPermission) {
+                if (highlight) BrandRed.copy(alpha = 0.15f) else containerColor
+            } else {
+                Color(0xFF161616)
+            },
+            contentColor = finalContentColor,
             disabledContainerColor = Color(0xFF1A1A1A),
             disabledContentColor = Color.Gray
         ),
-        border = BorderStroke(1.dp, if (highlight) BrandRed.copy(alpha = 0.6f) else Color(0xFF2E2E38)),
+        border = BorderStroke(
+            1.dp, 
+            if (hasPermission) {
+                if (highlight) BrandRed.copy(alpha = 0.6f) else Color(0xFF2E2E38)
+            } else {
+                Color(0xFF222222)
+            }
+        ),
         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
         modifier = modifier.height(42.dp)
     ) {
@@ -607,9 +645,9 @@ fun QuickActionButton(
             modifier = Modifier.fillMaxWidth()
         ) {
             Icon(
-                imageVector = icon,
+                imageVector = if (hasPermission) icon else Icons.Default.Lock,
                 contentDescription = null,
-                modifier = Modifier.size(15.dp)
+                modifier = Modifier.size(if (hasPermission) 15.dp else 13.dp)
             )
             Spacer(Modifier.width(6.dp))
             Text(
@@ -617,7 +655,8 @@ fun QuickActionButton(
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                color = finalContentColor
             )
         }
     }

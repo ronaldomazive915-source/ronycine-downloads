@@ -46,6 +46,9 @@ interface PlayFilmeDao {
     @Query("SELECT * FROM media_catalog WHERE tmdbId = :tmdbId LIMIT 1")
     fun observeMediaByTmdbId(tmdbId: Int): Flow<MediaEntity?>
 
+    @Query("SELECT * FROM episodes WHERE mediaTmdbId = :tmdbId AND seasonNumber = :seasonNumber AND episodeNumber = :episodeNumber LIMIT 1")
+    suspend fun getEpisode(tmdbId: Int, seasonNumber: Int, episodeNumber: Int): EpisodeEntity?
+
     @Query("SELECT COUNT(*) FROM media_catalog")
     suspend fun getMediaCount(): Int
 
@@ -93,6 +96,18 @@ interface PlayFilmeDao {
 
     @Query("SELECT * FROM media_catalog WHERE isHeroFeatured = 1")
     fun getFeaturedHeroMedia(): Flow<List<MediaEntity>>
+
+    @Query("SELECT * FROM media_catalog WHERE mediaCategory IN ('movie', 'series') ORDER BY rating DESC LIMIT 30")
+    fun getTrendingMedia(): Flow<List<MediaEntity>>
+
+    @Query("SELECT * FROM media_catalog WHERE mediaCategory IN ('movie', 'series') ORDER BY addedAt DESC, id DESC LIMIT 20")
+    fun getRecentlyAddedMedia(): Flow<List<MediaEntity>>
+
+    @Query("SELECT * FROM media_catalog WHERE mediaCategory IN ('movie', 'series') AND rating >= 7.5 ORDER BY rating DESC LIMIT 20")
+    fun getTopRatedMedia(): Flow<List<MediaEntity>>
+
+    @Query("SELECT * FROM media_catalog WHERE mediaCategory IN ('movie', 'series') ORDER BY releaseYear DESC LIMIT 20")
+    fun getReleases(): Flow<List<MediaEntity>>
 
     // --- Featured Media Management ---
     @Query("SELECT * FROM featured_media ORDER BY displayOrder ASC, createdAt DESC")
@@ -220,10 +235,10 @@ interface PlayFilmeDao {
     @Query("SELECT * FROM watch_history WHERE profileId = :profileId ORDER BY watchedAt DESC")
     suspend fun getWatchHistorySync(profileId: String): List<WatchHistoryEntity>
 
-    @Query("SELECT * FROM watch_history WHERE profileId = :profileId AND progressPercent > 0 AND progressPercent < 98 ORDER BY watchedAt DESC")
+    @Query("SELECT * FROM watch_history WHERE profileId = :profileId AND progressPercent >= 1.0 AND progressPercent < 95.0 ORDER BY watchedAt DESC LIMIT 20")
     fun getContinueWatching(profileId: String): Flow<List<WatchHistoryEntity>>
 
-    @Query("SELECT * FROM watch_history WHERE profileId = :profileId AND progressPercent > 0 AND progressPercent < 98 ORDER BY watchedAt DESC")
+    @Query("SELECT * FROM watch_history WHERE profileId = :profileId AND progressPercent >= 1.0 AND progressPercent < 95.0 ORDER BY watchedAt DESC LIMIT 20")
     suspend fun getContinueWatchingSync(profileId: String): List<WatchHistoryEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -235,11 +250,28 @@ interface PlayFilmeDao {
     @Query("SELECT * FROM watch_history WHERE tmdbId = :tmdbId AND profileId = :profileId LIMIT 1")
     suspend fun getWatchHistoryItemByTmdbId(tmdbId: Int, profileId: String): WatchHistoryEntity?
 
-    @Query("SELECT * FROM watch_history WHERE tmdbId = :tmdbId AND profileId = :profileId AND mediaType = :mediaType AND (:seasonNumber IS NULL OR seasonNumber = :seasonNumber) AND (:episodeNumber IS NULL OR episodeNumber = :episodeNumber) LIMIT 1")
+    @Query("""
+        SELECT * FROM watch_history 
+        WHERE tmdbId = :tmdbId 
+          AND profileId = :profileId 
+          AND (mediaType = :mediaType OR (:mediaType = 'serie' AND mediaType = 'tv') OR (:mediaType = 'tv' AND mediaType = 'serie'))
+          AND ((:seasonNumber IS NULL AND seasonNumber IS NULL) OR seasonNumber = :seasonNumber) 
+          AND ((:episodeNumber IS NULL AND episodeNumber IS NULL) OR episodeNumber = :episodeNumber) 
+        LIMIT 1
+    """)
     suspend fun getWatchHistoryItemByKey(tmdbId: Int, profileId: String, mediaType: String, seasonNumber: Int?, episodeNumber: Int?): WatchHistoryEntity?
 
     @Query("DELETE FROM watch_history WHERE id = :id")
     suspend fun deleteWatchHistoryById(id: Int)
+
+    @Query("""
+        DELETE FROM watch_history 
+        WHERE tmdbId = :tmdbId 
+          AND profileId = :profileId 
+          AND ((:seasonNumber IS NULL AND seasonNumber IS NULL) OR seasonNumber = :seasonNumber) 
+          AND ((:episodeNumber IS NULL AND episodeNumber IS NULL) OR episodeNumber = :episodeNumber)
+    """)
+    suspend fun deleteWatchHistoryByKey(tmdbId: Int, profileId: String, seasonNumber: Int?, episodeNumber: Int?)
 
     @Query("DELETE FROM watch_history WHERE tmdbId = :tmdbId")
     suspend fun deleteWatchHistoryByTmdbId(tmdbId: Int)
@@ -318,59 +350,4 @@ interface PlayFilmeDao {
     @Query("DELETE FROM tmdb_auto_sync_history")
     suspend fun clearTmdbAutoSyncHistory()
 
-    // --- Offline Downloads ---
-    @Query("SELECT * FROM download_items ORDER BY createdAt DESC")
-    fun getAllDownloads(): Flow<List<DownloadEntity>>
-
-    @Query("SELECT * FROM download_items ORDER BY createdAt DESC")
-    suspend fun getAllDownloadsSync(): List<DownloadEntity>
-
-    @Query("SELECT * FROM download_items WHERE status = 'COMPLETED' ORDER BY completedAt DESC, createdAt DESC")
-    fun getCompletedDownloads(): Flow<List<DownloadEntity>>
-
-    @Query("SELECT * FROM download_items WHERE status IN ('PENDING', 'PREPARING', 'DOWNLOADING', 'PAUSED') ORDER BY createdAt DESC")
-    fun getActiveDownloads(): Flow<List<DownloadEntity>>
-
-    @Query("SELECT * FROM download_items WHERE id = :id LIMIT 1")
-    fun observeDownloadById(id: String): Flow<DownloadEntity?>
-
-    @Query("SELECT * FROM download_items WHERE id = :id LIMIT 1")
-    suspend fun getDownloadById(id: String): DownloadEntity?
-
-    @Query("SELECT * FROM download_items WHERE tmdbId = :tmdbId")
-    fun observeDownloadsForMedia(tmdbId: Int): Flow<List<DownloadEntity>>
-
-    @Query("SELECT * FROM download_items WHERE tmdbId = :tmdbId")
-    suspend fun getDownloadsForMediaSync(tmdbId: Int): List<DownloadEntity>
-
-    @Query("SELECT * FROM download_items WHERE tmdbId = :tmdbId AND (seasonNumber = :seasonNumber OR (seasonNumber IS NULL AND :seasonNumber IS NULL)) AND (episodeNumber = :episodeNumber OR (episodeNumber IS NULL AND :episodeNumber IS NULL)) LIMIT 1")
-    fun observeDownloadForEpisode(tmdbId: Int, seasonNumber: Int?, episodeNumber: Int?): Flow<DownloadEntity?>
-
-    @Query("SELECT * FROM download_items WHERE tmdbId = :tmdbId AND (seasonNumber = :seasonNumber OR (seasonNumber IS NULL AND :seasonNumber IS NULL)) AND (episodeNumber = :episodeNumber OR (episodeNumber IS NULL AND :episodeNumber IS NULL)) LIMIT 1")
-    suspend fun getDownloadForEpisodeSync(tmdbId: Int, seasonNumber: Int?, episodeNumber: Int?): DownloadEntity?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertDownload(download: DownloadEntity)
-
-    @Update
-    suspend fun updateDownload(download: DownloadEntity)
-
-    @Query("UPDATE download_items SET status = :status, progress = :progress, downloadedBytes = :downloadedBytes, totalBytes = :totalBytes, downloadSpeed = :downloadSpeed, localFilePath = COALESCE(:localFilePath, localFilePath), completedAt = CASE WHEN :status = 'COMPLETED' THEN :completedAt ELSE completedAt END, errorMessage = :errorMessage WHERE id = :id")
-    suspend fun updateDownloadProgress(
-        id: String,
-        status: String,
-        progress: Int,
-        downloadedBytes: Long,
-        totalBytes: Long,
-        downloadSpeed: String?,
-        localFilePath: String? = null,
-        completedAt: Long? = null,
-        errorMessage: String? = null
-    )
-
-    @Query("DELETE FROM download_items WHERE id = :id")
-    suspend fun deleteDownloadById(id: String)
-
-    @Query("DELETE FROM download_items")
-    suspend fun deleteAllDownloads()
 }

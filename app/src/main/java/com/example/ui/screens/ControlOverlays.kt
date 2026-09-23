@@ -29,6 +29,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.draw.drawBehind
 import java.util.Locale
+import com.example.ui.components.RonycineSmileLoader
 import com.example.data.remote.FirebaseService
 import com.example.data.remote.RemoteConfigEntity
 
@@ -226,10 +227,9 @@ fun MaintenanceScreen(
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
             ) {
                 if (isChecking) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
+                    RonycineSmileLoader(
                         color = Color.White,
-                        strokeWidth = 3.dp
+                        size = 24.dp
                     )
                 } else {
                     Text(
@@ -401,7 +401,10 @@ fun MandatoryUpdateScreen(
                 }
 
                 is com.example.util.UpdateDownloadState.Verifying -> {
-                    CircularProgressIndicator(color = Color(0xFFE50914), modifier = Modifier.size(36.dp))
+                    RonycineSmileLoader(
+                        color = Color(0xFFE50914),
+                        size = 36.dp
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Validando integridade SHA-256 do pacote...",

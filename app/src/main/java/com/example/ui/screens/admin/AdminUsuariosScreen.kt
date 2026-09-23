@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.components.RonycineSmileLoader
 import com.example.data.remote.UserEntity
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
@@ -35,6 +36,12 @@ import com.example.ui.viewmodel.AdminViewModel
 import java.text.SimpleDateFormat
 import java.util.*
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.collectAsState
+
+import com.example.ui.theme.RatingYellow
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminUsuariosScreen(
@@ -43,6 +50,7 @@ fun AdminUsuariosScreen(
 ) {
     val users by adminViewModel.allUsers.collectAsState()
     val allProfiles by adminViewModel.allGlobalProfiles.collectAsState()
+    val currentUser by adminViewModel.currentUser.collectAsState()
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedFilter by remember { mutableStateOf("TODOS") } // "TODOS", "ATIVO", "SUSPENSO", "ADMIN"
@@ -266,7 +274,10 @@ fun AdminUsuariosScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             if (verifyingUserId == user.uid) {
-                                CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color(0xFF0095F6), strokeWidth = 2.dp)
+                                RonycineSmileLoader(
+                                    color = Color(0xFF0095F6),
+                                    size = 14.dp
+                                )
                                 Text("Salvando...", color = Color(0xFF0095F6), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             } else if (user.isVerified) {
                                 VerifiedBadge(size = 14.dp, showToastOnClick = false)

@@ -26,7 +26,7 @@ object AppShareConfig {
     const val APP_NAME = "RONYCINE"
     
     // Configuração Centralizada da URL de Atualização (Requisito 7)
-    const val UPDATE_APK_URL = "https://github.com/ronaldomazive915-source/ronycine-downloads/releases/download/v1.1.0/RONYCINE.apk"
+    const val UPDATE_APK_URL = "https://github.com/ronaldomazive915-source/Rony-Skies-/releases/download/v1.1.0/RONYCINE.apk"
     
     // Default URLs - Official APK release URL
     var defaultInstallUrl: String = UPDATE_APK_URL

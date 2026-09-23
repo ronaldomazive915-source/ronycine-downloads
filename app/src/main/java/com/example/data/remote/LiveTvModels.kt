@@ -16,26 +16,26 @@ data class ApiChannel(
     @Json(name = "id") val id: String,
     @Json(name = "name") val name: String,
     @Json(name = "category") val category: String? = "Variedades",
-    @Json(name = "logo") val logo: String? = null,
     @Json(name = "logo_url") val logoUrl: String? = null,
+    @Json(name = "preview_url") val previewUrl: String? = null,
     @Json(name = "embed_url") val embedUrl: String? = null,
-    @Json(name = "url") val url: String? = null,
     @Json(name = "description") val description: String? = null,
-    @Json(name = "status") val status: String? = "online",
-    @Json(name = "current_program") val currentProgram: String? = "Programação ao Vivo",
-    @Json(name = "next_program") val nextProgram: String? = "Transmissão 24 Horas",
-    @Json(name = "slug") val slug: String? = null
+    @Json(name = "is_active") val isActive: Boolean? = true,
+    @Json(name = "now_playing_title") val nowPlayingTitle: String? = null,
+    @Json(name = "now_playing_progress") val nowPlayingProgress: Int? = 0,
+    @Json(name = "now_playing_has_guide") val nowPlayingHasGuide: Boolean? = false,
+    @Json(name = "now_playing_next_programmes") val nowPlayingNextProgrammes: List<String>? = emptyList(),
+    @Json(name = "slug") val slug: String? = null,
+    @Json(name = "source_provider") val sourceProvider: String? = "api_atual"
 ) {
     fun getEffectiveLogo(): String {
-        return logo?.takeIf { it.isNotBlank() }
-            ?: logoUrl?.takeIf { it.isNotBlank() }
+        return logoUrl?.takeIf { it.isNotBlank() }
             ?: "https://images.unsplash.com/photo-1598899134739-24c46f58b8c0?w=300"
     }
 
     fun getEffectiveEmbedUrl(): String {
         return embedUrl?.takeIf { it.isNotBlank() }
-            ?: url?.takeIf { it.isNotBlank() }
-            ?: "https://reidosembeds.online/embed/$id"
+            ?: if (sourceProvider == "embedtv") "https://embedtv.lat/embed/$id" else "https://reidosembeds.online/embed/$id"
     }
 }
 
@@ -79,7 +79,8 @@ data class ApiEvent(
     @Json(name = "play_event_url") val playEventUrl: String? = null,
     @Json(name = "has_youtube_live") val hasYoutubeLive: Boolean? = false,
     @Json(name = "youtube_scan") val youtubeScan: String? = null,
-    @Json(name = "embeds") val embeds: List<ApiEventEmbed>? = emptyList()
+    @Json(name = "embeds") val embeds: List<ApiEventEmbed>? = emptyList(),
+    @Json(name = "source_provider") val sourceProvider: String? = "api_atual"
 ) {
     fun isLive(): Boolean {
         return status.equals("live", ignoreCase = true) ||
