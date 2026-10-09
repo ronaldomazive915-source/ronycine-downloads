@@ -22,7 +22,7 @@ data class PlayerSource(
     val tvTmdbUrl: String = "",
     val tvImdbUrl: String = "",
     
-    val internalPlayer: String = "", // megaplay, megatube, vidstack, vidcore, redeflixapi
+    val internalPlayer: String = "", // megaplay, megatube, vidstack, vidcore
     val playerColor: String = "", // #fb542b
     
     val isDefault: Boolean = false,
@@ -34,7 +34,7 @@ data class PlayerSource(
     val adFreeStatusMessage: String = "",
     val officialApiKey: String = "", // Chave de API / Token Pro oficial configurável
     val officialProEndpoint: String = "", // Endpoint Pro oficial configurável
-    val providerOrigin: String = "", // "RedeFlixApi", "MegaEmbed", "VidSrc"
+    val providerOrigin: String = "", // "MegaEmbed", "VidSrc"
 
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
@@ -45,7 +45,6 @@ data class PlayerSource(
         val lowerName = name.lowercase()
         val lowerUrl = (movieTmdbUrl + tvTmdbUrl).lowercase()
         return when {
-            lowerId.contains("redeflix") || lowerName.contains("redeflix") || lowerUrl.contains("redeflix") -> "RedeFlixApi"
             lowerId.contains("mgeb") || lowerName.contains("megaembed") || lowerUrl.contains("mgeb.top") -> "MegaEmbed"
             lowerId.contains("vidsrc") || lowerName.contains("vidsrc") || lowerUrl.contains("vidsrc") -> "VidSrc"
             else -> name.ifBlank { "Provedor Externo" }
@@ -70,7 +69,6 @@ data class PlayerSource(
             "Modalidade oficial sem anúncios ativa através das credenciais oficiais configuradas para este player."
         } else {
             when (origin) {
-                "RedeFlixApi" -> "LIMITAÇÃO DO FORNECEDOR: O fornecedor externo RedeFlixApi exibe publicidade própria na página web do player público. A API oficial gratuita não disponibiliza chave para remoção de anúncios nesta conta."
                 "MegaEmbed" -> "LIMITAÇÃO DO FORNECEDOR: Anúncios veiculados pela infraestrutura aberta do MegaEmbed. Para reprodução sem anúncios oficial, configure a Chave/Token Pro nas opções avançadas."
                 "VidSrc" -> "LIMITAÇÃO DO FORNECEDOR: Player legendado via embed público vidsrc.tw que inclui publicidade na CDN de origem do fornecedor."
                 else -> "LIMITAÇÃO DO FORNECEDOR: A publicidade é originada diretamente pelo provedor externo. O RONYCINE não exibe publicidade própria."
@@ -83,7 +81,7 @@ data class PlayerSource(
 @JsonClass(generateAdapter = true)
 data class MegaEmbedPlayerConfig(
     val enabled: Boolean = true,
-    val player: String = "megaplay", // megaplay, megatube, vidstack, vidcore, clappr, redeflixapi
+    val player: String = "megaplay", // megaplay, megatube, vidstack, vidcore, clappr
     val color: String = "fb542b", // hex without #
     val imdbSeriesFormat: String = "slash", // "slash" (/season/episode) or "dash" (-season-episode)
     val playbackMode: String = "standard",
@@ -117,16 +115,14 @@ object MegaEmbedPlayerType {
     const val VIDSTACK = "vidstack"
     const val VIDCORE = "vidcore"
     const val CLAPPR = "clappr"
-    const val REDEFLIXAPI = "redeflixapi"
 
-    val ALL = listOf(MEGAPLAY, MEGATUBE, VIDSTACK, VIDCORE, REDEFLIXAPI)
+    val ALL = listOf(MEGAPLAY, MEGATUBE, VIDSTACK, VIDCORE)
 
     val ALL_PLAYERS = listOf(
         MegaEmbedPlayerOption(MEGAPLAY, "MegaPlay (Premium)", "Player principal do MegaEmbed"),
         MegaEmbedPlayerOption(MEGATUBE, "MegaTube (Youtube)", "Reprodução baseada no player YouTube"),
         MegaEmbedPlayerOption(VIDSTACK, "Vidstack (Moderno)", "Interface moderna com aceleração"),
-        MegaEmbedPlayerOption(VIDCORE, "Vidcore (Clássico)", "Player clássico de alta compatibilidade"),
-        MegaEmbedPlayerOption(REDEFLIXAPI, "RedeFlixApi (TMDB)", "Player externo via TMDB")
+        MegaEmbedPlayerOption(VIDCORE, "Vidcore (Clássico)", "Player clássico de alta compatibilidade")
     )
 
     fun getDisplayName(code: String): String = when (code.trim().lowercase()) {
@@ -135,7 +131,6 @@ object MegaEmbedPlayerType {
         VIDSTACK -> "Vidstack (Moderno)"
         VIDCORE -> "Vidcore (Clássico)"
         CLAPPR -> "Clappr (Clássico)"
-        REDEFLIXAPI, "redeflix" -> "RedeFlixApi (TMDB)"
         else -> code
     }
 
@@ -144,7 +139,6 @@ object MegaEmbedPlayerType {
         MEGATUBE -> "Reprodução baseada no player YouTube"
         VIDSTACK -> "Interface moderna com aceleração"
         VIDCORE, CLAPPR -> "Player clássico de alta compatibilidade"
-        REDEFLIXAPI, "redeflix" -> "Player externo via TMDB"
         else -> "Player de reprodução"
     }
 
@@ -182,7 +176,7 @@ data class SubtitledPlayerConfig(
 @JsonClass(generateAdapter = true)
 data class PlayerConfig(
     val selectionMode: String = "PRIORITY", // FIXED, PRIORITY, AUTO
-    val defaultPlayerId: String = "videasy",
+    val defaultPlayerId: String = "mgeb",
     val fallbackEnabled: Boolean = true,
     val dubbedPlayer: DubbedPlayerConfig = DubbedPlayerConfig(),
     val subtitledPlayer: SubtitledPlayerConfig = SubtitledPlayerConfig(),

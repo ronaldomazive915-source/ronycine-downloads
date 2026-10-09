@@ -148,7 +148,10 @@ private fun HeroCardItem(
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(media.backdropPath ?: media.posterPath)
+                    .size(640, 360)
                     .crossfade(true)
+                    .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                    .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                     .build(),
                 contentDescription = media.title,
                 contentScale = ContentScale.Crop,

@@ -1,35 +1,6 @@
 package com.example.ui.screens.admin
 
-import androidx.compose.animation.*
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.ui.components.RonycineSmileLoader
-import com.example.data.remote.PlayerSource
-import com.example.ui.viewmodel.AdminViewModel
-import com.example.util.PlayerUtils
-import com.example.util.WebViewUtils
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -37,2397 +8,903 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.*
 import android.widget.Toast
-import androidx.compose.ui.viewinterop.AndroidView
-import kotlinx.coroutines.delay
-import java.util.UUID
-import androidx.compose.ui.graphics.toArgb
+import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.example.data.remote.PlayerSource
+import com.example.ui.theme.BrandRed
+import com.example.ui.viewmodel.AdminViewModel
+import com.example.util.PlayerUtils
+import com.example.util.WebViewUtils
+import kotlinx.coroutines.delay
 
-@Composable
-fun AdminSectionHeader(
-    title: String,
-    subtitle: String,
-    modifier: Modifier = Modifier
-) {
-    Column(modifier = modifier.padding(bottom = 16.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.headlineSmall,
-            color = Color.White,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodyMedium,
-            color = Color.White.copy(alpha = 0.7f)
-        )
-    }
+private val DarkBackground = Color(0xFF0A0A0E)
+private val DarkCard = Color(0xFF13131A)
+private val DarkCardBorder = Color(0xFF22222E)
+
+enum class PlayerPlaybackStatus(val label: String, val color: Color) {
+    WAITING("Aguardando", Color(0xFF9E9E9E)),
+    LOADING("Carregando", Color(0xFFFFA726)),
+    READY("Pronto", Color(0xFF42A5F5)),
+    PLAYING("Reproduzindo", Color(0xFF66BB6A)),
+    BUFFERING("Bufferizando", Color(0xFFAB47BC)),
+    ERROR("Erro", Color(0xFFEF5350))
 }
 
+data class TmdbPreset(val title: String, val tmdbId: Int, val type: String, val season: Int = 1, val episode: Int = 1)
+
+private val MOVIE_PRESETS = listOf(
+    TmdbPreset("Clube da Luta", 550, "movie"),
+    TmdbPreset("A Origem", 27205, "movie"),
+    TmdbPreset("Interestelar", 157336, "movie"),
+    TmdbPreset("Vingadores: Ultimato", 299534, "movie"),
+    TmdbPreset("Matrix", 603, "movie")
+)
+
+private val TV_PRESETS = listOf(
+    TmdbPreset("Game of Thrones", 1399, "tv", 1, 1),
+    TmdbPreset("Breaking Bad", 1396, "tv", 1, 1),
+    TmdbPreset("Stranger Things", 66732, "tv", 1, 1),
+    TmdbPreset("The Last of Us", 100088, "tv", 1, 1),
+    TmdbPreset("Loki", 84958, "tv", 1, 1)
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AdminPlayersScreen(viewModel: AdminViewModel) {
     val playerSources by viewModel.playerSources.collectAsState()
+    val megaEmbedConfig by viewModel.megaEmbedConfig.collectAsState()
     val playerConfig by viewModel.playerConfig.collectAsState()
-    val isSavingPlayerConfig by viewModel.isSavingPlayerConfig.collectAsState()
-    val playerSaveStatusMessage by viewModel.playerSaveStatusMessage.collectAsState()
-    
-    val currentUser by viewModel.currentUser.collectAsState()
-    val canConfigurePlayers = currentUser?.hasPermission("configurarPlayers") == true
-    val canManagePlayers = currentUser?.hasPermission("players") == true
-    
-    var showAddForm by remember { mutableStateOf(false) }
-    var editingSource by remember { mutableStateOf<PlayerSource?>(null) }
-    var showDeleteConfirm by remember { mutableStateOf<PlayerSource?>(null) }
-    var selectedTestPlayerId by remember { mutableStateOf<String?>(null) }
-    
-    val activeCount = playerSources.count { it.enabled }
-    val inactiveCount = playerSources.count { !it.enabled }
-    val primaryPlayer = playerSources.find { it.id == playerConfig.defaultPlayerId }
-    val isSettingDefaultPlayer by viewModel.isSettingDefaultPlayer.collectAsState()
-    val togglingPlayerIds by viewModel.togglingPlayerIds.collectAsState()
-
-    var showDefaultConfirm by remember { mutableStateOf<PlayerSource?>(null) }
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
-    LaunchedEffect(playerSaveStatusMessage) {
-        playerSaveStatusMessage?.let { msg ->
-            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    // Testing Bench Form State
+    var selectedPlayerId by remember { mutableStateOf("") }
+    var selectedMediaType by remember { mutableStateOf("movie") } // "movie" or "tv"
+    var tmdbIdInput by remember { mutableStateOf("550") }
+    var seasonInput by remember { mutableStateOf("1") }
+    var episodeInput by remember { mutableStateOf("1") }
+    var generatedUrl by remember { mutableStateOf("") }
+    var activeTestUrl by remember { mutableStateOf("") }
+    var testPlayerKey by remember { mutableIntStateOf(0) }
+    var currentPlaybackStatus by remember { mutableStateOf(PlayerPlaybackStatus.WAITING) }
+    var lastErrorMessage by remember { mutableStateOf<String?>(null) }
+    var isPlayerDropdownExpanded by remember { mutableStateOf(false) }
+
+    // Auto-select first available player on launch if unselected
+    LaunchedEffect(playerSources) {
+        if (selectedPlayerId.isBlank() && playerSources.isNotEmpty()) {
+            val defaultPlayer = playerSources.find { it.isDefault } ?: playerSources.first()
+            selectedPlayerId = defaultPlayer.id
+        }
+    }
+
+    val selectedSource = remember(selectedPlayerId, playerSources) {
+        playerSources.find { it.id == selectedPlayerId } ?: playerSources.firstOrNull()
+    }
+
+    fun generateAndTestUrl(autoPlay: Boolean = false) {
+        keyboardController?.hide()
+        val source = selectedSource ?: return
+        val tmdbId = tmdbIdInput.trim().toIntOrNull()
+        if (tmdbId == null || tmdbId <= 0) {
+            Toast.makeText(context, "Informe um TMDB ID válido maior que 0.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val s = if (selectedMediaType == "tv") seasonInput.trim().toIntOrNull() ?: 1 else null
+        val e = if (selectedMediaType == "tv") episodeInput.trim().toIntOrNull() ?: 1 else null
+
+        val url = PlayerUtils.buildPlayerUrl(
+            source = source,
+            mediaType = selectedMediaType,
+            tmdbId = tmdbId,
+            season = s,
+            episode = e,
+            megaEmbedConfig = playerConfig.megaEmbed
+        )
+
+        if (url.isNotBlank()) {
+            generatedUrl = url
+            activeTestUrl = url
+            testPlayerKey++
+            currentPlaybackStatus = PlayerPlaybackStatus.LOADING
+            lastErrorMessage = null
+        } else {
+            Toast.makeText(context, "Não foi possível gerar a URL para este player.", Toast.LENGTH_SHORT).show()
         }
     }
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // --- 1. CABEÇALHO OFICIAL DO CENTRO DE TESTES ---
         item {
-            AdminSectionHeader(
-                title = "Gerenciador de Players",
-                subtitle = "Configure, teste e gerencie as fontes de reprodução utilizadas pelo RONYCINE."
-            )
-        }
-
-        // Status Feedback Banner
-        if (playerSaveStatusMessage != null) {
-            item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF4CAF50).copy(alpha = 0.15f),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.4f))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = playerSaveStatusMessage ?: "",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        IconButton(
-                            onClick = { viewModel.clearPlayerStatusMessage() },
-                            modifier = Modifier.size(24.dp)
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Fechar", tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        // SECTION: PLAYER E CONTEÚDO
-        item {
-            Text(
-                "PLAYER E CONTEÚDO GLOBAL",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Black,
-                color = Color(0xFFfb542b),
-                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-                letterSpacing = 1.sp
-            )
-        }
-
-        item {
-            Box(modifier = Modifier.fillMaxWidth()) {
-                PlayerAndContentCard(
-                    playerConfig = playerConfig,
-                    onDefaultPlayerSelected = { if (canConfigurePlayers) viewModel.saveDefaultPlayerOption(it) },
-                    onAccentColorChanged = { if (canConfigurePlayers) viewModel.saveAccentColor(it) },
-                    onAdsEnabledChanged = { if (canConfigurePlayers) viewModel.setAppAdsEnabled(it) },
-                    onSaveOfficialCredentials = { apiKey, proEndpoint ->
-                        if (canConfigurePlayers) viewModel.saveMegaEmbedOfficialCredentials(apiKey, proEndpoint)
-                    },
-                    isSaving = isSavingPlayerConfig,
-                    accentColor = Color(android.graphics.Color.parseColor("#" + (playerConfig.megaEmbed.color.ifBlank { "fb542b" }).removePrefix("#"))),
-                    enabled = canConfigurePlayers
-                )
-                if (!canConfigurePlayers) {
-                    Surface(
-                        modifier = Modifier.matchParentSize(),
-                        color = Color.Black.copy(alpha = 0.4f),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.Lock, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(24.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        // SECTION: GERENCIAR FONTES
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        "FONTES DE REPRODUÇÃO",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White.copy(alpha = 0.6f)
-                    )
-                    Text(
-                        "Gerencie e priorize os servidores de conteúdo",
-                        fontSize = 10.sp,
-                        color = Color.White.copy(alpha = 0.4f)
-                    )
-                }
-                Button(
-                    onClick = { if (canManagePlayers) showAddForm = true },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (canManagePlayers) Color(0xFFfb542b) else Color.Gray.copy(alpha = 0.2f)
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.height(36.dp),
-                    enabled = canManagePlayers
-                ) {
-                    Icon(if (canManagePlayers) Icons.Default.Add else Icons.Default.Lock, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(if (canManagePlayers) "NOVA FONTE" else "BLOQUEADO", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-    items(playerSources.sortedBy { it.priority }) { source ->
-        PlayerSourceCompactCard(
-            source = source,
-            isGlobalDefault = source.id == playerConfig.defaultPlayerId,
-            isSettingDefault = isSettingDefaultPlayer == source.id,
-            isToggling = togglingPlayerIds.contains(source.id),
-            accentColor = Color(android.graphics.Color.parseColor("#" + (playerConfig.megaEmbed.color.ifBlank { "fb542b" }).removePrefix("#"))),
-            canManagePlayers = canManagePlayers,
-            onEdit = { editingSource = source },
-            onDelete = { showDeleteConfirm = source },
-            onToggle = { viewModel.togglePlayerEnabled(source.id, !source.enabled) },
-            onSetDefault = { showDefaultConfirm = source },
-            onDuplicate = { viewModel.duplicatePlayerSource(source) },
-            onTest = {
-                selectedTestPlayerId = source.id
-                Toast.makeText(context, "Player ${source.name} selecionado no Testador", Toast.LENGTH_SHORT).show()
-            }
-        )
-    }
-
-        // Test Section
-        item {
-            PlayerTestCard(
-                sources = playerSources,
-                defaultPlayerId = playerConfig.defaultPlayerId,
-                playerConfig = playerConfig,
-                selectedPlayerIdOverride = selectedTestPlayerId
-            )
-        }
-        
-        item { Spacer(Modifier.height(80.dp)) }
-    }
-
-    if (showAddForm || editingSource != null) {
-        PlayerSourceFormDialog(
-            source = editingSource,
-            onDismiss = { 
-                showAddForm = false
-                editingSource = null
-            },
-            onSave = { 
-                viewModel.savePlayerSource(it)
-                showAddForm = false
-                editingSource = null
-            }
-        )
-    }
-
-    if (showDeleteConfirm != null) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = null },
-            containerColor = Color(0xFF121212),
-            title = { Text("Excluir Player?", color = Color.White) },
-            text = { 
-                Text(
-                    "Esta ação removerá a configuração de \"${showDeleteConfirm?.name}\". " +
-                    if (showDeleteConfirm?.id == playerConfig.defaultPlayerId) "\n\n⚠️ Este é o player principal. Defina outro como principal antes de excluir." else "",
-                    color = Color.White.copy(alpha = 0.7f)
-                ) 
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirm?.let { viewModel.deletePlayerSource(it.id) }
-                        showDeleteConfirm = null
-                    },
-                    enabled = showDeleteConfirm?.id != playerConfig.defaultPlayerId,
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFF44336))
-                ) {
-                    Text("EXCLUIR")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = null }) {
-                    Text("CANCELAR", color = Color.White)
-                }
-            }
-        )
-    }
-
-    if (showDefaultConfirm != null) {
-        AlertDialog(
-            onDismissRequest = { showDefaultConfirm = null },
-            containerColor = Color(0xFF121212),
-            title = { Text("Definir Player Principal?", color = Color.White) },
-            text = {
-                Text(
-                    "Deseja definir \"${showDefaultConfirm?.name}\" como o player principal do aplicativo? " +
-                    "\n\nEsta alteração afetará todos os usuários imediatamente.",
-                    color = Color.White.copy(alpha = 0.7f)
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showDefaultConfirm?.let { viewModel.setDefaultPlayer(it.id) }
-                        showDefaultConfirm = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFfb542b))
-                ) {
-                    Text("DEFINIR COMO PRINCIPAL")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDefaultConfirm = null }) {
-                    Text("CANCELAR", color = Color.White)
-                }
-            }
-        )
-    }
-}
-
-@Composable
-fun DashboardSmallCard(
-    title: String,
-    value: String,
-    label: String,
-    color: Color,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(title, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = color)
-            Spacer(Modifier.height(2.dp))
-            Text(value, fontSize = 16.sp, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(label, fontSize = 8.sp, color = Color.White.copy(alpha = 0.4f))
-        }
-    }
-}
-
-@Composable
-fun PrimaryPlayerCard(
-    source: PlayerSource,
-    playerConfig: com.example.data.remote.PlayerConfig,
-    onEdit: () -> Unit,
-    onTest: () -> Unit
-) {
-    val isMegaEmbed = source.id.contains("mgeb", ignoreCase = true) ||
-            source.name.contains("mega", ignoreCase = true) ||
-            source.movieTmdbUrl.contains("mgeb.top")
-
-    val activeSubPlayerName = if (isMegaEmbed) {
-        val playerCode = playerConfig.megaEmbed.player.ifBlank { source.internalPlayer.ifBlank { "megaplay" } }
-        com.example.data.remote.MegaEmbedPlayerType.getDisplayName(playerCode)
-    } else if (source.internalPlayer.isNotBlank()) {
-        source.internalPlayer
-    } else {
-        null
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFfb542b).copy(alpha = 0.35f)),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                "PLAYER PRINCIPAL ATUAL",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFFfb542b),
-                letterSpacing = 1.sp
-            )
-            Spacer(Modifier.height(8.dp))
-            Row(
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                colors = CardDefaults.cardColors(containerColor = DarkCard),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, DarkCardBorder)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF4CAF50))
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(source.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    }
-
-                    if (activeSubPlayerName != null) {
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = activeSubPlayerName,
-                                color = Color(0xFFfb542b),
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp
-                            )
-                            if (isMegaEmbed && playerConfig.megaEmbed.color.isNotBlank()) {
-                                Spacer(Modifier.width(8.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            try {
-                                                Color(android.graphics.Color.parseColor("#" + playerConfig.megaEmbed.color))
-                                            } catch (e: Exception) {
-                                                Color(0xFFfb542b)
-                                            }
-                                        )
-                                )
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    text = "#${playerConfig.megaEmbed.color}",
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    fontSize = 11.sp
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "${source.language} • Prioridade ${source.priority}",
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 13.sp
-                    )
-                }
-                
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        onClick = onEdit,
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
-                        contentPadding = PaddingValues(horizontal = 12.dp)
-                    ) {
-                        Text("CONFIGURAR", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun PlayerAndContentCard(
-    playerConfig: com.example.data.remote.PlayerConfig,
-    onDefaultPlayerSelected: (String) -> Unit,
-    onAccentColorChanged: (String) -> Unit,
-    onAdsEnabledChanged: ((Boolean) -> Unit)? = null,
-    onSaveOfficialCredentials: ((apiKey: String, proEndpoint: String) -> Unit)? = null,
-    isSaving: Boolean,
-    accentColor: Color,
-    enabled: Boolean = true
-) {
-    var showColorPicker by remember { mutableStateOf(false) }
-    
-    var colorHex by remember(playerConfig.megaEmbed.color) {
-        mutableStateOf(playerConfig.megaEmbed.color.ifBlank { "fb542b" })
-    }
-    
-    val isValidHex = com.example.data.remote.MegaEmbedPlayerType.isValidHexColor(colorHex)
-    val normalizedHex = com.example.data.remote.MegaEmbedPlayerType.normalizeColor(colorHex)
-    val previewColor = if (isValidHex) {
-        try {
-            Color(android.graphics.Color.parseColor("#" + normalizedHex.removePrefix("#")))
-        } catch (e: Exception) {
-            accentColor
-        }
-    } else {
-        accentColor
-    }
-
-    if (showColorPicker) {
-        ColorPickerDialog(
-            initialColor = colorHex,
-            onColorSelected = { 
-                colorHex = it.removePrefix("#")
-                onAccentColorChanged(colorHex)
-                showColorPicker = false
-            },
-            onDismiss = { showColorPicker = false }
-        )
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
-        shape = RoundedCornerShape(12.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Player Padrão
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.PlayCircle, null, tint = previewColor, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Player padrão",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                com.example.data.remote.MegaEmbedPlayerType.ALL_PLAYERS.forEach { option ->
-                    val isSelected = playerConfig.megaEmbed.player.equals(option.code, ignoreCase = true)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onDefaultPlayerSelected(option.code) }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = isSelected,
-                            onClick = { onDefaultPlayerSelected(option.code) },
-                            colors = RadioButtonDefaults.colors(
-                                selectedColor = previewColor,
-                                unselectedColor = Color.White.copy(alpha = 0.3f)
-                            )
-                        )
-                        Text(
-                            text = option.displayName,
-                            color = if (isSelected) Color.White else Color.White.copy(alpha = 0.6f),
-                            fontSize = 14.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-
-            Divider(color = Color.White.copy(alpha = 0.05f))
-
-            // Cor de Destaque
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Palette, null, tint = previewColor, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        "Cor de destaque",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(previewColor)
-                            .border(2.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
-                            .clickable { showColorPicker = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Colorize, null, tint = if (previewColor.luminance() > 0.5f) Color.Black else Color.White, modifier = Modifier.size(20.dp))
-                    }
-
-                    OutlinedTextField(
-                        value = colorHex,
-                        onValueChange = { 
-                            val clean = it.uppercase().removePrefix("#")
-                            colorHex = clean
-                            if (clean.length == 6 && com.example.data.remote.MegaEmbedPlayerType.isValidHexColor(clean)) {
-                                onAccentColorChanged(clean)
-                            }
-                        },
-                        placeholder = { Text("E50914", color = Color.White.copy(alpha = 0.3f)) },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        shape = RoundedCornerShape(8.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = previewColor,
-                            unfocusedContainerColor = Color(0xFF121212),
-                            focusedContainerColor = Color(0xFF121212)
-                        ),
-                        label = { Text("COR DE DESTAQUE (HEX)", fontSize = 10.sp) },
-                        prefix = { Text("#", color = Color.White.copy(alpha = 0.5f)) }
-                    )
-                }
-
-                Divider(color = Color.White.copy(alpha = 0.05f))
-
-                // STATUS E AUDITORIA DO PLAYER GLOBAL
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.VerifiedUser, null, tint = previewColor, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            "STATUS E AUDITORIA DO PLAYER",
-                            color = Color.White,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Color(0xFF141414),
-                        shape = RoundedCornerShape(8.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            // Status do player
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Status do player:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                Surface(
-                                    color = if (playerConfig.megaEmbed.enabled) Color(0xFF22C55E).copy(alpha = 0.15f) else Color(0xFFEF4444).copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(4.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (playerConfig.megaEmbed.enabled) Color(0xFF22C55E).copy(alpha = 0.3f) else Color(0xFFEF4444).copy(alpha = 0.3f))
-                                ) {
-                                    Text(
-                                        text = if (playerConfig.megaEmbed.enabled) "ATIVO" else "DESATIVADO",
-                                        color = if (playerConfig.megaEmbed.enabled) Color(0xFF22C55E) else Color(0xFFEF4444),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                    )
-                                }
-                            }
-
-                            // Publicidade do Fornecedor Externo
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Publicidade do player:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                val isAdFree = playerConfig.megaEmbed.isAdFreeAvailable()
-                                Surface(
-                                    color = if (isAdFree) Color(0xFF22C55E).copy(alpha = 0.15f) else Color(0xFFF59E0B).copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(4.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isAdFree) Color(0xFF22C55E).copy(alpha = 0.3f) else Color(0xFFF59E0B).copy(alpha = 0.3f))
-                                ) {
-                                    Text(
-                                        text = if (isAdFree) "[Sem anúncios — disponível]" else "[Publicidade fornecida pelo player]",
-                                        color = if (isAdFree) Color(0xFF22C55E) else Color(0xFFF59E0B),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                    )
-                                }
-                            }
-
-                            // Publicidade Central RONYCINE (ads.enabled)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Publicidade Central RONYCINE", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                    Text("Controle global de anúncios da plataforma (ads.enabled)", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
-                                }
-                                Switch(
-                                    checked = playerConfig.adsEnabled,
-                                    onCheckedChange = { onAdsEnabledChanged?.invoke(it) },
-                                    enabled = enabled,
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = previewColor
-                                    )
-                                )
-                            }
-
-                            // Origem
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Origem:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                                Text("MegaEmbed", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            // Detalhe / Limitação do Fornecedor
-                            Text(
-                                text = playerConfig.megaEmbed.getAdvertisingDetail(),
-                                color = Color.White.copy(alpha = 0.6f),
-                                fontSize = 11.sp,
-                                lineHeight = 15.sp
-                            )
-                        }
-                    }
-
-                    // Seção de Configuração Oficial sem Anúncios
-                    var showProConfig by remember { mutableStateOf(playerConfig.megaEmbed.isAdFreeAvailable()) }
-                    var proKeyInput by remember(playerConfig.megaEmbed.officialApiKey) { mutableStateOf(playerConfig.megaEmbed.officialApiKey) }
-                    var proEndpointInput by remember(playerConfig.megaEmbed.officialProEndpoint) { mutableStateOf(playerConfig.megaEmbed.officialProEndpoint) }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable { showProConfig = !showProConfig }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Default.VpnKey, null, tint = previewColor, modifier = Modifier.size(14.dp))
-                            Text(
-                                "Configuração oficial sem anúncios (MegaEmbed Pro)",
-                                color = previewColor,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Icon(
-                            if (showProConfig) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.5f),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    if (showProConfig) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedTextField(
-                                value = proKeyInput,
-                                onValueChange = { proKeyInput = it },
-                                label = { Text("Chave / Token Pro Oficial (MegaEmbed)") },
-                                placeholder = { Text("Ex: me_pro_xxxxxxxxxxxx", color = Color.White.copy(alpha = 0.3f)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    unfocusedTextColor = Color.White,
-                                    focusedTextColor = Color.White,
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                                    focusedBorderColor = previewColor,
-                                    unfocusedContainerColor = Color(0xFF141414),
-                                    focusedContainerColor = Color(0xFF141414)
-                                )
-                            )
-
-                            OutlinedTextField(
-                                value = proEndpointInput,
-                                onValueChange = { proEndpointInput = it },
-                                label = { Text("Endpoint Pro Oficial (Opcional)") },
-                                placeholder = { Text("https://pro.mgeb.top/embed/{tmdb_id}", color = Color.White.copy(alpha = 0.3f)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true,
-                                shape = RoundedCornerShape(8.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    unfocusedTextColor = Color.White,
-                                    focusedTextColor = Color.White,
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                                    focusedBorderColor = previewColor,
-                                    unfocusedContainerColor = Color(0xFF141414),
-                                    focusedContainerColor = Color(0xFF141414)
-                                )
-                            )
-
-                            Button(
-                                onClick = {
-                                    onSaveOfficialCredentials?.invoke(proKeyInput.trim(), proEndpointInput.trim())
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = previewColor),
-                                shape = RoundedCornerShape(8.dp),
-                                enabled = enabled && !isSaving
-                            ) {
-                                Icon(Icons.Default.Check, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("SALVAR CONFIGURAÇÃO OFICIAL", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-                
-                if (isSaving) {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)),
-                        color = previewColor,
-                        trackColor = previewColor.copy(alpha = 0.1f)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun ColorPickerDialog(
-    initialColor: String,
-    onColorSelected: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val palette = listOf(
-        Pair("Vermelho", "#E50914"),
-        Pair("Azul", "#1E88E5"),
-        Pair("Verde", "#10B981"),
-        Pair("Laranja", "#FB542B"),
-        Pair("Amarelo", "#F59E0B"),
-        Pair("Roxo", "#8B5CF6"),
-        Pair("Marrom", "#795548"),
-        Pair("Preto", "#18181B"),
-        Pair("Branco", "#FFFFFF"),
-        Pair("Ciano", "#00BCD4")
-    )
-
-    var currentHex by remember { mutableStateOf(initialColor.removePrefix("#").uppercase()) }
-    
-    // Initial hue calculation from initial hex
-    var hue by remember {
-        val initialInt = try {
-            android.graphics.Color.parseColor("#${initialColor.removePrefix("#")}")
-        } catch (e: Exception) {
-            android.graphics.Color.parseColor("#FB542B")
-        }
-        val hsv = FloatArray(3)
-        android.graphics.Color.colorToHSV(initialInt, hsv)
-        mutableFloatStateOf(hsv[0])
-    }
-
-    val isValid = com.example.data.remote.MegaEmbedPlayerType.isValidHexColor(currentHex)
-    val previewColor = try {
-        if (isValid) Color(android.graphics.Color.parseColor("#$currentHex")) else Color.Gray
-    } catch (e: Exception) {
-        Color.Gray
-    }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 380.dp),
-            shape = RoundedCornerShape(16.dp),
-            color = Color(0xFF141418),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Selecionar cor",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp
-                    )
-                    
-                    // Live Mini Indicator
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(previewColor)
-                            .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
-                    )
-                }
-
-                // 1. Preview Box with Hex Text
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(previewColor)
-                        .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(10.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        "#$currentHex",
-                        color = if (previewColor.luminance() > 0.5f) Color.Black else Color.White,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 20.sp,
-                        letterSpacing = 1.sp
-                    )
-                }
-
-                // 2. PALETA DE CORES
-                Text(
-                    "PALETA DE CORES",
-                    color = Color.Gray,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                )
-
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(5),
-                    modifier = Modifier.height(84.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(palette) { (name, hex) ->
-                        val itemColor = Color(android.graphics.Color.parseColor(hex))
-                        val isSelected = currentHex.equals(hex.removePrefix("#"), ignoreCase = true)
-                        Box(
-                            modifier = Modifier
-                                .aspectRatio(1f)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(itemColor)
-                                .border(
-                                    width = if (isSelected) 3.dp else 1.dp,
-                                    color = if (isSelected) Color.White else Color.White.copy(alpha = 0.15f),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                .clickable {
-                                    val cleanHex = hex.removePrefix("#").uppercase()
-                                    currentHex = cleanHex
-                                    val colorInt = android.graphics.Color.parseColor(hex)
-                                    val hsvArr = FloatArray(3)
-                                    android.graphics.Color.colorToHSV(colorInt, hsvArr)
-                                    hue = hsvArr[0]
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (isSelected) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = null,
-                                    tint = if (itemColor.luminance() > 0.5f) Color.Black else Color.White,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // 3. ESPECTRO / SLIDER
-                Text(
-                    "ESPECTRO / SLIDER",
-                    color = Color.Gray,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                )
-
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // Rainbow Gradient Bar
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(10.dp)
-                            .clip(RoundedCornerShape(5.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        Color.Red,
-                                        Color.Yellow,
-                                        Color.Green,
-                                        Color.Cyan,
-                                        Color.Blue,
-                                        Color.Magenta,
-                                        Color.Red
-                                    )
-                                )
-                            )
-                    )
-
-                    Slider(
-                        value = hue,
-                        onValueChange = { newHue ->
-                            hue = newHue
-                            val hsv = floatArrayOf(newHue, 1f, 1f)
-                            val colorInt = android.graphics.Color.HSVToColor(hsv)
-                            currentHex = String.format("%06X", 0xFFFFFF and colorInt)
-                        },
-                        valueRange = 0f..360f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color.Transparent,
-                            inactiveTrackColor = Color.Transparent
-                        ),
-                        modifier = Modifier.fillMaxWidth().height(24.dp)
-                    )
-                }
-
-                // 4. HEX PERSONALIZADO
-                Text(
-                    "HEX PERSONALIZADO",
-                    color = Color.Gray,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                )
-
-                OutlinedTextField(
-                    value = currentHex,
-                    onValueChange = { input ->
-                        val clean = input.uppercase().removePrefix("#").take(6)
-                        currentHex = clean
-                        if (clean.length == 6 && com.example.data.remote.MegaEmbedPlayerType.isValidHexColor(clean)) {
-                            try {
-                                val colorInt = android.graphics.Color.parseColor("#$clean")
-                                val hsvArr = FloatArray(3)
-                                android.graphics.Color.colorToHSV(colorInt, hsvArr)
-                                hue = hsvArr[0]
-                            } catch (e: Exception) {
-                                // Ignore parsing error while typing
-                            }
-                        }
-                    },
-                    prefix = { Text("# ", color = Color.White, fontWeight = FontWeight.Bold) },
-                    placeholder = { Text("E50914", color = Color.Gray) },
-                    modifier = Modifier.fillMaxWidth(),
-                    isError = !isValid,
-                    singleLine = true,
-                    shape = RoundedCornerShape(8.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = previewColor,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                        focusedContainerColor = Color(0xFF1B1B20),
-                        unfocusedContainerColor = Color(0xFF1B1B20)
-                    )
-                )
-
-                if (!isValid) {
-                    Text("Informe um código HEX de 6 dígitos válido", color = Color(0xFFEF4444), fontSize = 11.sp)
-                }
-
-                // 5. Botões CANCELAR e SALVAR
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedButton(
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-                    ) {
-                        Text("CANCELAR", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    }
-
-                    Button(
-                        onClick = { onColorSelected(currentHex) },
-                        enabled = isValid,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isValid) previewColor else Color.Gray,
-                            contentColor = if (isValid && previewColor.luminance() > 0.5f) Color.Black else Color.White
-                        )
-                    ) {
-                        Text("SALVAR", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun Color.luminance(): Float {
-    val argb = toArgb()
-    val r = (argb shr 16 and 0xFF) / 255f
-    val g = (argb shr 8 and 0xFF) / 255f
-    val b = (argb and 0xFF) / 255f
-    return 0.299f * r + 0.587f * g + 0.114f * b
-}
-
-@Composable
-fun AudioConfigCard(
-    playerConfig: com.example.data.remote.PlayerConfig,
-    isSaving: Boolean,
-    onSaveSubtitled: (provider: String, defaultLanguage: String, enabled: Boolean) -> Unit
-) {
-    var subtitledProvider by remember(playerConfig.subtitledPlayer.provider) { 
-        mutableStateOf(if (playerConfig.subtitledPlayer.provider.isNotBlank()) playerConfig.subtitledPlayer.provider else "vidsrc") 
-    }
-    var subtitledLanguage by remember(playerConfig.subtitledPlayer.defaultLanguage) { 
-        mutableStateOf(if (playerConfig.subtitledPlayer.defaultLanguage.isNotBlank()) playerConfig.subtitledPlayer.defaultLanguage else "pt") 
-    }
-    var subtitledEnabled by remember(playerConfig.subtitledPlayer.enabled) { 
-        mutableStateOf(playerConfig.subtitledPlayer.enabled) 
-    }
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161616)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
-        shape = RoundedCornerShape(10.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Text(
-                        "CONFIGURAÇÃO DE ÁUDIO",
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontSize = 14.sp
-                    )
-                    Text(
-                        "Mapeamento oficial de provedores por tipo de áudio",
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 11.sp
-                    )
-                }
-                Badge(
-                    containerColor = Color(0xFFfb542b).copy(alpha = 0.2f),
-                    contentColor = Color(0xFFfb542b)
-                ) {
-                    Text("SISTEMA", fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
-                }
-            }
-
-            // DUBLADO SECTION
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF4CAF50).copy(alpha = 0.2f)),
+                            .background(BrandRed.copy(alpha = 0.15f))
+                            .border(1.dp, BrandRed.copy(alpha = 0.35f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.VolumeUp, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(20.dp))
+                        Icon(
+                            imageVector = Icons.Default.PlayCircleOutline,
+                            contentDescription = null,
+                            tint = BrandRed,
+                            modifier = Modifier.size(24.dp)
+                        )
                     }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
                     Column(modifier = Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("DUBLADO", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                            Spacer(Modifier.width(6.dp))
-                            Badge(containerColor = Color(0xFF4CAF50).copy(alpha = 0.2f), contentColor = Color(0xFF4CAF50)) {
-                                Text("ATIVO", fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
-                            }
-                        }
-                        Text("Provedor: MegaEmbed (mgeb.top)", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+                        Text(
+                            text = "CENTRO DE TESTES DE PLAYERS",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Teste os players configurados no sistema usando um filme ou série.",
+                            color = Color(0xFF9E9EA8),
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
                     }
                 }
             }
+        }
 
-            // LEGENDADO SECTION (VIDSRC)
+        // --- 2. LISTA DE PLAYERS CONFIGURADOS NO SISTEMA (FONTE ÚNICA) ---
+        item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFfb542b).copy(alpha = 0.3f)),
-                shape = RoundedCornerShape(8.dp)
+                colors = CardDefaults.cardColors(containerColor = DarkCard),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, DarkCardBorder)
             ) {
                 Column(
-                    modifier = Modifier.padding(12.dp),
+                    modifier = Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        Column {
+                            Text(
+                                text = "PLAYERS CONFIGURADOS",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+                            Text(
+                                text = "Sincronizado diretamente com Configurações → Players",
+                                color = Color(0xFF7E7E8C),
+                                fontSize = 11.sp
+                            )
+                        }
+
+                        Surface(
+                            color = Color(0xFF1E1E28),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, Color(0xFF333344))
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFfb542b).copy(alpha = 0.2f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Subtitles, contentDescription = null, tint = Color(0xFFfb542b), modifier = Modifier.size(20.dp))
-                            }
-                            Column {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("LEGENDADO", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
-                                    Spacer(Modifier.width(6.dp))
-                                    Badge(
-                                        containerColor = if (subtitledEnabled) Color(0xFF4CAF50).copy(alpha = 0.2f) else Color(0xFFF44336).copy(alpha = 0.2f),
-                                        contentColor = if (subtitledEnabled) Color(0xFF4CAF50) else Color(0xFFF44336)
+                            Text(
+                                text = "${playerSources.size} cadastrados",
+                                color = Color(0xFFD0D0DE),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = DarkCardBorder)
+
+                    if (playerSources.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 20.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Nenhum player configurado no sistema.",
+                                color = Color.Gray,
+                                fontSize = 12.sp
+                            )
+                        }
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            playerSources.forEach { source ->
+                                val isSelectedForTest = selectedPlayerId == source.id
+                                val isMgeb = source.id.contains("mgeb", ignoreCase = true) || source.name.contains("mgeb", ignoreCase = true)
+
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .border(
+                                            width = if (isSelectedForTest) 1.5.dp else 1.dp,
+                                            color = if (isSelectedForTest) BrandRed else DarkCardBorder,
+                                            shape = RoundedCornerShape(10.dp)
+                                        ),
+                                    color = if (isSelectedForTest) BrandRed.copy(alpha = 0.08f) else Color(0xFF161620)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text(if (subtitledEnabled) "ATIVO" else "INATIVO", fontSize = 8.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(2.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(8.dp)
+                                                        .clip(CircleShape)
+                                                        .background(if (source.enabled) Color(0xFF4CAF50) else Color(0xFF757575))
+                                                )
+
+                                                Text(
+                                                    text = source.name,
+                                                    color = Color.White,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+
+                                                // Status Badge
+                                                Surface(
+                                                    color = if (source.enabled) Color(0xFF1B5E20).copy(alpha = 0.4f) else Color(0xFF37474F).copy(alpha = 0.4f),
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    border = BorderStroke(
+                                                        0.5.dp,
+                                                        if (source.enabled) Color(0xFF4CAF50) else Color(0xFF78909C)
+                                                    )
+                                                ) {
+                                                    Text(
+                                                        text = if (source.enabled) "ATIVO" else "DESATIVADO",
+                                                        color = if (source.enabled) Color(0xFF81C784) else Color(0xFFB0BEC5),
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                    )
+                                                }
+
+                                                if (source.isDefault) {
+                                                    Surface(
+                                                        color = BrandRed.copy(alpha = 0.2f),
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        border = BorderStroke(0.5.dp, BrandRed.copy(alpha = 0.6f))
+                                                    ) {
+                                                        Text(
+                                                            text = "PADRÃO",
+                                                            color = BrandRed,
+                                                            fontSize = 9.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            Button(
+                                                onClick = {
+                                                    selectedPlayerId = source.id
+                                                    generateAndTestUrl()
+                                                },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = if (isSelectedForTest) BrandRed else Color(0xFF262634)
+                                                ),
+                                                shape = RoundedCornerShape(6.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                                modifier = Modifier.height(30.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(3.dp))
+                                                Text(
+                                                    text = "TESTAR",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+
+                                        // Informações adicionais de suporte e aviso se desativado
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Suporte: ${if (source.supportedContent.contains("tv")) "Filmes e Séries" else "Filmes"} • Áudio: ${source.language}",
+                                                color = Color(0xFF8E8EA0),
+                                                fontSize = 11.sp
+                                            )
+
+                                            if (!source.enabled) {
+                                                Text(
+                                                    text = "Desativado em Configurações → Players",
+                                                    color = Color(0xFFFFB74D),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            }
+                                        }
                                     }
                                 }
-                                Text("Provedor: VidSrc (vidsrc.tw)", color = Color(0xFFfb542b), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-
-                        Switch(
-                            checked = subtitledEnabled,
-                            onCheckedChange = { subtitledEnabled = it },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFFfb542b),
-                                uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                                uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
-                            )
-                        )
-                    }
-
-                    Text(
-                        "O botão Legendado no player do app utiliza exclusivamente VidSrc para Filmes e Séries.",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 11.sp
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = subtitledLanguage,
-                            onValueChange = { subtitledLanguage = it },
-                            label = { Text("Idioma Legendas") },
-                            placeholder = { Text("pt") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFFfb542b),
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.15f)
-                            )
-                        )
-
-                        Button(
-                            onClick = {
-                                onSaveSubtitled(subtitledProvider, subtitledLanguage, subtitledEnabled)
-                            },
-                            enabled = !isSaving,
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFfb542b)),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(52.dp)
-                        ) {
-                            if (isSaving) {
-                                RonycineSmileLoader(
-                                    color = Color.White,
-                                    size = 16.dp
-                                )
-                            } else {
-                                Icon(Icons.Default.Save, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("SALVAR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
                 }
             }
         }
-    }
-}
 
-@Composable
-fun PlayerSourceCompactCard(
-    source: PlayerSource,
-    isGlobalDefault: Boolean,
-    isSettingDefault: Boolean,
-    isToggling: Boolean,
-    accentColor: Color,
-    canManagePlayers: Boolean = true,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    onToggle: () -> Unit,
-    onSetDefault: () -> Unit,
-    onDuplicate: () -> Unit,
-    onTest: () -> Unit = {}
-) {
-    var expanded by remember { mutableStateOf(false) }
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .clickable { expanded = !expanded },
-        color = Color(0xFF1A1A1A),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp, 
-            if (isGlobalDefault) accentColor.copy(alpha = 0.3f) else Color.White.copy(alpha = 0.05f)
-        )
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
+        // --- 3. BANCADA DE TESTE DO PLAYER ---
+        item {
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                colors = CardDefaults.cardColors(containerColor = DarkCard),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.dp, DarkCardBorder)
             ) {
-                // Status Indicator
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(if (source.enabled) Color(0xFF22C55E) else Color(0xFFEF4444))
-                        .border(1.dp, Color.White.copy(alpha = 0.1f), CircleShape)
-                )
-                
-                Spacer(Modifier.width(12.dp))
-                
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            source.name, 
-                            color = if (source.enabled) Color.White else Color.White.copy(alpha = 0.4f), 
-                            fontWeight = FontWeight.Bold, 
-                            fontSize = 15.sp
-                        )
-                        if (isGlobalDefault) {
-                            Spacer(Modifier.width(8.dp))
-                            Surface(
-                                color = accentColor.copy(alpha = 0.1f),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    "PRINCIPAL", 
-                                    color = accentColor, 
-                                    fontSize = 9.sp, 
-                                    fontWeight = FontWeight.Black,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
-                    
-                    Spacer(Modifier.height(4.dp))
-
-                    // Status do player, Publicidade e Origem
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        // Status do player
-                        Surface(
-                            color = if (source.enabled) Color(0xFF22C55E).copy(alpha = 0.15f) else Color(0xFFEF4444).copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = if (source.enabled) "ATIVO" else "DESATIVADO",
-                                color = if (source.enabled) Color(0xFF22C55E) else Color(0xFFEF4444),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                            )
-                        }
-
-                        // Publicidade
-                        val isAdFree = source.isAdFreeAvailable()
-                        Surface(
-                            color = if (isAdFree) Color(0xFF22C55E).copy(alpha = 0.15f) else Color(0xFFF59E0B).copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text(
-                                text = if (isAdFree) "[Sem anúncios — disponível]" else "[Publicidade fornecida pelo player]",
-                                color = if (isAdFree) Color(0xFF22C55E) else Color(0xFFF59E0B),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                            )
-                        }
-
-                        // Origem
-                        Text(
-                            text = source.getEffectiveOrigin(),
-                            color = Color.White.copy(alpha = 0.5f),
-                            fontSize = 9.5.sp,
-                            maxLines = 1
-                        )
-                    }
-                }
-
-                if (isToggling) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp).padding(4.dp),
-                        color = accentColor,
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Switch(
-                        checked = source.enabled,
-                        onCheckedChange = { if (canManagePlayers) onToggle() },
-                        enabled = canManagePlayers,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = if (canManagePlayers) accentColor else Color.Gray,
-                            uncheckedThumbColor = Color.White.copy(alpha = 0.4f),
-                            uncheckedTrackColor = Color.White.copy(alpha = 0.1f)
-                        )
-                    )
-                }
-
-                IconButton(onClick = { expanded = !expanded }) {
-                    Icon(
-                        if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, 
-                        null, 
-                        tint = Color.White.copy(alpha = 0.5f)
-                    )
-                }
-            }
-
-            if (expanded) {
-                Divider(
-                    color = Color.White.copy(alpha = 0.05f),
-                    modifier = Modifier.padding(vertical = 10.dp)
-                )
-
-                // Painel de Auditoria Detalhado
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 10.dp),
-                    color = Color(0xFF141414),
-                    shape = RoundedCornerShape(8.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Status do player:", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
-                            Text(
-                                if (source.enabled) "ATIVO" else "DESATIVADO",
-                                color = if (source.enabled) Color(0xFF22C55E) else Color(0xFFEF4444),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Publicidade:", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
-                            Text(
-                                if (source.isAdFreeAvailable()) "[Sem anúncios — disponível]" else "[Publicidade fornecida pelo player]",
-                                color = if (source.isAdFreeAvailable()) Color(0xFF22C55E) else Color(0xFFF59E0B),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Origem:", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
-                            Text(
-                                source.getEffectiveOrigin(),
-                                color = Color.White,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp
-                            )
-                        }
-
-                        Divider(color = Color.White.copy(alpha = 0.05f), modifier = Modifier.padding(vertical = 2.dp))
-
-                        Text(
-                            text = source.getAdvertisingDetail(),
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 10.5.sp,
-                            lineHeight = 14.sp
-                        )
-
-                        if (source.isAdFreeAvailable()) {
-                            Text(
-                                text = "✓ Credencial Pro Oficial ativa neste player.",
-                                color = Color(0xFF22C55E),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { if (canManagePlayers) onEdit() },
-                        modifier = Modifier.weight(1f),
-                        enabled = canManagePlayers,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(0.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, if (canManagePlayers) Color.White.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.05f))
-                    ) {
-                        Icon(if (canManagePlayers) Icons.Default.Edit else Icons.Default.Lock, null, modifier = Modifier.size(14.dp), tint = if (canManagePlayers) Color.White else Color.Gray)
-                        Spacer(Modifier.width(4.dp))
-                        Text(if (canManagePlayers) "EDITAR" else "BLOQUEADO", fontSize = 11.sp, color = if (canManagePlayers) Color.White else Color.Gray)
-                    }
-
-                    if (!isGlobalDefault && source.enabled) {
-                        Button(
-                            onClick = { if (canManagePlayers) onSetDefault() },
-                            modifier = Modifier.weight(1f),
-                            enabled = canManagePlayers,
-                            shape = RoundedCornerShape(8.dp),
-                            contentPadding = PaddingValues(0.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (canManagePlayers) accentColor.copy(alpha = 0.1f) else Color.Gray.copy(alpha = 0.1f)
-                            ),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, if (canManagePlayers) accentColor.copy(alpha = 0.3f) else Color.Gray.copy(alpha = 0.3f))
-                        ) {
-                            Icon(if (canManagePlayers) Icons.Default.Star else Icons.Default.Lock, null, modifier = Modifier.size(14.dp), tint = if (canManagePlayers) accentColor else Color.Gray)
-                            Spacer(Modifier.width(4.dp))
-                            Text(if (canManagePlayers) "PRINCIPAL" else "BLOQUEADO", fontSize = 11.sp, color = if (canManagePlayers) accentColor else Color.Gray)
-                        }
-                    }
-
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFFF44336).copy(alpha = 0.1f))
-                    ) {
-                        Icon(Icons.Default.Delete, null, tint = Color(0xFFF44336), modifier = Modifier.size(18.dp))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun PlayerSourceFormDialog(
-    source: PlayerSource?,
-    onDismiss: () -> Unit,
-    onSave: (PlayerSource) -> Unit
-) {
-    var name by remember { mutableStateOf(source?.name ?: "") }
-    var priority by remember { mutableStateOf(source?.priority?.toString() ?: "1") }
-    var language by remember { mutableStateOf(source?.language ?: "Dublado") }
-    
-    var movieTmdbUrl by remember { mutableStateOf(source?.movieTmdbUrl ?: "") }
-    var movieImdbUrl by remember { mutableStateOf(source?.movieImdbUrl ?: "") }
-    var tvTmdbUrl by remember { mutableStateOf(source?.tvTmdbUrl ?: "") }
-    var tvImdbUrl by remember { mutableStateOf(source?.tvImdbUrl ?: "") }
-    
-    var internalPlayer by remember { mutableStateOf(source?.internalPlayer ?: "") }
-    var playerColor by remember { mutableStateOf(source?.playerColor ?: "") }
-    
-    var providerOrigin by remember { 
-        mutableStateOf(source?.providerOrigin?.ifBlank { null } ?: source?.getEffectiveOrigin() ?: "") 
-    }
-    var officialApiKey by remember { mutableStateOf(source?.officialApiKey ?: "") }
-    var officialProEndpoint by remember { mutableStateOf(source?.officialProEndpoint ?: "") }
-
-    var enabled by remember { mutableStateOf(source?.enabled ?: true) }
-    var isSaving by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFF121212),
-        title = {
-            Text(if (source == null) "Adicionar Player" else "Editar Player", color = Color.White)
-        },
-        text = {
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 450.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Quick Preset Selection
-                item {
-                    Text("PREDEFINIÇÕES RÁPIDAS", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                name = "MegaEmbed"
-                                priority = "1"
-                                language = "Dublado"
-                                movieTmdbUrl = "https://mgeb.top/embed/{tmdb_id}"
-                                tvTmdbUrl = "https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}"
-                                internalPlayer = "megaplay"
-                                playerColor = "#fb542b"
-                                providerOrigin = "MegaEmbed"
-                                enabled = true
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(6.dp),
-                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
-                        ) {
-                            Text("MegaEmbed", fontSize = 10.sp, color = Color.White, maxLines = 1)
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                name = "RedeFlixApi"
-                                priority = "2"
-                                language = "Dublado"
-                                movieTmdbUrl = "https://redeflixapi.store/filme/{tmdb_id}"
-                                tvTmdbUrl = "https://redeflixapi.store/serie/{tmdb_id}/{season_number}/{episode_number}"
-                                internalPlayer = "redeflixapi"
-                                playerColor = "#E50914"
-                                providerOrigin = "RedeFlixApi"
-                                enabled = true
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(6.dp),
-                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE50914).copy(alpha = 0.6f))
-                        ) {
-                            Text("RedeFlix", fontSize = 10.sp, color = Color(0xFFE50914), maxLines = 1)
-                        }
-
-                        OutlinedButton(
-                            onClick = {
-                                name = "VidSrc"
-                                priority = "3"
-                                language = "Legendado"
-                                movieTmdbUrl = "https://vidsrc.tw/embed/movie/{tmdb_id}"
-                                tvTmdbUrl = "https://vidsrc.tw/embed/tv/{tmdb_id}/{season_number}/{episode_number}"
-                                internalPlayer = ""
-                                playerColor = "#3B82F6"
-                                providerOrigin = "VidSrc"
-                                enabled = true
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(6.dp),
-                            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 4.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF3B82F6).copy(alpha = 0.6f))
-                        ) {
-                            Text("VidSrc", fontSize = 10.sp, color = Color(0xFF3B82F6), maxLines = 1)
-                        }
-                    }
-                }
-
-                item {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("Nome do Player") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
+                    Text(
+                        text = "TESTAR PLAYER",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Black,
+                        letterSpacing = 0.5.sp
                     )
-                }
-                
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = priority,
-                            onValueChange = { priority = it },
-                            label = { Text("Prioridade") },
-                            modifier = Modifier.weight(1f),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedTextColor = Color.White,
-                                focusedTextColor = Color.White,
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                                focusedBorderColor = Color(0xFFfb542b)
-                            )
+
+                    // Seletor de Player (Dropdown)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "PLAYER",
+                            color = Color(0xFFA0A0B0),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
-                        
-                        var langExpanded by remember { mutableStateOf(false) }
-                        Box(modifier = Modifier.weight(1f)) {
+
+                        ExposedDropdownMenuBox(
+                            expanded = isPlayerDropdownExpanded,
+                            onExpandedChange = { isPlayerDropdownExpanded = it }
+                        ) {
                             OutlinedTextField(
-                                value = language,
-                                onValueChange = { },
-                                label = { Text("Idioma") },
+                                value = selectedSource?.name ?: "Selecione um player",
+                                onValueChange = {},
                                 readOnly = true,
-                                trailingIcon = { Icon(Icons.Default.ArrowDropDown, null, tint = Color.White) },
-                                modifier = Modifier.fillMaxWidth().clickable { langExpanded = true },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isPlayerDropdownExpanded) },
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    unfocusedTextColor = Color.White,
+                                    focusedContainerColor = Color(0xFF181822),
+                                    unfocusedContainerColor = Color(0xFF181822),
                                     focusedTextColor = Color.White,
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                                    focusedBorderColor = Color(0xFFfb542b)
-                                )
+                                    unfocusedTextColor = Color.White,
+                                    focusedBorderColor = BrandRed,
+                                    unfocusedBorderColor = DarkCardBorder
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor()
+                                    .height(50.dp)
                             )
-                            DropdownMenu(
-                                expanded = langExpanded,
-                                onDismissRequest = { langExpanded = false },
-                                modifier = Modifier.background(Color(0xFF1A1A1A))
+
+                            ExposedDropdownMenu(
+                                expanded = isPlayerDropdownExpanded,
+                                onDismissRequest = { isPlayerDropdownExpanded = false },
+                                modifier = Modifier.background(Color(0xFF181822))
                             ) {
-                                listOf("Dublado", "Legendado", "Original").forEach {
+                                playerSources.forEach { source ->
                                     DropdownMenuItem(
-                                        text = { Text(it, color = Color.White) },
-                                        onClick = { 
-                                            language = it
-                                            langExpanded = false 
+                                        text = {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(source.name, color = Color.White, fontWeight = FontWeight.Bold)
+                                                Text(
+                                                    text = if (source.enabled) "Ativo" else "Desativado",
+                                                    color = if (source.enabled) Color(0xFF81C784) else Color(0xFFE57373),
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedPlayerId = source.id
+                                            isPlayerDropdownExpanded = false
                                         }
                                     )
                                 }
                             }
                         }
                     }
-                }
 
-                item { Text("FILMES", color = Color(0xFFfb542b), fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-                
-                item {
-                    OutlinedTextField(
-                        value = movieTmdbUrl,
-                        onValueChange = { movieTmdbUrl = it },
-                        label = { Text("URL TMDB") },
-                        placeholder = { Text("https://.../{tmdb_id}") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
-                    )
-                }
-
-                item { Text("SÉRIES", color = Color(0xFFfb542b), fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-
-                item {
-                    OutlinedTextField(
-                        value = tvTmdbUrl,
-                        onValueChange = { tvTmdbUrl = it },
-                        label = { Text("URL TMDB") },
-                        placeholder = { Text("https://.../{tmdb_id}/{season_number}/{episode_number}") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
-                    )
-                }
-
-                item { Text("AVANÇADO", color = Color(0xFFfb542b), fontSize = 11.sp, fontWeight = FontWeight.Bold) }
-
-                item {
-                    var playerTypeExpanded by remember { mutableStateOf(false) }
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = internalPlayer,
-                            onValueChange = { internalPlayer = it },
-                            label = { Text("Player Interno (Mgeb)") },
-                            placeholder = { Text("Ex: megaplay, vidstack") },
-                            trailingIcon = { Icon(Icons.Default.ArrowDropDown, null, tint = Color.White) },
-                            modifier = Modifier.fillMaxWidth().clickable { playerTypeExpanded = true },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                unfocusedTextColor = Color.White,
-                                focusedTextColor = Color.White,
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                                focusedBorderColor = Color(0xFFfb542b)
-                            )
-                        )
-                        DropdownMenu(
-                            expanded = playerTypeExpanded,
-                            onDismissRequest = { playerTypeExpanded = false },
-                            modifier = Modifier.background(Color(0xFF1A1A1A))
-                        ) {
-                            listOf("megaplay", "megatube", "vidstack", "vidcore", "redeflixapi").forEach {
-                                DropdownMenuItem(
-                                    text = { Text(it, color = Color.White) },
-                                    onClick = { 
-                                        internalPlayer = it
-                                        playerTypeExpanded = false 
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                item {
-                    OutlinedTextField(
-                        value = playerColor,
-                        onValueChange = { playerColor = it },
-                        label = { Text("Cor (Hex)") },
-                        placeholder = { Text("#fb542b") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
-                    )
-                }
-                
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable { enabled = !enabled },
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = enabled,
-                            onCheckedChange = { enabled = it },
-                            colors = CheckboxDefaults.colors(checkedColor = Color(0xFFfb542b))
-                        )
-                        Text("Habilitado para o Aplicativo", color = Color.White, fontSize = 14.sp)
-                    }
-                }
-
-                // AUDITORIA, ORIGEM E MODO SEM ANÚNCIOS OFICIAL
-                item {
-                    Text("AUDITORIA & INTEGRAÇÃO DE ANÚNCIOS", color = Color(0xFFfb542b), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-
-                item {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = Color(0xFF161616),
-                        shape = RoundedCornerShape(8.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Status do player:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                                Text(
-                                    if (enabled) "ATIVO" else "DESATIVADO",
-                                    color = if (enabled) Color(0xFF22C55E) else Color(0xFFEF4444),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            val isAdFree = officialApiKey.isNotBlank() || officialProEndpoint.isNotBlank()
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Publicidade:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                                Text(
-                                    if (isAdFree) "[Sem anúncios — disponível]" else "[Publicidade fornecida pelo player]",
-                                    color = if (isAdFree) Color(0xFF22C55E) else Color(0xFFF59E0B),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Origem:", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
-                                Text(
-                                    providerOrigin.ifBlank { name.ifBlank { "Provedor Externo" } },
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp
-                                )
-                            }
-
-                            Divider(color = Color.White.copy(alpha = 0.05f), modifier = Modifier.padding(vertical = 2.dp))
-
-                            Text(
-                                text = if (isAdFree) {
-                                    "✓ Configuração oficial sem anúncios ativa para este fornecedor. O player será carregado com autenticação autorizada."
-                                } else {
-                                    "LIMITAÇÃO DO FORNECEDOR: Anúncios veiculados pelo fornecedor na modalidade pública/gratuita. O RONYCINE não adiciona publicidade própria nem utiliza métodos agressivos de remoção que quebrem a inicialização do vídeo."
-                                },
-                                color = Color.White.copy(alpha = 0.6f),
-                                fontSize = 10.5.sp,
-                                lineHeight = 14.sp
-                            )
-                        }
-                    }
-                }
-
-                item {
-                    OutlinedTextField(
-                        value = providerOrigin,
-                        onValueChange = { providerOrigin = it },
-                        label = { Text("Origem do Fornecedor") },
-                        placeholder = { Text("Ex: RedeFlixApi, MegaEmbed, VidSrc") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
-                    )
-                }
-
-                item {
-                    OutlinedTextField(
-                        value = officialApiKey,
-                        onValueChange = { officialApiKey = it },
-                        label = { Text("Chave / Token Pro Oficial (Opcional)") },
-                        placeholder = { Text("Ex: rf_api_key_xxxxxxxx") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
-                    )
-                }
-
-                item {
-                    OutlinedTextField(
-                        value = officialProEndpoint,
-                        onValueChange = { officialProEndpoint = it },
-                        label = { Text("Endpoint Pro Oficial (Opcional)") },
-                        placeholder = { Text("https://pro.api.../embed/{tmdb_id}") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    isSaving = true
-                    val isAdFree = officialApiKey.isNotBlank() || officialProEndpoint.isNotBlank()
-                    val newSource = (source ?: PlayerSource()).copy(
-                        id = if (source == null) UUID.randomUUID().toString() else source.id,
-                        name = name,
-                        priority = priority.toIntOrNull() ?: 1,
-                        language = language,
-                        movieTmdbUrl = movieTmdbUrl,
-                        movieImdbUrl = movieImdbUrl,
-                        tvTmdbUrl = tvTmdbUrl,
-                        tvImdbUrl = tvImdbUrl,
-                        internalPlayer = internalPlayer,
-                        playerColor = playerColor,
-                        enabled = enabled,
-                        providerOrigin = providerOrigin.trim(),
-                        officialApiKey = officialApiKey.trim(),
-                        officialProEndpoint = officialProEndpoint.trim(),
-                        playbackMode = if (isAdFree) "official_ad_free" else "standard",
-                        updatedAt = System.currentTimeMillis()
-                    )
-                    onSave(newSource)
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFfb542b)),
-                enabled = name.isNotBlank() && !isSaving
-            ) {
-                Text(if (isSaving) "SALVANDO..." else "SALVAR ALTERAÇÕES")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isSaving) {
-                Text("CANCELAR", color = Color.White.copy(alpha = 0.5f))
-            }
-        }
-    )
-}
-
-@Composable
-fun PlayerTestCard(
-    sources: List<PlayerSource>,
-    defaultPlayerId: String? = null,
-    playerConfig: com.example.data.remote.PlayerConfig? = null,
-    selectedPlayerIdOverride: String? = null
-) {
-    var selectedSource by remember { mutableStateOf<PlayerSource?>(null) }
-    var mediaType by remember { mutableStateOf("movie") }
-    var tmdbId by remember { mutableStateOf("1439930") }
-    var season by remember { mutableStateOf("1") }
-    var episode by remember { mutableStateOf("1") }
-    
-    var testPlayerType by remember { mutableStateOf("megaplay") }
-    var testColor by remember { mutableStateOf("#fb542b") }
-
-    var generatedUrl by remember { mutableStateOf("") }
-    var previewReloadCount by remember { mutableIntStateOf(0) }
-    val clipboardManager = LocalClipboardManager.current
-    val context = LocalContext.current
-
-    // React to external player selection for test
-    LaunchedEffect(selectedPlayerIdOverride) {
-        if (selectedPlayerIdOverride != null) {
-            val matched = sources.find { it.id == selectedPlayerIdOverride }
-            if (matched != null) {
-                selectedSource = matched
-            }
-        }
-    }
-
-    // Auto-select primary player on first load if sources are available
-    LaunchedEffect(sources, defaultPlayerId) {
-        if (selectedSource == null && sources.isNotEmpty()) {
-            selectedSource = sources.find { it.id == defaultPlayerId && it.enabled } 
-                ?: sources.firstOrNull { it.enabled }
-        }
-    }
-
-    LaunchedEffect(playerConfig) {
-        if (playerConfig != null) {
-            if (playerConfig.megaEmbed.player.isNotBlank()) {
-                testPlayerType = playerConfig.megaEmbed.player
-            }
-            if (playerConfig.megaEmbed.color.isNotBlank()) {
-                testColor = "#" + playerConfig.megaEmbed.color.removePrefix("#")
-            }
-        }
-    }
-
-    val isMegaEmbed = selectedSource?.let { src ->
-        src.id.contains("mgeb", ignoreCase = true) ||
-        src.name.contains("mega", ignoreCase = true) ||
-        src.movieTmdbUrl.contains("mgeb.top")
-    } ?: false
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1A1A)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
-    ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("TESTAR GERADOR DE URL", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
-            
-            var sourceExpanded by remember { mutableStateOf(false) }
-            Box(modifier = Modifier.fillMaxWidth()) {
-                // OutlinedTextField styled as a Dropdown
-                OutlinedTextField(
-                    value = selectedSource?.name ?: "Selecionar Player",
-                    onValueChange = {},
-                    readOnly = true,
-                    enabled = false, // We use the Box overlay to capture clicks reliably on mobile
-                    trailingIcon = { 
-                        Icon(
-                            if (sourceExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown, 
-                            null, 
-                            tint = Color.White
-                        ) 
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        disabledTextColor = if (selectedSource != null) Color.White else Color.White.copy(alpha = 0.5f),
-                        disabledBorderColor = Color.White.copy(alpha = 0.1f),
-                        disabledLabelColor = Color.White.copy(alpha = 0.5f),
-                        disabledTrailingIconColor = Color.White
-                    )
-                )
-                
-                // Invisible click overlay to ensure touch events are captured correctly on Android
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clickable { sourceExpanded = true }
-                )
-
-                DropdownMenu(
-                    expanded = sourceExpanded,
-                    onDismissRequest = { sourceExpanded = false },
-                    modifier = Modifier.background(Color(0xFF1A1A1A)).widthIn(min = 200.dp)
-                ) {
-                    val activeSources = sources.filter { it.enabled }
-                    if (activeSources.isEmpty()) {
-                        DropdownMenuItem(
-                            text = { Text("Nenhum player ativo", color = Color.White.copy(alpha = 0.5f)) },
-                            onClick = { sourceExpanded = false },
-                            enabled = false
-                        )
-                    } else {
-                        activeSources.forEach { source ->
-                            DropdownMenuItem(
-                                text = { 
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(source.name, color = Color.White)
-                                        if (source.id == defaultPlayerId) {
-                                            Spacer(Modifier.width(8.dp))
-                                            Icon(Icons.Default.Star, "Principal", tint = Color(0xFFfb542b), modifier = Modifier.size(12.dp))
-                                        }
-                                    }
-                                },
-                                onClick = { 
-                                    selectedSource = source
-                                    sourceExpanded = false 
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Se for MegaEmbed, permite selecionar o Player específico de teste
-            if (isMegaEmbed) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        "Player de Teste (MegaEmbed):",
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        com.example.data.remote.MegaEmbedPlayerType.ALL_PLAYERS.forEach { p ->
-                            val isSelected = testPlayerType.equals(p.code, ignoreCase = true)
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { testPlayerType = p.code },
-                                label = { Text(p.displayName.substringBefore(" "), fontSize = 11.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color(0xFFfb542b),
-                                    selectedLabelColor = Color.White,
-                                    labelColor = Color.White.copy(alpha = 0.7f),
-                                    containerColor = Color(0xFF141414)
-                                ),
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    }
-                }
-
-                // Campo Cor para o teste
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedTextField(
-                        value = testColor,
-                        onValueChange = { testColor = it },
-                        label = { Text("Cor do Player") },
-                        placeholder = { Text("#fb542b") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
-                    )
-                    val previewColor = try {
-                        val clean = com.example.data.remote.MegaEmbedPlayerType.normalizeColor(testColor)
-                        Color(android.graphics.Color.parseColor("#$clean"))
-                    } catch (_: Exception) {
-                        Color(0xFFfb542b)
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(previewColor)
-                            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                    )
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("movie" to "Filme", "tv" to "Série").forEach { (id, label) ->
-                    FilterChip(
-                        selected = mediaType == id,
-                        onClick = { mediaType = id },
-                        label = { Text(label) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFFfb542b).copy(alpha = 0.2f),
-                            selectedLabelColor = Color(0xFFfb542b),
-                            labelColor = Color.White.copy(alpha = 0.6f)
-                        )
-                    )
-                }
-            }
-
-            OutlinedTextField(
-                value = tmdbId,
-                onValueChange = { tmdbId = it },
-                label = { Text("TMDB ID") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    unfocusedTextColor = Color.White,
-                    focusedTextColor = Color.White,
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                    focusedBorderColor = Color(0xFFfb542b)
-                )
-            )
-
-            if (mediaType == "tv") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = season,
-                        onValueChange = { season = it },
-                        label = { Text("Temp") },
-                        modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
-                    )
-                    OutlinedTextField(
-                        value = episode,
-                        onValueChange = { episode = it },
-                        label = { Text("Ep") },
-                        modifier = Modifier.weight(1f),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            unfocusedTextColor = Color.White,
-                            focusedTextColor = Color.White,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
-                            focusedBorderColor = Color(0xFFfb542b)
-                        )
-                    )
-                }
-            }
-
-            Button(
-                onClick = {
-                    val src = selectedSource
-                    if (src != null) {
-                        android.util.Log.d("PLAYER_TEST", "--- INICIANDO TESTE ---")
-                        android.util.Log.d("PLAYER_TEST", "Player: ${src.name} (ID: ${src.id})")
-                        android.util.Log.d("PLAYER_TEST", "Tipo: $mediaType")
-                        android.util.Log.d("PLAYER_TEST", "TMDB ID: $tmdbId")
-                        if (mediaType == "tv") {
-                            android.util.Log.d("PLAYER_TEST", "Temp: $season, Ep: $episode")
-                        }
-
-                        val dummyMedia = com.example.data.local.MediaEntity(
-                            tmdbId = tmdbId.toIntOrNull() ?: 0,
-                            mediaType = mediaType,
-                            title = "Teste",
-                            posterPath = null,
-                            backdropPath = null,
-                            overview = "",
-                            releaseYear = "2024",
-                            rating = 0.0,
-                            genres = ""
-                        )
-
-                        // Clona fonte apenas para o teste com o player e cor selecionados no painel de teste
-                        val effectiveSrc = if (isMegaEmbed) {
-                            src.copy(
-                                internalPlayer = testPlayerType,
-                                playerColor = testColor
-                            )
-                        } else {
-                            src
-                        }
-
-                        generatedUrl = PlayerUtils.buildPlayerUrl(
-                            effectiveSrc, 
-                            dummyMedia, 
-                            season.toIntOrNull(), 
-                            episode.toIntOrNull()
-                        )
-                        previewReloadCount++
-                        android.util.Log.d("PLAYER_TEST", "URL Gerada: $generatedUrl")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFfb542b)),
-                enabled = selectedSource != null && tmdbId.isNotBlank()
-            ) {
-                Text("GERAR URL")
-            }
-
-            if (generatedUrl.isNotEmpty()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = Color.Black.copy(alpha = 0.3f),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("URL GERADA:", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFfb542b))
-                        Spacer(Modifier.height(4.dp))
-                        Text(generatedUrl, color = Color.White, fontSize = 11.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        Spacer(Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = { 
-                                    clipboardManager.setText(AnnotatedString(generatedUrl))
-                                    Toast.makeText(context, "✓ URL copiada", Toast.LENGTH_SHORT).show()
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color.White.copy(alpha = 0.1f)),
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("COPIAR", fontSize = 10.sp)
-                            }
-                            Button(
-                                onClick = { 
-                                    try {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(generatedUrl))
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Erro ao abrir player", Toast.LENGTH_SHORT).show()
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFfb542b).copy(alpha = 0.2f), contentColor = Color(0xFFfb542b)),
-                                contentPadding = PaddingValues(0.dp)
-                            ) {
-                                Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("ABRIR TESTE", fontSize = 10.sp)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ==========================================
-            // SEÇÃO: PRÉ-VISUALIZAÇÃO DO PLAYER DE TESTE
-            // ==========================================
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "PRÉ-VISUALIZAÇÃO",
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    fontSize = 12.sp
-                )
-                if (generatedUrl.isNotBlank()) {
-                    IconButton(
-                        onClick = { previewReloadCount++ },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "Recarregar pré-visualização",
-                            tint = Color.White.copy(alpha = 0.8f),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black)
-                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                if (generatedUrl.isBlank()) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.PlayCircleOutline,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.25f),
-                            modifier = Modifier.size(44.dp)
-                        )
-                        Spacer(Modifier.height(8.dp))
+                    // Seletor de Tipo (Filme / Série)
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            text = "Selecione um player e gere uma URL para testar.",
-                            color = Color.White.copy(alpha = 0.5f),
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center
+                            text = "TIPO DE CONTEÚDO",
+                            color = Color(0xFFA0A0B0),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val isMovie = selectedMediaType == "movie"
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        selectedMediaType = "movie"
+                                        if (tmdbIdInput == "1399" || tmdbIdInput == "1396") tmdbIdInput = "550"
+                                    },
+                                color = if (isMovie) BrandRed else Color(0xFF1A1A26),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, if (isMovie) BrandRed else DarkCardBorder)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Movie,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "FILME",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            val isTv = selectedMediaType == "tv"
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(40.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        selectedMediaType = "tv"
+                                        if (tmdbIdInput == "550" || tmdbIdInput == "27205") tmdbIdInput = "1399"
+                                    },
+                                color = if (isTv) BrandRed else Color(0xFF1A1A26),
+                                shape = RoundedCornerShape(8.dp),
+                                border = BorderStroke(1.dp, if (isTv) BrandRed else DarkCardBorder)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Tv,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "SÉRIE",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Campo TMDB ID e Presets Rápidos
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "TMDB ID",
+                                color = Color(0xFFA0A0B0),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = if (selectedMediaType == "movie") "ex: 550 (Clube da Luta)" else "ex: 1399 (Game of Thrones)",
+                                color = Color(0xFF6B6B7A),
+                                fontSize = 10.5.sp
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = tmdbIdInput,
+                            onValueChange = { tmdbIdInput = it.filter { ch -> ch.isDigit() } },
+                            placeholder = { Text("Digite o TMDB ID...", color = Color.Gray, fontSize = 13.sp) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { generateAndTestUrl() }),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color(0xFF181822),
+                                unfocusedContainerColor = Color(0xFF181822),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = BrandRed,
+                                unfocusedBorderColor = DarkCardBorder
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp),
+                            trailingIcon = {
+                                if (tmdbIdInput.isNotEmpty()) {
+                                    IconButton(onClick = { tmdbIdInput = "" }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Limpar", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        )
+
+                        // Presets Chips Rápidos
+                        val presets = if (selectedMediaType == "movie") MOVIE_PRESETS else TV_PRESETS
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            presets.forEach { preset ->
+                                val isCurrent = tmdbIdInput == preset.tmdbId.toString()
+                                Surface(
+                                    modifier = Modifier.clickable {
+                                        tmdbIdInput = preset.tmdbId.toString()
+                                        if (selectedMediaType == "tv") {
+                                            seasonInput = preset.season.toString()
+                                            episodeInput = preset.episode.toString()
+                                        }
+                                        generateAndTestUrl()
+                                    },
+                                    color = if (isCurrent) BrandRed.copy(alpha = 0.2f) else Color(0xFF1A1A24),
+                                    shape = RoundedCornerShape(6.dp),
+                                    border = BorderStroke(0.8.dp, if (isCurrent) BrandRed else Color(0xFF2E2E3E))
+                                ) {
+                                    Text(
+                                        text = "${preset.title} (#${preset.tmdbId})",
+                                        color = if (isCurrent) Color.White else Color(0xFFB0B0C0),
+                                        fontSize = 10.5.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Se for Série: Temporada e Episódio
+                    if (selectedMediaType == "tv") {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("TEMPORADA", color = Color(0xFFA0A0B0), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                OutlinedTextField(
+                                    value = seasonInput,
+                                    onValueChange = { seasonInput = it.filter { ch -> ch.isDigit() } },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = Color(0xFF181822),
+                                        unfocusedContainerColor = Color(0xFF181822),
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = BrandRed,
+                                        unfocusedBorderColor = DarkCardBorder
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                )
+                            }
+
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("EPISÓDIO", color = Color(0xFFA0A0B0), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                OutlinedTextField(
+                                    value = episodeInput,
+                                    onValueChange = { episodeInput = it.filter { ch -> ch.isDigit() } },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedContainerColor = Color(0xFF181822),
+                                        unfocusedContainerColor = Color(0xFF181822),
+                                        focusedTextColor = Color.White,
+                                        unfocusedTextColor = Color.White,
+                                        focusedBorderColor = BrandRed,
+                                        unfocusedBorderColor = DarkCardBorder
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Botão GERAR URL
+                    Button(
+                        onClick = { generateAndTestUrl() },
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("btn_generate_player_url")
+                    ) {
+                        Icon(Icons.Default.Bolt, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "GERAR URL E CARREGAR TESTE",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
                         )
                     }
-                } else {
-                    AdminPlayerTestPreview(
-                        url = generatedUrl,
-                        sources = sources,
-                        reloadTrigger = previewReloadCount,
-                        onReloadRequest = { previewReloadCount++ }
-                    )
+                }
+            }
+        }
+
+        // --- 4. EXIBIÇÃO DA URL GERADA ---
+        if (generatedUrl.isNotBlank()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = DarkCard),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, DarkCardBorder)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "URL GERADA OFICIAL",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(generatedUrl))
+                                        Toast.makeText(context, "URL copiada!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copiar URL", tint = Color.LightGray, modifier = Modifier.size(16.dp))
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        try {
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(generatedUrl))
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, "Erro ao abrir navegador: ${e.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(Icons.Default.OpenInNew, contentDescription = "Abrir no navegador", tint = Color.LightGray, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+
+                        Surface(
+                            color = Color(0xFF0C0C10),
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, Color(0xFF1E1E28)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = generatedUrl,
+                                color = Color(0xFF80D8FF),
+                                fontSize = 11.5.sp,
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 16.sp,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 5. PRÉ-VISUALIZAÇÃO / PLAYER INTERATIVO DE TESTE ---
+        if (activeTestUrl.isNotBlank()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = DarkCard),
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(1.dp, DarkCardBorder)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "PRÉ-VISUALIZAÇÃO",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
+                            )
+
+                            // Status Indicator
+                            Surface(
+                                color = currentPlaybackStatus.color.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, currentPlaybackStatus.color.copy(alpha = 0.4f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(currentPlaybackStatus.color)
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = currentPlaybackStatus.label,
+                                        color = currentPlaybackStatus.color,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
+                        // Container do Player Responsivo (16:9)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(16f / 9f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.Black)
+                                .border(1.dp, Color(0xFF222230), RoundedCornerShape(10.dp))
+                        ) {
+                            key(activeTestUrl, testPlayerKey) {
+                                UnifiedLiveTestPlayer(
+                                    url = activeTestUrl,
+                                    onStatusChanged = { status ->
+                                        currentPlaybackStatus = status
+                                    },
+                                    onError = { err ->
+                                        currentPlaybackStatus = PlayerPlaybackStatus.ERROR
+                                        lastErrorMessage = err
+                                    }
+                                )
+                            }
+                        }
+
+                        if (lastErrorMessage != null) {
+                            Surface(
+                                color = Color(0xFF2B1214),
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, Color(0xFFB71C1C)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = Color(0xFFEF5350), modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = lastErrorMessage ?: "Erro ao carregar o player.",
+                                        color = Color(0xFFFFCDD2),
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2435,410 +912,217 @@ fun PlayerTestCard(
 }
 
 /**
- * Pré-visualização real e segura do player de teste dentro do painel administrativo.
- * Carrega a URL exatamente gerada em iframe responsivo com WebChromeClient e WebViewClient otimizados.
+ * Live Interactive Player for Testing:
+ * - Instantiates a single WebView with isolated lifecycle
+ * - Intercepts JS player events (playing, waiting, canplay, error) via injected Javascript Interface
+ * - Removes loading overlay immediately on active playback
+ * - Disposes previous instance safely on destruction
  */
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun AdminPlayerTestPreview(
+fun UnifiedLiveTestPlayer(
     url: String,
-    sources: List<PlayerSource>,
-    reloadTrigger: Int,
-    onReloadRequest: () -> Unit
+    onStatusChanged: (PlayerPlaybackStatus) -> Unit,
+    onError: (String) -> Unit
 ) {
-    // 1. Validação de segurança: apenas HTTPS
-    val isHttps = url.startsWith("https://", ignoreCase = true)
+    var isOverlayLoading by remember { mutableStateOf(true) }
+    var activeWebViewRef by remember { mutableStateOf<WebView?>(null) }
 
-    // 2. Validação de hosts permitidos (configurados nos players ou hosts de embed reconhecidos)
-    val isAllowedHost = remember(url, sources) {
-        if (!isHttps) return@remember false
-        try {
-            val uri = Uri.parse(url)
-            val host = uri.host?.lowercase() ?: return@remember false
-            val configuredHosts = sources.flatMap { src ->
-                listOf(src.movieTmdbUrl, src.movieImdbUrl, src.tvTmdbUrl, src.tvImdbUrl).mapNotNull { template ->
-                    try {
-                        val clean = template.replace("{tmdb_id}", "1").replace("{season_number}", "1").replace("{episode_number}", "1")
-                        Uri.parse(clean).host?.lowercase()
-                    } catch (_: Exception) {
-                        null
-                    }
-                }
+    DisposableEffect(url) {
+        onDispose {
+            activeWebViewRef?.let { webView ->
+                WebViewUtils.safeDestroy(webView)
             }
-            val standardEmbedHosts = listOf(
-                "redeflixapi.store", "mgeb.top", "nhdapi.com", "vidsrc.tw", "vidsrc.to", "vidsrc.me", "vidsrc.xyz", 
-                "vidsrc.cc", "vidsrc.pm", "vidsrc.net", "vidsrc.in", "vidsrc.pro",
-                "superembed.stream", "embed.su", "player.nhdapi.com"
-            )
-            val allAllowed = (configuredHosts + standardEmbedHosts).distinct()
-            allAllowed.any { allowed -> host == allowed || host.endsWith(".$allowed") }
-        } catch (_: Exception) {
-            false
+            activeWebViewRef = null
         }
     }
 
-    if (!isHttps) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFFF44336), modifier = Modifier.size(32.dp))
-            Spacer(Modifier.height(8.dp))
-            Text("URL insegura. Apenas conexões HTTPS são permitidas.", color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
-        }
-        return
-    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                WebView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    setBackgroundColor(android.graphics.Color.BLACK)
+                    WebViewUtils.applySafeLayerType(this, forceSoftware = false)
 
-    if (!isAllowedHost) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Icon(Icons.Default.WarningAmber, contentDescription = null, tint = Color(0xFFFFC107), modifier = Modifier.size(32.dp))
-            Spacer(Modifier.height(8.dp))
-            Text("Domínio não configurado na lista de players.", color = Color.White, fontSize = 12.sp, textAlign = TextAlign.Center)
-        }
-        return
-    }
+                    try {
+                        CookieManager.getInstance().setAcceptCookie(true)
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    } catch (_: Exception) {}
 
-    var isLoading by remember(url, reloadTrigger) { mutableStateOf(true) }
-    var hasError by remember(url, reloadTrigger) { mutableStateOf(false) }
-    var forceSoftwareRenderer by remember(url, reloadTrigger) { mutableStateOf(false) }
-    var customView by remember { mutableStateOf<View?>(null) }
-    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        databaseEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        loadsImagesAutomatically = true
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        allowFileAccess = false
+                        allowContentAccess = false
+                        useWideViewPort = true
+                        loadWithOverviewMode = true
+                        builtInZoomControls = false
+                        displayZoomControls = false
+                        setSupportMultipleWindows(false)
+                        javaScriptCanOpenWindowsAutomatically = false
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                        userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
+                    }
 
-    val isHttpUrl = remember(url) {
-        url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true)
-    }
-
-    // Timeout de carregamento razoável (18 segundos) para evitar carregamento infinito
-    LaunchedEffect(url, reloadTrigger) {
-        isLoading = true
-        hasError = false
-        delay(18000)
-        if (isLoading) {
-            isLoading = false
-            hasError = true
-        }
-    }
-
-    // HTML wrapper caso a URL seja um snippet de iframe
-    val iframeHtml = remember(url) {
-        val escapedUrl = url.replace("\"", "&quot;")
-        """
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-            <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                html, body {
-                    width: 100%;
-                    height: 100%;
-                    background-color: #000000;
-                    overflow: hidden;
-                }
-                iframe {
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    border: 0;
-                    display: block;
-                }
-            </style>
-        </head>
-        <body>
-            <iframe
-                src="$escapedUrl"
-                width="100%"
-                height="100%"
-                frameborder="0"
-                scrolling="no"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                allowfullscreen="true"
-                webkitallowfullscreen="true"
-                mozallowfullscreen="true">
-            </iframe>
-        </body>
-        </html>
-        """.trimIndent()
-    }
-
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        if (!hasError) {
-            // key garante que o WebView anterior é completamente destruído antes de instanciar o novo
-            key(url, reloadTrigger) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            setBackgroundColor(android.graphics.Color.BLACK)
-
-                            // Previne crashes de rendernode da Mesa e Chromium aw_browser_terminator
-                            WebViewUtils.applySafeLayerType(this, forceSoftware = forceSoftwareRenderer)
-
-                            try {
-                                CookieManager.getInstance().setAcceptCookie(true)
-                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                            } catch (_: Exception) {}
-
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                mediaPlaybackRequiresUserGesture = false
-                                loadsImagesAutomatically = true
-                                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                                allowFileAccess = false
-                                allowContentAccess = false
-                                useWideViewPort = true
-                                loadWithOverviewMode = true
-                                builtInZoomControls = false
-                                displayZoomControls = false
-                                setSupportMultipleWindows(false)
-                                javaScriptCanOpenWindowsAutomatically = false
-                                cacheMode = WebSettings.LOAD_DEFAULT
-                                userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-                            }
-
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(
-                                    view: WebView?,
-                                    request: WebResourceRequest?
-                                ): Boolean {
-                                    val targetUrl = request?.url?.toString() ?: return false
-                                    val scheme = request.url?.scheme?.lowercase() ?: ""
-                                    if (scheme != "http" && scheme != "https") {
-                                        return true
+                    addJavascriptInterface(object {
+                        @JavascriptInterface
+                        fun onPlayerEvent(event: String) {
+                            post {
+                                val ev = event.lowercase()
+                                when {
+                                    ev == "playing" || ev == "play" -> {
+                                        isOverlayLoading = false
+                                        onStatusChanged(PlayerPlaybackStatus.PLAYING)
                                     }
-                                    return false
-                                }
-
-                                override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                    super.onPageStarted(view, url, favicon)
-                                    isLoading = true
-                                }
-
-                                override fun onPageFinished(view: WebView?, url: String?) {
-                                    super.onPageFinished(view, url)
-                                    isLoading = false
-                                }
-
-                                override fun onReceivedError(
-                                    view: WebView?,
-                                    request: WebResourceRequest?,
-                                    error: WebResourceError?
-                                ) {
-                                    super.onReceivedError(view, request, error)
-                                    if (request?.isForMainFrame == true) {
-                                        isLoading = false
-                                        hasError = true
+                                    ev == "waiting" || ev == "buffering" -> {
+                                        onStatusChanged(PlayerPlaybackStatus.BUFFERING)
+                                    }
+                                    ev == "canplay" || ev == "ready" || ev == "loadeddata" -> {
+                                        isOverlayLoading = false
+                                        onStatusChanged(PlayerPlaybackStatus.READY)
+                                    }
+                                    ev == "error" || ev == "failed" -> {
+                                        isOverlayLoading = false
+                                        onError("Erro reportado pelo player.")
                                     }
                                 }
-
-                                override fun onReceivedSslError(
-                                    view: WebView?,
-                                    handler: SslErrorHandler?,
-                                    error: android.net.http.SslError?
-                                ) {
-                                    try {
-                                        handler?.proceed()
-                                    } catch (_: Exception) {
-                                        handler?.cancel()
-                                    }
-                                }
-
-                                override fun onRenderProcessGone(
-                                    view: WebView?,
-                                    detail: RenderProcessGoneDetail?
-                                ): Boolean {
-                                    android.util.Log.w(
-                                        "ADMIN_PREVIEW",
-                                        "Preview renderer terminated (didCrash=${detail?.didCrash()}). Recovering safely..."
-                                    )
-                                    WebViewUtils.safeDestroy(view)
-                                    if (!forceSoftwareRenderer) {
-                                        forceSoftwareRenderer = true
-                                        onReloadRequest()
-                                    } else {
-                                        hasError = true
-                                        isLoading = false
-                                    }
-                                    return true
-                                }
-                            }
-
-                            webChromeClient = object : WebChromeClient() {
-                                override fun getDefaultVideoPoster(): Bitmap? {
-                                    return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
-                                }
-
-                                override fun onPermissionRequest(request: PermissionRequest?) {
-                                    try {
-                                        request?.grant(request.resources)
-                                    } catch (_: Exception) {}
-                                }
-
-                                override fun onCreateWindow(
-                                    view: WebView?,
-                                    isDialog: Boolean,
-                                    isUserGesture: Boolean,
-                                    resultMsg: android.os.Message?
-                                ): Boolean = false
-
-                                override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                                    super.onProgressChanged(view, newProgress)
-                                    if (newProgress >= 80) {
-                                        isLoading = false
-                                    }
-                                }
-
-                                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                    super.onShowCustomView(view, callback)
-                                    customView = view
-                                    customViewCallback = callback
-                                }
-
-                                override fun onHideCustomView() {
-                                    super.onHideCustomView()
-                                    customView = null
-                                    customViewCallback?.onCustomViewHidden()
-                                    customViewCallback = null
-                                }
-                            }
-
-                            if (isHttpUrl) {
-                                loadUrl(url)
-                            } else {
-                                loadDataWithBaseURL(null, iframeHtml, "text/html", "UTF-8", null)
                             }
                         }
-                    },
-                    onRelease = { webView ->
-                        WebViewUtils.safeDestroy(webView)
-                    }
-                )
-            }
-        }
+                    }, "TestPlayerBridge")
 
-        // Overlay de Loading discreto
-        if (isLoading && !hasError) {
+                    webViewClient = object : WebViewClient() {
+                        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                            super.onPageStarted(view, url, favicon)
+                            onStatusChanged(PlayerPlaybackStatus.LOADING)
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            // Inject HTMLMediaElement listener to bridge video events automatically
+                            view?.evaluateJavascript(
+                                """
+                                (function() {
+                                    function hookVideos() {
+                                        var vids = document.querySelectorAll('video');
+                                        for (var i = 0; i < vids.length; i++) {
+                                            var v = vids[i];
+                                            if (!v.__hooked) {
+                                                v.__hooked = true;
+                                                v.addEventListener('playing', function() { if(window.TestPlayerBridge) window.TestPlayerBridge.onPlayerEvent('playing'); });
+                                                v.addEventListener('waiting', function() { if(window.TestPlayerBridge) window.TestPlayerBridge.onPlayerEvent('waiting'); });
+                                                v.addEventListener('canplay', function() { if(window.TestPlayerBridge) window.TestPlayerBridge.onPlayerEvent('canplay'); });
+                                                v.addEventListener('error', function() { if(window.TestPlayerBridge) window.TestPlayerBridge.onPlayerEvent('error'); });
+                                            }
+                                        }
+                                    }
+                                    hookVideos();
+                                    setInterval(hookVideos, 1500);
+
+                                    window.addEventListener('message', function(ev) {
+                                        try {
+                                            var d = ev.data;
+                                            if (typeof d === 'string') { try { d = JSON.parse(d); } catch(e){} }
+                                            if (d && (d.event || d.type)) {
+                                                var t = (d.event || d.type).toLowerCase();
+                                                if (window.TestPlayerBridge) window.TestPlayerBridge.onPlayerEvent(t);
+                                            }
+                                        } catch(e) {}
+                                    });
+                                })();
+                                """.trimIndent(),
+                                null
+                            )
+                            onStatusChanged(PlayerPlaybackStatus.READY)
+                            isOverlayLoading = false
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            error: WebResourceError?
+                        ) {
+                            super.onReceivedError(view, request, error)
+                            if (request?.isForMainFrame == true) {
+                                isOverlayLoading = false
+                                val desc = error?.description?.toString() ?: "Falha ao carregar URL"
+                                onError(desc)
+                            }
+                        }
+
+                        override fun onReceivedHttpError(
+                            view: WebView?,
+                            request: WebResourceRequest?,
+                            errorResponse: WebResourceResponse?
+                        ) {
+                            super.onReceivedHttpError(view, request, errorResponse)
+                            if (request?.isForMainFrame == true && (errorResponse?.statusCode ?: 0) >= 400) {
+                                isOverlayLoading = false
+                                onError("Erro HTTP ${errorResponse?.statusCode}")
+                            }
+                        }
+
+                        override fun onRenderProcessGone(
+                            view: WebView?,
+                            detail: RenderProcessGoneDetail?
+                        ): Boolean {
+                            WebViewUtils.safeDestroy(view, isDead = true)
+                            activeWebViewRef = null
+                            isOverlayLoading = false
+                            onError("Processo do player foi encerrado.")
+                            return true
+                        }
+                    }
+
+                    webChromeClient = object : WebChromeClient() {
+                        override fun getDefaultVideoPoster(): Bitmap? {
+                            return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                        }
+
+                        override fun onPermissionRequest(request: PermissionRequest?) {
+                            try {
+                                request?.grant(request.resources)
+                            } catch (_: Exception) {}
+                        }
+                    }
+
+                    loadUrl(url)
+                    activeWebViewRef = this
+                }
+            }
+        )
+
+        // Loading Overlay (only shown while initially resolving page)
+        if (isOverlayLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.Black.copy(alpha = 0.7f)),
                 contentAlignment = Alignment.Center
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    RonycineSmileLoader(
-                        color = Color(0xFFfb542b),
-                        size = 18.dp
+                    CircularProgressIndicator(
+                        color = BrandRed,
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 2.5.dp
                     )
                     Text(
-                        "CARREGANDO PLAYER...",
-                        color = Color.White.copy(alpha = 0.9f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                        text = "Conectando ao player...",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
                     )
-                }
-            }
-        }
-
-        // Overlay de Erro
-        if (hasError) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-                    .padding(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    Icons.Default.ErrorOutline,
-                    contentDescription = null,
-                    tint = Color(0xFFF44336),
-                    modifier = Modifier.size(36.dp)
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Não foi possível carregar este player.",
-                    color = Color.White,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Verifique a URL ou tente outro player.",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 11.sp,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = onReloadRequest,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFfb542b)),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Tentar novamente", fontSize = 11.sp)
-                }
-            }
-        }
-
-        // Diálogo para reprodução em Tela Cheia acionada pelo iframe/player
-        if (customView != null) {
-            androidx.compose.ui.window.Dialog(
-                onDismissRequest = {
-                    customViewCallback?.onCustomViewHidden()
-                    customView = null
-                },
-                properties = androidx.compose.ui.window.DialogProperties(
-                    usePlatformDefaultWidth = false,
-                    decorFitsSystemWindows = false
-                )
-            ) {
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                    AndroidView(
-                        factory = { ctx ->
-                            android.widget.FrameLayout(ctx).apply {
-                                (customView?.parent as? ViewGroup)?.removeView(customView)
-                                addView(
-                                    customView,
-                                    ViewGroup.LayoutParams(
-                                        ViewGroup.LayoutParams.MATCH_PARENT,
-                                        ViewGroup.LayoutParams.MATCH_PARENT
-                                    )
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                    IconButton(
-                        onClick = {
-                            customViewCallback?.onCustomViewHidden()
-                            customView = null
-                        },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .statusBarsPadding()
-                            .padding(16.dp)
-                            .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Fechar Tela Cheia", tint = Color.White)
-                    }
                 }
             }
         }

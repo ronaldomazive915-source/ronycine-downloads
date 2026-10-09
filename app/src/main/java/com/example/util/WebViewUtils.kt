@@ -51,55 +51,47 @@ object WebViewUtils {
     }
 
     /**
-     * Determines whether the environment requires software layer rendering
-     * (e.g., emulators or virtual containers using Mesa without /dev/dri/renderD128).
+     * Determines whether the environment requires software layer rendering.
+     * Real devices should always use standard hardware acceleration to avoid memory crashes.
      */
     val isSoftwareRendererNeeded: Boolean by lazy {
-        val emulator = isEmulator()
-
-        val hasHardwareDrmNode = try {
-            File("/dev/dri/renderD128").exists() || File("/dev/dri/card0").exists()
-        } catch (_: Exception) {
-            false
-        }
-
-        // On emulators and environments lacking DRM rendernodes, Mesa cannot allocate GPU surfaces,
-        // which causes Chromium's renderer process to crash.
-        emulator || !hasHardwareDrmNode
+        false
     }
 
     /**
      * Applies safe rendering layer type to a WebView.
-     *
-     * IMPORTANT: WebViews rendering HTML5 video, WebGL, or Canvas MUST use View.LAYER_TYPE_NONE.
-     * Setting View.LAYER_TYPE_SOFTWARE causes HTML5 <video> elements to decode audio normally
-     * but prevents hardware video texture compositing, causing the video frame to be completely black.
      */
     fun applySafeLayerType(webView: WebView, forceSoftware: Boolean = false) {
         try {
-            webView.setLayerType(View.LAYER_TYPE_NONE, null)
+            if (forceSoftware) {
+                webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
+                android.util.Log.i("WebViewUtils", "Applied LAYER_TYPE_SOFTWARE to WebView")
+            } else {
+                // LAYER_TYPE_NONE allows normal hardware-accelerated surface compositing
+                webView.setLayerType(View.LAYER_TYPE_NONE, null)
+            }
         } catch (_: Exception) {}
     }
 
     /**
      * Safely cleans up and disposes of a WebView instance.
+     * When isDead = true (from onRenderProcessGone), avoids calling methods on the destroyed engine.
      */
-    fun safeDestroy(webView: WebView?) {
+    fun safeDestroy(webView: WebView?, isDead: Boolean = false) {
         if (webView == null) return
         try {
-            webView.stopLoading()
-            webView.webChromeClient = null
-            webView.webViewClient = object : WebViewClient() {
-                override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean = true
-            }
-            try {
-                webView.loadUrl("about:blank")
-            } catch (_: Exception) {}
-            try {
-                webView.onPause()
-                webView.pauseTimers()
-            } catch (_: Exception) {}
             (webView.parent as? ViewGroup)?.removeView(webView)
+            if (!isDead) {
+                try {
+                    webView.stopLoading()
+                    webView.webChromeClient = null
+                    webView.webViewClient = object : WebViewClient() {
+                        override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean = true
+                    }
+                    webView.loadUrl("about:blank")
+                    webView.onPause()
+                } catch (_: Exception) {}
+            }
             webView.destroy()
         } catch (_: Exception) {}
     }

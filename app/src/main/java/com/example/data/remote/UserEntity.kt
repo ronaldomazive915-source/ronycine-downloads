@@ -96,7 +96,15 @@ data class UserEntity(
      * USER never has administrative access.
      */
     fun hasPermission(permissionKey: String): Boolean {
-        if (role.equals("FOUNDER", ignoreCase = true) || email.equals("ronaldomazive915@gmail.com", ignoreCase = true)) return true
+        // SEGURANÇA RONYCINE: Apenas ronaldomazive915@gmail.com é o ÚNICO fundador oficial.
+        // O e-mail vieiradasilvawesley071@gmail.com foi removido permanentemente da função de fundador.
+        val isTargetEmail = email.equals("ronaldomazive915@gmail.com", ignoreCase = true)
+        val isRemovedFounder = email.equals("vieiradasilvawesley071@gmail.com", ignoreCase = true)
+        
+        if (isTargetEmail) return true
+        if (isRemovedFounder) return false // Bloqueio explícito de privilégios de fundador para este e-mail
+        
+        if (role.equals("FOUNDER", ignoreCase = true)) return true
         if (!role.equals("ADMIN", ignoreCase = true)) return false
         
         return when (permissionKey) {

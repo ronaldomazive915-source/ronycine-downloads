@@ -56,7 +56,8 @@ enum class ScreenRoute(val route: String, val title: String) {
     PROFILE_SELECTION("profile_selection", "Quem está assistindo?"),
     CREATE_PROFILE("create_profile", "Criar Perfil"),
     UPDATE_SCREEN("update_screen", "Atualizações"),
-    DOWNLOADS("downloads", "Downloads")
+    DOWNLOADS("downloads", "Downloads"),
+    WHATS_NEW("whats_new", "Novidades")
 }
 
 private data class NavItemData(

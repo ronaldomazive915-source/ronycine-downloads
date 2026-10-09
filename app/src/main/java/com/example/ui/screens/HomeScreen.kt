@@ -298,7 +298,7 @@ fun HomeScreen(
                         width = 1.dp,
                         color = if (isReadyToRelease || isRefreshing) BrandRed.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.2f)
                     ),
-                    shadowElevation = 6.dp,
+                    shadowElevation = 0.dp, // REMOVE SHADOW
                     modifier = Modifier.size(36.dp)
                 ) {
                     Box(
@@ -548,12 +548,15 @@ fun Top10MediaCard(
 
     val context = LocalContext.current
     val imageUrl = remember(media.posterPath, media.backdropPath) {
-        media.posterPath ?: media.backdropPath
+        val raw = media.posterPath ?: media.backdropPath
+        raw?.replace("/w500/", "/w185/")
+           ?.replace("/w1280/", "/w780/")
+           ?.replace("/original/", "/w185/")
     }
     val imageRequest = remember(imageUrl) {
         ImageRequest.Builder(context)
             .data(imageUrl)
-            .size(240, 360)
+            .size(180, 270) // DOWNSAMPLED
             .crossfade(false)
             .build()
     }
@@ -651,10 +654,15 @@ fun ContinueWatchingCard(
     onRequestRemove: () -> Unit
 ) {
     val context = LocalContext.current
-    val imageRequest = remember(item.posterPath) {
+    val posterUrl = remember(item.posterPath) {
+        item.posterPath?.replace("/w500/", "/w185/")
+                       ?.replace("/w1280/", "/w780/")
+                       ?.replace("/original/", "/w185/")
+    }
+    val imageRequest = remember(posterUrl) {
         ImageRequest.Builder(context)
-            .data(item.posterPath)
-            .size(280, 420)
+            .data(posterUrl)
+            .size(200, 300) // DOWNSAMPLED
             .crossfade(false)
             .build()
     }

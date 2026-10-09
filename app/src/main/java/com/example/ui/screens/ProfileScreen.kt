@@ -586,7 +586,8 @@ fun ProfileScreen(
             val fbService = com.example.data.remote.FirebaseService.getInstance(context.applicationContext)
             val dId = fbService.getOrGeneratePersistentDeviceId()
             try {
-                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                val dbId = context.getString(com.example.R.string.firestore_database_id)
+                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance(dbId)
                 db.collection("devices").document(dId).get().addOnSuccessListener { snap ->
                     if (snap != null && snap.exists()) {
                         val hasAdmin = snap.getBoolean("adminAccess") ?: false

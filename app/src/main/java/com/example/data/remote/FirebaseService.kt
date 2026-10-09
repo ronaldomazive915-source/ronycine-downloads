@@ -13,6 +13,7 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.example.R
 import com.example.data.local.AppDatabase
 import com.example.data.local.ChannelEntity
 import com.example.data.local.EpisodeEntity
@@ -111,11 +112,11 @@ class FirebaseService private constructor(private val appContext: Context) {
                 } catch (e: Exception) {
                     Log.w(TAG, "[FIREBASE] Recursos google-services.json não encontrados ou falhos: ${e.message}, usando Builder manual.")
                     com.google.firebase.FirebaseOptions.Builder()
-                        .setApplicationId("1:159608197340:android:2d5ee166c463ec6079e419")
-                        .setApiKey("AIzaSyDbU6FNY9lPlg4S14UF-xCG7JnYPa54pNY")
-                        .setProjectId("playfilme")
-                        .setGcmSenderId("159608197340")
-                        .setStorageBucket("playfilme.firebasestorage.app")
+                        .setApplicationId("1:730488540777:android:716e4aa68362dc428adcf8")
+                        .setApiKey("AIzaSyBqK9hIT5PijyHvQOqd_l5713brKFUvCfA")
+                        .setProjectId("sturdy-essence-476321-r2")
+                        .setGcmSenderId("730488540777")
+                        .setStorageBucket("sturdy-essence-476321-r2.firebasestorage.app")
                         .build()
                 }
 
@@ -148,7 +149,10 @@ class FirebaseService private constructor(private val appContext: Context) {
                     return@synchronized null
                 }
 
-                val db = FirebaseFirestore.getInstance(app)
+                Log.d(TAG, "[FIRESTORE_CONFIG] App: ${app.name}, ProjectID: ${app.options.projectId}, DB_ID: ${appContext.getString(R.string.firestore_database_id)}")
+
+                val db = FirebaseFirestore.getInstance(app, appContext.getString(R.string.firestore_database_id))
+                Log.d(TAG, "[FIRESTORE] Nova instância do Firestore criada para o app: ${app.name} no DB: ${appContext.getString(R.string.firestore_database_id)}")
                 try {
                     val settings = com.google.firebase.firestore.FirebaseFirestoreSettings.Builder()
                         .setPersistenceEnabled(true)
@@ -198,6 +202,16 @@ class FirebaseService private constructor(private val appContext: Context) {
         }
     }
 
+    private fun logFirestoreOp(operation: String, collection: String, docPath: String, result: String, error: String? = null) {
+        val uid = FirebaseAuth.getInstance().currentUser?.uid ?: "unauthenticated"
+        val logMsg = "[FIRESTORE_OP] op=$operation, col=$collection, path=$docPath, uid=$uid, res=$result"
+        if (error != null) {
+            Log.e(TAG, "$logMsg, err=$error")
+        } else {
+            Log.d(TAG, logMsg)
+        }
+    }
+
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // --- Sync Status Flow ---
@@ -206,45 +220,11 @@ class FirebaseService private constructor(private val appContext: Context) {
 
     private val defaultInitialPlayerSources = listOf(
         PlayerSource(
-            id = "videasy",
-            name = "Videasy (Multi-Áudio)",
-            description = "Player rápido com áudios e legendas em português",
-            type = "Embed",
-            priority = 1,
-            language = "Dublado",
-            isSystem = true,
-            supportedContent = listOf("movie", "tv"),
-            movieTmdbUrl = "https://player.videasy.to/movie/{tmdb_id}",
-            tvTmdbUrl = "https://player.videasy.to/tv/{tmdb_id}/{season_number}/{episode_number}",
-            internalPlayer = "videasy",
-            playerColor = "#fb542b",
-            isDefault = true,
-            enabled = true,
-            providerOrigin = "Videasy"
-        ),
-        PlayerSource(
-            id = "multiembed",
-            name = "MultiEmbed",
-            description = "Player alternativo de streaming multi-servidores",
-            type = "Embed",
-            priority = 2,
-            language = "Dublado",
-            isSystem = true,
-            supportedContent = listOf("movie", "tv"),
-            movieTmdbUrl = "https://multiembed.mov/?video_id={tmdb_id}&tmdb=1",
-            tvTmdbUrl = "https://multiembed.mov/?video_id={tmdb_id}&tmdb=1&s={season_number}&e={episode_number}",
-            internalPlayer = "multiembed",
-            playerColor = "#fb542b",
-            isDefault = false,
-            enabled = true,
-            providerOrigin = "MultiEmbed"
-        ),
-        PlayerSource(
             id = "vidsrc",
             name = "VidSrc",
             description = "Player oficial para conteúdo legendado",
             type = "Embed",
-            priority = 3,
+            priority = 1,
             language = "Legendado",
             isSystem = true,
             supportedContent = listOf("movie", "tv"),
@@ -256,10 +236,10 @@ class FirebaseService private constructor(private val appContext: Context) {
         ),
         PlayerSource(
             id = "mgeb",
-            name = "MegaEmbed",
-            description = "Player secundário com opções integradas",
+            name = "Mgeb Embed",
+            description = "Player oficial Mgeb Embed via TMDB",
             type = "Embed",
-            priority = 4,
+            priority = 2,
             language = "Dublado",
             isSystem = true,
             supportedContent = listOf("movie", "tv"),
@@ -267,26 +247,9 @@ class FirebaseService private constructor(private val appContext: Context) {
             tvTmdbUrl = "https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}",
             internalPlayer = "megaplay",
             playerColor = "#fb542b",
-            isDefault = false,
+            isDefault = true,
             enabled = true,
             providerOrigin = "MegaEmbed"
-        ),
-        PlayerSource(
-            id = "redeflixapi",
-            name = "RedeFlixApi",
-            description = "Player externo via TMDB",
-            type = "Iframe / WebView",
-            priority = 5,
-            language = "Dublado",
-            isSystem = true,
-            supportedContent = listOf("movie", "tv"),
-            movieTmdbUrl = "https://redeflixapi.store/filme/{tmdbId}",
-            tvTmdbUrl = "https://redeflixapi.store/serie/{tmdbId}/{seasonNumber}/{episodeNumber}",
-            internalPlayer = "redeflixapi",
-            playerColor = "#E50914",
-            isDefault = false,
-            enabled = true,
-            providerOrigin = "RedeFlixApi"
         )
     )
 
@@ -314,7 +277,7 @@ class FirebaseService private constructor(private val appContext: Context) {
         val user = _currentUser.value
         val fbUser = FirebaseAuth.getInstance().currentUser
 
-        Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTH_START - fbUid=${fbUser?.uid}, profileUid=${user?.uid}")
+        Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTHORIZATION_CHECK_START - fbUid=${fbUser?.uid}, profileUid=${user?.uid}")
 
         if (fbUser == null) {
             _isAdminAuthorized.value = false
@@ -325,7 +288,10 @@ class FirebaseService private constructor(private val appContext: Context) {
 
         val userRole = user?.role
         val userEmail = user?.email ?: fbUser.email
-        val isFounder = userRole.equals("FOUNDER", ignoreCase = true) || userEmail?.lowercase() == "ronaldomazive915@gmail.com"
+        val isTargetFounder = userEmail?.lowercase() == "ronaldomazive915@gmail.com"
+        val isRemovedFounder = userEmail?.lowercase() == "vieiradasilvawesley071@gmail.com"
+        
+        val isFounder = (userRole.equals("FOUNDER", ignoreCase = true) || isTargetFounder) && !isRemovedFounder
         val isAdmin = userRole.equals("ADMIN", ignoreCase = true)
 
         val isAuthorized = isFounder || isAdmin
@@ -492,10 +458,11 @@ class FirebaseService private constructor(private val appContext: Context) {
 
     init {
         // Log initialization check
-        Log.d(TAG, "[DIAGNÓSTICO] FirebaseService iniciado.")
+        Log.d(TAG, "[AUTH_DIAGNOSTIC] FirebaseService inicializado.")
         
         // Critical listeners - started immediately in background
         serviceScope.launch {
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] STARTUP_LISTENERS_INIT")
             registerNetworkCallback()
             startListeningAuth()
             startListeningRemoteConfig()
@@ -503,15 +470,18 @@ class FirebaseService private constructor(private val appContext: Context) {
             
             // Stagger non-critical listeners to avoid startup flood (ANR prevention)
             delay(1500L)
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] STARTUP_LISTENERS_STAGGER_1")
             startListeningTop10()
             startListeningFeaturedConfig()
             
             delay(2000L)
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] STARTUP_LISTENERS_STAGGER_2")
             startListeningManualUpdates()
             startListeningNotificationEvents()
             
             // Note: Admin listeners are now moved to startAdminListeners()
             // to be called only when the admin dashboard is accessed.
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] STARTUP_COMPLETE")
         }
     }
 
@@ -742,6 +712,9 @@ class FirebaseService private constructor(private val appContext: Context) {
                 return@launch
             }
 
+            val currentUser = FirebaseAuth.getInstance().currentUser
+            Log.d(TAG, "[ADMIN] Iniciando listener de dispositivos. User: ${currentUser?.email} (${currentUser?.uid})")
+            
             devicesListener?.remove()
             Log.d(TAG, "[ADMIN] listener iniciado na coleção 'devices'")
             val currentDeviceId = getOrGeneratePersistentDeviceId()
@@ -3408,8 +3381,13 @@ class FirebaseService private constructor(private val appContext: Context) {
                 updates["fcmTokenUpdatedAt"] = now
             }
             db.collection("devices").document(id).set(updates, SetOptions.merge()).await()
+            logFirestoreOp("set", "devices", id, "success (push status update)")
             Log.d(TAG, "[FCM] Push status updated for device $id (Permission: $hasPermission, Token: ${token != null})")
+        } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
+            logFirestoreOp("set", "devices", id, "denied", e.message)
+            Log.e(TAG, "[FCM] Error updating push status for device $id: ${e.message}")
         } catch (e: Exception) {
+            logFirestoreOp("set", "devices", id, "error", e.message)
             Log.e(TAG, "[FCM] Error updating push status for device $id: ${e.message}")
         }
     }
@@ -3601,8 +3579,16 @@ class FirebaseService private constructor(private val appContext: Context) {
                             deviceId?.let { id ->
                                 registerDeviceWithRetry(id)
                             }
-                            startListeningDevices()
-                            startListeningRequests()
+                            
+                            // Apenas admins precisam ouvir todos os dispositivos e pedidos em tempo real no callback de rede
+                            // Usuários comuns carregam sob demanda ou via outros mecanismos
+                            if (_isAdminAuthorized.value || _currentUser.value?.role == "FOUNDER" || _currentUser.value?.role == "ADMIN") {
+                                Log.d(TAG, "[AUTH_DIAGNOSTIC] STARTING_ADMIN_LISTENERS_FROM_NETWORK_CALLBACK")
+                                startListeningDevices()
+                                startListeningRequests()
+                            } else {
+                                Log.d(TAG, "[AUTH_DIAGNOSTIC] SKIPPING_ADMIN_LISTENERS_FROM_NETWORK_CALLBACK (Not Authorized)")
+                            }
                         }
                     }
 
@@ -3636,10 +3622,12 @@ class FirebaseService private constructor(private val appContext: Context) {
         // 0. Deleted Catalog (Tombstones) Realtime Listener - MUST start before catalog
         deletedCatalogListener = db.collection("deleted_catalog").addSnapshotListener { snapshot, error ->
             if (error != null) {
+                logFirestoreOp("query/listen", "deleted_catalog", "ALL", "failed", error.message)
                 Log.e(TAG, "Deleted catalog listener error: ${error.message}")
                 return@addSnapshotListener
             }
             if (snapshot != null) {
+                logFirestoreOp("query/listen", "deleted_catalog", "ALL", "success (${snapshot.size()} docs)")
                 for (dc in snapshot.documentChanges) {
                     when (dc.type) {
                         DocumentChange.Type.ADDED, DocumentChange.Type.MODIFIED -> _deletedIds.add(dc.document.id)
@@ -3653,13 +3641,16 @@ class FirebaseService private constructor(private val appContext: Context) {
         // 1. Catalog Collection Realtime Listener (Movies & Series)
         catalogListener = db.collection("catalog").addSnapshotListener { snapshot, error ->
             if (error != null) {
-                Log.e(TAG, "Catalog realtime listener error: ${error.message}")
+                logFirestoreOp("query/listen", "catalog", "ALL", "failed", error.message)
+                val currentUser = FirebaseAuth.getInstance().currentUser
+                Log.e(TAG, "Catalog realtime listener error (User: ${currentUser?.email}/${currentUser?.uid}): ${error.message}")
                 if (!isNetworkOnline) _syncStatus.value = SyncStatus.OFFLINE
                 else _syncStatus.value = SyncStatus.ERROR
                 return@addSnapshotListener
             }
 
             if (snapshot != null) {
+                logFirestoreOp("query/listen", "catalog", "ALL", "success (${snapshot.size()} docs)")
                 serviceScope.launch {
                     try {
                         val toInsert = mutableListOf<MediaEntity>()
@@ -4175,16 +4166,30 @@ class FirebaseService private constructor(private val appContext: Context) {
                 "addedAt" to entity.addedAt,
                 "updatedAt" to System.currentTimeMillis()
             )
-            db.collection("catalog").document(docId).set(mediaMap, SetOptions.merge()).await()
+            
+            try {
+                db.collection("catalog").document(docId).set(mediaMap, SetOptions.merge()).await()
+                logFirestoreOp("set", "catalog", docId, "success")
+            } catch (e: Exception) {
+                logFirestoreOp("set", "catalog", docId, "failed", e.message)
+                throw e
+            }
+
             val newVersion = System.currentTimeMillis()
-            db.collection("catalog_metadata").document("version").set(
-                hashMapOf(
-                    "version" to newVersion,
-                    "lastUpdatedFormatted" to getCurrentTimestamp(),
-                    "event" to "CONTENT_UPDATED"
-                ),
-                SetOptions.merge()
-            ).await()
+            try {
+                db.collection("catalog_metadata").document("version").set(
+                    hashMapOf(
+                        "version" to newVersion,
+                        "lastUpdatedFormatted" to getCurrentTimestamp(),
+                        "event" to "CONTENT_UPDATED"
+                    ),
+                    SetOptions.merge()
+                ).await()
+                logFirestoreOp("set", "catalog_metadata", "version", "success")
+            } catch (e: Exception) {
+                logFirestoreOp("set", "catalog_metadata", "version", "failed", e.message)
+                throw e
+            }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Log.e(TAG, "Error upserting media to cloud: ${e.message}")
@@ -4229,18 +4234,31 @@ class FirebaseService private constructor(private val appContext: Context) {
                     )
                     batch.set(db.collection("catalog").document(docId), mediaMap, SetOptions.merge())
                 }
-                batch.commit().await()
+                
+                try {
+                    batch.commit().await()
+                    logFirestoreOp("batch/commit", "catalog", "CHUNK", "success (${chunk.size} docs)")
+                } catch (e: Exception) {
+                    logFirestoreOp("batch/commit", "catalog", "CHUNK", "failed", e.message)
+                    throw e
+                }
             }
 
             val newVersion = System.currentTimeMillis()
-            db.collection("catalog_metadata").document("version").set(
-                hashMapOf(
-                    "version" to newVersion,
-                    "lastUpdatedFormatted" to getCurrentTimestamp(),
-                    "event" to "CONTENT_UPDATED"
-                ),
-                SetOptions.merge()
-            ).await()
+            try {
+                db.collection("catalog_metadata").document("version").set(
+                    hashMapOf(
+                        "version" to newVersion,
+                        "lastUpdatedFormatted" to getCurrentTimestamp(),
+                        "event" to "CONTENT_UPDATED"
+                    ),
+                    SetOptions.merge()
+                ).await()
+                logFirestoreOp("set", "catalog_metadata", "version", "success")
+            } catch (e: Exception) {
+                logFirestoreOp("set", "catalog_metadata", "version", "failed", e.message)
+                throw e
+            }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Log.e(TAG, "Error batch upserting media to cloud: ${e.message}")
@@ -4529,64 +4547,86 @@ class FirebaseService private constructor(private val appContext: Context) {
             .orderBy("priority", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, e ->
                 if (e != null) {
+                    logFirestoreOp("query/listen", "playerSources", "ALL", "failed", e.message)
                     Log.e(TAG, "PlayerSources listener failed.", e)
                     return@addSnapshotListener
                 }
                 if (snapshot != null) {
+                    logFirestoreOp("query/listen", "playerSources", "ALL", "success (${snapshot.size()} docs)")
                     val rawSources = snapshot.toObjects(PlayerSource::class.java)
-                    // Requirement 1, 2, 6: Filter out any legacy Player R2 entries
-                    val sources = rawSources.filterNot { 
-                        it.id.equals("r2", ignoreCase = true) || 
-                        it.id.equals("playerr2", ignoreCase = true) || 
-                        it.internalPlayer.equals("playerr2", ignoreCase = true) ||
-                        it.name.contains("Player R2", ignoreCase = true)
+                    // Elimination of decommissioned players (Requirement: Videasy, MultiEmbed, RedeFlixApi, StreamBetter)
+                    val legacyIds = listOf("videasy", "multiembed", "redeflix", "redeflixapi", "streambetter", "r2", "playerr2", "playmoz")
+                    val legacyNames = listOf("Videasy", "MultiEmbed", "RedeFlix", "StreamBetter", "Player R2", "PlayMoz")
+
+                    val sources = rawSources.filterNot { src ->
+                        src.id.lowercase() in legacyIds || 
+                        src.internalPlayer.lowercase() in legacyIds ||
+                        legacyNames.any { name -> src.name.contains(name, ignoreCase = true) }
                     }
 
-                    // Delete legacy R2 entries from cloud if present
-                    val r2Entries = rawSources.filter { 
-                        it.id.equals("r2", ignoreCase = true) || 
-                        it.id.equals("playerr2", ignoreCase = true) || 
-                        it.internalPlayer.equals("playerr2", ignoreCase = true) ||
-                        it.name.contains("Player R2", ignoreCase = true)
+                    // Delete decommissioned entries from cloud if present
+                    val entriesToDelete = rawSources.filter { src ->
+                        src.id.lowercase() in legacyIds || 
+                        src.internalPlayer.lowercase() in legacyIds ||
+                        legacyNames.any { name -> src.name.contains(name, ignoreCase = true) }
                     }
-                    if (r2Entries.isNotEmpty()) {
+
+                    if (entriesToDelete.isNotEmpty()) {
                         serviceScope.launch {
-                            r2Entries.forEach { r2 ->
+                            entriesToDelete.forEach { entry ->
                                 try {
-                                    db.collection("playerSources").document(r2.id).delete()
-                                    Log.d(TAG, "[PLAYER] Registro antigo do Player R2 (${r2.id}) removido do Firestore.")
+                                    db.collection("playerSources").document(entry.id).delete()
+                                    Log.d(TAG, "[PLAYER] Registro desativado (${entry.name} / ${entry.id}) removido definitivamente do Firestore.")
                                 } catch (ex: Exception) {
-                                    Log.w(TAG, "[PLAYER] Erro ao deletar R2 do Firestore: ${ex.message}")
+                                    Log.w(TAG, "[PLAYER] Erro ao deletar registro do Firestore: ${ex.message}")
                                 }
                             }
                         }
                     }
 
-                    val playmozEntries = sources.filter { it.id == "playmoz" || it.name.contains("playmoz", ignoreCase = true) }
-                    if (playmozEntries.isNotEmpty()) {
-                        serviceScope.launch {
-                            playmozEntries.forEach { pm ->
-                                try {
-                                    db.collection("playerSources").document(pm.id).delete()
-                                    Log.d(TAG, "[PLAYER] Registro antigo do Player PlayMoz (${pm.id}) removido do Firestore.")
-                                } catch (ex: Exception) {
-                                    Log.w(TAG, "[PLAYER] Erro ao deletar PlayMoz do Firestore: ${ex.message}")
-                                }
+                    val activeSources = sources.map { src ->
+                        if (src.id.contains("mgeb", ignoreCase = true) || src.movieTmdbUrl.contains("mgeb.top")) {
+                            if (src.name.equals("MegaEmbed", ignoreCase = true) || src.name.isBlank()) {
+                                src.copy(name = "Mgeb Embed")
+                            } else {
+                                src
                             }
+                        } else {
+                            src
                         }
                     }
-
-                    val activeSources = sources.filterNot { it.id == "playmoz" || it.name.contains("playmoz", ignoreCase = true) }
 
                     if (activeSources.isEmpty()) {
                         _playerSources.value = defaultInitialPlayerSources
                     } else {
-                        val hasVidSrc = activeSources.any { it.id == "vidsrc" || it.name.contains("vidsrc", ignoreCase = true) }
-                        val hasRedeFlix = activeSources.any { it.id == "redeflix" || it.id == "redeflixapi" || it.name.contains("redeflix", ignoreCase = true) }
-                        val missingDefaults = defaultInitialPlayerSources.filter { 
-                            (it.id == "vidsrc" && !hasVidSrc) || 
-                            ((it.id == "redeflix" || it.id == "redeflixapi") && !hasRedeFlix)
+                        val hasMgeb = activeSources.any { 
+                            it.id == "mgeb" || it.id == "mgeb_embed" || it.id == "megaembed" ||
+                            it.name.contains("mgeb", ignoreCase = true) || it.name.contains("megaembed", ignoreCase = true) ||
+                            it.movieTmdbUrl.contains("mgeb.top")
                         }
+                        val hasVidSrc = activeSources.any { it.id == "vidsrc" || it.name.contains("vidsrc", ignoreCase = true) }
+
+                        val missingDefaults = defaultInitialPlayerSources.filter { def ->
+                            when (def.id) {
+                                "mgeb" -> !hasMgeb
+                                "vidsrc" -> !hasVidSrc
+                                else -> activeSources.none { it.id == def.id }
+                            }
+                        }
+
+                        // Ensure Mgeb Embed exists as it is mandatory
+                        if (!hasMgeb) {
+                            serviceScope.launch {
+                                try {
+                                    val defaultMgeb = defaultInitialPlayerSources.first { it.id == "mgeb" }
+                                    db.collection("playerSources").document("mgeb").set(defaultMgeb, SetOptions.merge()).await()
+                                    Log.d(TAG, "[PLAYER] Mgeb Embed restaurado e sincronizado no Firestore.")
+                                } catch (ex: Exception) {
+                                    Log.w(TAG, "[PLAYER] Aviso ao sincronizar Mgeb no Firestore: ${ex.message}")
+                                }
+                            }
+                        }
+
                         val finalSources = if (missingDefaults.isNotEmpty()) {
                             activeSources + missingDefaults
                         } else {
@@ -4607,10 +4647,11 @@ class FirebaseService private constructor(private val appContext: Context) {
                 if (snapshot != null && snapshot.exists()) {
                     val config = snapshot.toObject(PlayerConfig::class.java)
                     if (config != null) {
-                        // Sanitize defaultPlayer if it points to R2 or PlayMoz
+                        // Sanitize defaultPlayer if it points to decommissioned players
                         var sanitizedConfig = config
-                        val isInvalidDefault = config.defaultPlayerId.lowercase() in listOf("r2", "playerr2", "playmoz") ||
-                                              config.megaEmbed.player.lowercase() in listOf("r2", "playerr2", "playmoz")
+                        val decommissionedIds = listOf("videasy", "multiembed", "redeflix", "redeflixapi", "streambetter", "r2", "playerr2", "playmoz")
+                        val isInvalidDefault = config.defaultPlayerId.lowercase() in decommissionedIds ||
+                                              config.megaEmbed.player.lowercase() in decommissionedIds
 
                         if (isInvalidDefault) {
                             val activeFallbackPlayer = "mgeb"
@@ -5014,124 +5055,142 @@ class FirebaseService private constructor(private val appContext: Context) {
             // 1. Fetch catalog from cloud with safety timeout
             val cloudIds = mutableSetOf<Int>()
             kotlinx.coroutines.withTimeoutOrNull(15000L) {
-                val catalogSnap = db.collection("catalog").get().await()
-                for (doc in catalogSnap.documents) {
-                    val data = doc.data ?: continue
-                    val tmdbId = (data["tmdbId"] as? Long)?.toInt()
-                        ?: (data["tmdbId"] as? String)?.toIntOrNull()
-                        ?: continue
+                try {
+                    val catalogSnap = db.collection("catalog").get().await()
+                    logFirestoreOp("get/list", "catalog", "ALL", "success (${catalogSnap.size()} docs)")
+                    for (doc in catalogSnap.documents) {
+                        val data = doc.data ?: continue
+                        val tmdbId = (data["tmdbId"] as? Long)?.toInt()
+                            ?: (data["tmdbId"] as? String)?.toIntOrNull()
+                            ?: continue
 
-                    cloudIds.add(tmdbId)
+                        cloudIds.add(tmdbId)
 
-                    val mediaType = data["mediaType"] as? String ?: "movie"
-                    val catFromCloud = data["mediaCategory"] as? String
-                    val originalLang = data["originalLanguage"] as? String ?: ""
-                    val originCount = data["originCountry"] as? String ?: ""
-                    val genresStr = data["genres"] as? String ?: ""
-                    val titleStr = data["title"] as? String ?: "Sem título"
-                    val mediaCat = if (!catFromCloud.isNullOrBlank()) {
-                        catFromCloud
-                    } else {
-                        MediaClassifier.classifyMedia(
+                        val mediaType = data["mediaType"] as? String ?: "movie"
+                        val catFromCloud = data["mediaCategory"] as? String
+                        val originalLang = data["originalLanguage"] as? String ?: ""
+                        val originCount = data["originCountry"] as? String ?: ""
+                        val genresStr = data["genres"] as? String ?: ""
+                        val titleStr = data["title"] as? String ?: "Sem título"
+                        val mediaCat = if (!catFromCloud.isNullOrBlank()) {
+                            catFromCloud
+                        } else {
+                            MediaClassifier.classifyMedia(
+                                mediaType = mediaType,
+                                genreIds = emptyList(),
+                                genreNames = genresStr,
+                                originalLanguage = originalLang,
+                                originCountry = originCount.split(",").filter { it.isNotBlank() },
+                                title = titleStr
+                            )
+                        }
+
+                        val entity = MediaEntity(
+                            tmdbId = tmdbId,
+                            title = titleStr,
+                            originalTitle = data["originalTitle"] as? String ?: "",
                             mediaType = mediaType,
-                            genreIds = emptyList(),
-                            genreNames = genresStr,
+                            mediaCategory = mediaCat,
                             originalLanguage = originalLang,
-                            originCountry = originCount.split(",").filter { it.isNotBlank() },
-                            title = titleStr
+                            originCountry = originCount,
+                            posterPath = data["posterPath"] as? String,
+                            backdropPath = data["backdropPath"] as? String,
+                            overview = data["overview"] as? String ?: "",
+                            releaseYear = data["releaseYear"] as? String ?: "",
+                            rating = (data["voteAverage"] as? Double) ?: (data["voteAverage"] as? Long)?.toDouble() ?: 0.0,
+                            genres = genresStr,
+                            durationMinutes = (data["runtime"] as? Long)?.toInt() ?: 0,
+                            addedAt = (data["updatedAt"] as? Long) ?: System.currentTimeMillis()
                         )
+                        dao.insertMedia(entity)
                     }
-
-                    val entity = MediaEntity(
-                        tmdbId = tmdbId,
-                        title = titleStr,
-                        originalTitle = data["originalTitle"] as? String ?: "",
-                        mediaType = mediaType,
-                        mediaCategory = mediaCat,
-                        originalLanguage = originalLang,
-                        originCountry = originCount,
-                        posterPath = data["posterPath"] as? String,
-                        backdropPath = data["backdropPath"] as? String,
-                        overview = data["overview"] as? String ?: "",
-                        releaseYear = data["releaseYear"] as? String ?: "",
-                        rating = (data["rating"] as? Number)?.toDouble() ?: 0.0,
-                        genres = genresStr,
-                        durationMinutes = (data["durationMinutes"] as? Long)?.toInt() ?: 120,
-                        cast = data["cast"] as? String ?: "",
-                        director = data["director"] as? String ?: "",
-                        seasonsCount = (data["seasonsCount"] as? Long)?.toInt() ?: 1,
-                        episodesCount = (data["episodesCount"] as? Long)?.toInt() ?: 1,
-                        trailerKey = data["trailerKey"] as? String,
-                        isHeroFeatured = data["isHeroFeatured"] as? Boolean ?: false,
-                        addedAt = (data["addedAt"] as? Long) ?: System.currentTimeMillis()
-                    )
-                    dao.insertMedia(entity)
+                } catch (e: Exception) {
+                    logFirestoreOp("get/list", "catalog", "ALL", "failed", e.message)
+                    throw e
                 }
+            }
 
-                // RECONCILIATION / PRUNING: Delete any local catalog items NOT present in the Firestore catalog
-                val localMedia = dao.getAllMediaSync()
-                for (local in localMedia) {
-                    if (!cloudIds.contains(local.tmdbId)) {
-                        Log.d(TAG, "[SYNC-PRUNE] Removendo item do catálogo local pois foi excluído da nuvem: '${local.title}' (ID ${local.tmdbId})")
-                        dao.deleteMediaByTmdbId(local.tmdbId)
-                        dao.deleteEpisodesByMediaId(local.tmdbId)
-                        dao.deleteFromMyListGlobal(local.tmdbId)
-                        dao.deleteFromWatchHistoryGlobal(local.tmdbId)
-                    }
+            // RECONCILIATION / PRUNING: Delete any local catalog items NOT present in the Firestore catalog
+            val localMedia = dao.getAllMediaSync()
+            for (local in localMedia) {
+                if (!cloudIds.contains(local.tmdbId)) {
+                    Log.d(TAG, "[SYNC-PRUNE] Removendo item do catálogo local pois foi excluído da nuvem: '${local.title}' (ID ${local.tmdbId})")
+                    dao.deleteMediaByTmdbId(local.tmdbId)
+                    dao.deleteEpisodesByMediaId(local.tmdbId)
+                    dao.deleteFromMyListGlobal(local.tmdbId)
+                    dao.deleteFromWatchHistoryGlobal(local.tmdbId)
                 }
             }
 
             // 2. Fetch featured from cloud with safety timeout
             kotlinx.coroutines.withTimeoutOrNull(8000L) {
-                val featuredSnap = db.collection("featured").get().await()
-                for (doc in featuredSnap.documents) {
-                    val data = doc.data ?: continue
-                    val mediaTmdbId = (data["mediaTmdbId"] as? Long)?.toInt()
-                        ?: (data["mediaTmdbId"] as? String)?.toIntOrNull()
-                        ?: continue
+                try {
+                    val featuredSnap = db.collection("featured").get().await()
+                    logFirestoreOp("get/list", "featured", "ALL", "success (${featuredSnap.size()} docs)")
+                    for (doc in featuredSnap.documents) {
+                        val data = doc.data ?: continue
+                        val mediaTmdbId = (data["mediaTmdbId"] as? Long)?.toInt()
+                            ?: (data["mediaTmdbId"] as? String)?.toIntOrNull()
+                            ?: continue
 
-                    val featured = FeaturedMediaEntity(
-                        id = (data["id"] as? Long)?.toInt() ?: 0,
-                        mediaTmdbId = mediaTmdbId,
-                        mediaType = data["mediaType"] as? String ?: "movie",
-                        trailerUrl = data["trailerUrl"] as? String ?: "",
-                        autoPlayTrailer = data["autoPlayTrailer"] as? Boolean ?: true,
-                        displayOrder = (data["displayOrder"] as? Long)?.toInt() ?: 0,
-                        isActive = data["isActive"] as? Boolean ?: true,
-                        createdAt = (data["createdAt"] as? Long) ?: System.currentTimeMillis(),
-                        updatedAt = (data["updatedAt"] as? Long) ?: System.currentTimeMillis()
-                    )
-                    dao.insertFeaturedMedia(featured)
+                        val featured = FeaturedMediaEntity(
+                            id = (data["id"] as? Long)?.toInt() ?: 0,
+                            mediaTmdbId = mediaTmdbId,
+                            mediaType = data["mediaType"] as? String ?: "movie",
+                            trailerUrl = data["trailerUrl"] as? String ?: "",
+                            autoPlayTrailer = data["autoPlayTrailer"] as? Boolean ?: true,
+                            displayOrder = (data["displayOrder"] as? Long)?.toInt() ?: 0,
+                            isActive = data["isActive"] as? Boolean ?: true,
+                            createdAt = (data["createdAt"] as? Long) ?: System.currentTimeMillis(),
+                            updatedAt = (data["updatedAt"] as? Long) ?: System.currentTimeMillis()
+                        )
+                        dao.insertFeaturedMedia(featured)
+                    }
+                } catch (e: Exception) {
+                    logFirestoreOp("get/list", "featured", "ALL", "failed", e.message)
+                    throw e
                 }
             }
 
             // 3. Fetch channels from cloud with safety timeout
             kotlinx.coroutines.withTimeoutOrNull(8000L) {
-                val channelsSnap = db.collection("live_channels").get().await()
-                for (doc in channelsSnap.documents) {
-                    val data = doc.data ?: continue
-                    val id = data["id"] as? String ?: doc.id
-                    val channel = ChannelEntity(
-                        id = id,
-                        name = data["name"] as? String ?: "Canal",
-                        category = data["category"] as? String ?: "Geral",
-                        logoUrl = data["logoUrl"] as? String ?: "",
-                        streamUrl = data["streamUrl"] as? String ?: "",
-                        isOnline = data["isOnline"] as? Boolean ?: true,
-                        addedAt = (data["addedAt"] as? Long) ?: System.currentTimeMillis()
-                    )
-                    dao.insertChannel(channel)
+                try {
+                    val channelsSnap = db.collection("live_channels").get().await()
+                    logFirestoreOp("get/list", "live_channels", "ALL", "success (${channelsSnap.size()} docs)")
+                    for (doc in channelsSnap.documents) {
+                        val data = doc.data ?: continue
+                        val id = data["id"] as? String ?: doc.id
+                        val channel = ChannelEntity(
+                            id = id,
+                            name = data["name"] as? String ?: "Canal",
+                            category = data["category"] as? String ?: "Geral",
+                            logoUrl = data["logoUrl"] as? String ?: "",
+                            streamUrl = data["streamUrl"] as? String ?: "",
+                            isOnline = data["isOnline"] as? Boolean ?: true,
+                            addedAt = (data["addedAt"] as? Long) ?: System.currentTimeMillis()
+                        )
+                        dao.insertChannel(channel)
+                    }
+                } catch (e: Exception) {
+                    logFirestoreOp("get/list", "live_channels", "ALL", "failed", e.message)
+                    throw e
                 }
             }
 
             // 4. Fetch metadata
             kotlinx.coroutines.withTimeoutOrNull(5000L) {
-                val metaSnap = db.collection("catalog_metadata").document("version").get().await()
-                if (metaSnap.exists()) {
-                    val ver = metaSnap.getLong("version") ?: System.currentTimeMillis()
-                    _catalogVersion.value = ver
-                } else {
-                    bumpCatalogVersionInCloud()
+                try {
+                    val metaSnap = db.collection("catalog_metadata").document("version").get().await()
+                    logFirestoreOp("get", "catalog_metadata", "version", "success")
+                    if (metaSnap.exists()) {
+                        val ver = metaSnap.getLong("version") ?: System.currentTimeMillis()
+                        _catalogVersion.value = ver
+                    } else {
+                        bumpCatalogVersionInCloud()
+                    }
+                } catch (e: Exception) {
+                    logFirestoreOp("get", "catalog_metadata", "version", "failed", e.message)
+                    throw e
                 }
             }
 
@@ -5334,13 +5393,19 @@ class FirebaseService private constructor(private val appContext: Context) {
     }
 
     fun stopRealtimeSync() {
+        deletedCatalogListener?.remove()
         catalogListener?.remove()
         episodesListener?.remove()
         channelsListener?.remove()
+        featuredListener?.remove()
+        notificationsListener?.remove()
         metadataListener?.remove()
+        deletedCatalogListener = null
         catalogListener = null
         episodesListener = null
         channelsListener = null
+        featuredListener = null
+        notificationsListener = null
         metadataListener = null
         isSyncStarted.set(false)
     }
@@ -5479,28 +5544,51 @@ class FirebaseService private constructor(private val appContext: Context) {
         val auth = FirebaseAuth.getInstance()
         authStateListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
             val firebaseUser = firebaseAuth.currentUser
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] ON_AUTH_STATE_CHANGED: uid=${firebaseUser?.uid}")
             if (firebaseUser != null) {
                 _profilesLoaded.value = false
                 startListeningUserProfile(firebaseUser.uid)
                 
-                // Verifica se o usuário deve ser FOUNDER baseado em claims ou e-mail inicial (apenas se não houver role no Firestore ainda)
+                // Verifica se o usuário deve ser FOUNDER baseado em claims ou e-mail inicial
                 serviceScope.launch {
                     try {
+                        Log.d(TAG, "[AUTH_DIAGNOSTIC] TOKEN_CLAIMS_START: uid=${firebaseUser.uid}")
                         val tokenResult = firebaseUser.getIdToken(true).await()
                         val role = tokenResult.claims["role"] as? String
                         val isAdmin = tokenResult.claims["admin"] as? Boolean ?: false
                         
-                        Log.d(TAG, "[AUTH] Token atualizado no listener. Role: $role, Admin: $isAdmin")
+                        val isFounderToken = role == "FOUNDER" || isAdmin
+                        val isRemovedFounder = firebaseUser.email?.lowercase() == "vieiradasilvawesley071@gmail.com"
                         
-                        if (role == "FOUNDER" || isAdmin) {
+                        Log.d(TAG, "[AUTH_DIAGNOSTIC] TOKEN_CLAIMS_SUCCESS: role=$role, admin=$isAdmin")
+                        
+                        if (isFounderToken && !isRemovedFounder) {
+                            Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTO_UPGRADE_FOUNDER_START")
                             val db = obtainFirestore()
-                            db?.collection("users")?.document(firebaseUser.uid)?.update(
-                                "role", if (role == "FOUNDER") "FOUNDER" else "ADMIN",
-                                "updatedAt", System.currentTimeMillis()
+                            val updates = mapOf(
+                                "role" to (if (role == "FOUNDER") "FOUNDER" else "ADMIN"),
+                                "updatedAt" to System.currentTimeMillis(),
+                                "lastLoginAt" to System.currentTimeMillis()
+                            )
+                            db?.collection("users")?.document(firebaseUser.uid)?.set(
+                                updates, SetOptions.merge()
                             )?.await()
+                            Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTO_UPGRADE_FOUNDER_SUCCESS")
+                        } else if (isRemovedFounder) {
+                            Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTO_DOWNGRADE_WESLEY_START")
+                            val db = obtainFirestore()
+                            val updates = mapOf(
+                                "role" to "USER",
+                                "updatedAt" to System.currentTimeMillis(),
+                                "lastLoginAt" to System.currentTimeMillis()
+                            )
+                            db?.collection("users")?.document(firebaseUser.uid)?.set(
+                                updates, SetOptions.merge()
+                            )?.await()
+                            Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTO_DOWNGRADE_WESLEY_SUCCESS")
                         }
                     } catch (e: Exception) {
-                        Log.w(TAG, "[AUTH] Erro ao verificar claims no listener: ${e.message}")
+                        Log.w(TAG, "[AUTH_DIAGNOSTIC] TOKEN_CLAIMS_ERROR: ${e.message}")
                     }
                 }
             } else {
@@ -5515,29 +5603,32 @@ class FirebaseService private constructor(private val appContext: Context) {
     }
 
     private fun startListeningUserProfile(uid: String) {
+        Log.d(TAG, "[AUTH_DIAGNOSTIC] LISTEN_PROFILE_START: uid=$uid")
         val db = obtainFirestore() ?: return
         userProfileListener?.remove()
         userProfileListener = db.collection("users").document(uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.w(TAG, "Error listening to user profile: ${error.message}")
+                    Log.w(TAG, "[AUTH_DIAGNOSTIC] LISTEN_PROFILE_ERROR: ${error.code} - ${error.message}")
                     return@addSnapshotListener
                 }
                 if (snapshot != null && snapshot.exists()) {
                     val user = snapshot.toObject(UserEntity::class.java)
                     _currentUser.value = user
                     updateAdminAuthorization()
-                    Log.d(TAG, "[AUTH] Perfil carregado. Email: ${user?.email}, Role: ${user?.role}")
+                    Log.d(TAG, "[AUTH_DIAGNOSTIC] LISTEN_PROFILE_SUCCESS: email=${user?.email}, role=${user?.role}")
                 } else {
+                    Log.d(TAG, "[AUTH_DIAGNOSTIC] LISTEN_PROFILE_EMPTY: profile not found, creating basic...")
                     // Se o perfil não existe mas o usuário está autenticado, criamos um básico
                     val fbUser = FirebaseAuth.getInstance().currentUser
                     if (fbUser != null && fbUser.uid == uid) {
                         serviceScope.launch {
                             val isFounderEmail = fbUser.email?.lowercase() == "ronaldomazive915@gmail.com"
+                            val isRemovedFounder = fbUser.email?.lowercase() == "vieiradasilvawesley071@gmail.com"
                             val role = if (isFounderEmail) "FOUNDER" else "USER"
                             
                             // Se for FOUNDER, garante permissões totais
-                            val permissions = if (role == "FOUNDER") {
+                            val permissions = if (role == "FOUNDER" && !isRemovedFounder) {
                                 UserPermissions(
                                     dashboard = true,
                                     administrators = true,
@@ -5569,11 +5660,12 @@ class FirebaseService private constructor(private val appContext: Context) {
                                 email = fbUser.email ?: "",
                                 displayName = fbUser.displayName ?: "Usuário",
                                 photoUrl = fbUser.photoUrl?.toString(),
-                                role = role,
+                                role = if (isRemovedFounder) "USER" else role,
                                 permissions = permissions,
-                                isVerified = isFounderEmail,
+                                isVerified = if (isRemovedFounder) false else isFounderEmail,
                                 deviceId = getOrGeneratePersistentDeviceId()
                             )
+                            Log.d(TAG, "[AUTH_DIAGNOSTIC] CREATE_PROFILE_AUTO_START: uid=${fbUser.uid}")
                             createUserProfile(newUser)
                         }
                     }
@@ -5602,7 +5694,8 @@ class FirebaseService private constructor(private val appContext: Context) {
         profilesListListener = db.collection("users").document(uid).collection("profiles")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e(TAG, "Error listening to profiles list: ${error.message}")
+                    val currentUser = FirebaseAuth.getInstance().currentUser
+                    Log.e(TAG, "Error listening to profiles list for $uid (Logged as: ${currentUser?.email}/${currentUser?.uid}): ${error.message}")
                     _profilesLoaded.value = true // Even on error, we consider "loaded" to unblock UI
                     return@addSnapshotListener
                 }
@@ -6130,10 +6223,11 @@ class FirebaseService private constructor(private val appContext: Context) {
     suspend fun createUserProfile(user: UserEntity) = withContext(Dispatchers.IO) {
         val db = obtainFirestore() ?: return@withContext
         try {
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] CREATE_USER_PROFILE_START: ${user.uid}")
             db.collection("users").document(user.uid).set(user, SetOptions.merge()).await()
-            Log.d(TAG, "User profile created/updated: ${user.uid}")
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] CREATE_USER_PROFILE_SUCCESS: ${user.uid}")
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating user profile: ${e.message}")
+            Log.e(TAG, "[AUTH_DIAGNOSTIC] CREATE_USER_PROFILE_ERROR: ${e.message}")
         }
     }
 
@@ -6294,53 +6388,22 @@ class FirebaseService private constructor(private val appContext: Context) {
 
             val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Serviço de banco de dados indisponível no momento."))
 
-            // Consulta direta no índice atômico de usernames
-            val usernameDoc = db.collection("usernames").document(norm).get().await()
+            // Consulta direta no índice atômico de usernames (público - não requer auth)
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] RESOLVE_USERNAME_QUERY_START: doc=$norm")
+            val usernameDoc = try {
+                val snap = db.collection("usernames").document(norm).get().await()
+                logFirestoreOp("get", "usernames", norm, "success")
+                snap
+            } catch (e: Exception) {
+                logFirestoreOp("get", "usernames", norm, "error", e.message)
+                Log.e(TAG, "[AUTH_DIAGNOSTIC] RESOLVE_USERNAME_QUERY_ERROR: ${e.message}")
+                throw e
+            }
+
             if (usernameDoc.exists()) {
                 val email = usernameDoc.getString("email")
                 if (!email.isNullOrBlank()) {
-                    return@withContext Result.success(email.lowercase())
-                }
-            }
-
-            // Fallback na coleção 'users' por usernameNormalized
-            val snapNorm = db.collection("users")
-                .whereEqualTo("usernameNormalized", norm)
-                .limit(1)
-                .get()
-                .await()
-
-            if (!snapNorm.isEmpty) {
-                val email = snapNorm.documents.first().getString("email")
-                if (!email.isNullOrBlank()) {
-                    return@withContext Result.success(email.lowercase())
-                }
-            }
-
-            // Fallback na coleção 'users' por username com '@'
-            val snapDisplay = db.collection("users")
-                .whereEqualTo("username", "@$norm")
-                .limit(1)
-                .get()
-                .await()
-
-            if (!snapDisplay.isEmpty) {
-                val email = snapDisplay.documents.first().getString("email")
-                if (!email.isNullOrBlank()) {
-                    return@withContext Result.success(email.lowercase())
-                }
-            }
-
-            // Fallback na coleção 'users' por displayName
-            val snapDisplayName = db.collection("users")
-                .whereEqualTo("displayName", trimmed)
-                .limit(1)
-                .get()
-                .await()
-
-            if (!snapDisplayName.isEmpty) {
-                val email = snapDisplayName.documents.first().getString("email")
-                if (!email.isNullOrBlank()) {
+                    Log.d(TAG, "[AUTH_DIAGNOSTIC] RESOLVE_USERNAME_QUERY_FOUND: $email")
                     return@withContext Result.success(email.lowercase())
                 }
             }
@@ -6474,72 +6537,135 @@ class FirebaseService private constructor(private val appContext: Context) {
                 return@withContext Result.failure(Exception("Preencha todos os campos."))
             }
 
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] LOGIN_START: $trimmedInput")
+
             // Resolve e-mail se foi fornecido um username
             val resolvedEmail = if (com.example.util.UsernameUtils.isEmailAddress(trimmedInput)) {
                 trimmedInput.lowercase()
             } else {
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] RESOLVE_IDENTIFIER_START: $trimmedInput")
                 val resolveResult = resolveEmailFromIdentifier(trimmedInput)
                 if (resolveResult.isFailure) {
+                    Log.e(TAG, "[AUTH_DIAGNOSTIC] RESOLVE_IDENTIFIER_ERROR: ${resolveResult.exceptionOrNull()?.message}")
                     return@withContext Result.failure(resolveResult.exceptionOrNull() ?: Exception("Usuário não encontrado."))
                 }
-                resolveResult.getOrThrow()
+                val resolved = resolveResult.getOrThrow()
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] RESOLVE_IDENTIFIER_SUCCESS: $resolved")
+                resolved
             }
 
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTH_START: $resolvedEmail")
             val auth = FirebaseAuth.getInstance()
-            val result = auth.signInWithEmailAndPassword(resolvedEmail, pass).await()
+            val result = try {
+                auth.signInWithEmailAndPassword(resolvedEmail, pass).await()
+            } catch (e: Exception) {
+                Log.e(TAG, "[AUTH_DIAGNOSTIC] AUTH_ERROR: ${e.message}")
+                throw e
+            }
             val fbUser = result.user ?: throw Exception("Falha ao obter usuário após login.")
             
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTH_SUCCESS")
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTH_UID: ${fbUser.uid}")
+
             // Verifica Custom Claims no ID Token
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] ROLE_READ_START")
             val tokenResult = fbUser.getIdToken(true).await()
             val claimRole = tokenResult.claims["role"] as? String
             val isAdminClaim = tokenResult.claims["admin"] as? Boolean ?: false
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] ROLE_READ_SUCCESS: claimRole=$claimRole, isAdminClaim=$isAdminClaim")
             
             // Regra especial para o e-mail do fundador
             val isFounderEmail = fbUser.email?.lowercase() == "ronaldomazive915@gmail.com"
+            val isRemovedFounderEmail = fbUser.email?.lowercase() == "vieiradasilvawesley071@gmail.com"
             
             // Busca o perfil no Firestore
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] PROFILE_READ_START: collection=users, doc=${fbUser.uid}")
             val db = obtainFirestore() ?: throw Exception("Firestore indisponível.")
-            val snapshot = db.collection("users").document(fbUser.uid).get().await()
+            val snapshot = try {
+                val snap = db.collection("users").document(fbUser.uid).get().await()
+                logFirestoreOp("get", "users", fbUser.uid, "success")
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] PROFILE_READ_SUCCESS: exists=${snap.exists()}")
+                snap
+            } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
+                logFirestoreOp("get", "users", fbUser.uid, "denied", e.message)
+                if (e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    Log.e(TAG, "[AUTH_DIAGNOSTIC] PROFILE_READ_PERMISSION_DENIED: uid=${fbUser.uid}, error=${e.message}")
+                }
+                throw e
+            } catch (e: Exception) {
+                logFirestoreOp("get", "users", fbUser.uid, "error", e.message)
+                Log.e(TAG, "[AUTH_DIAGNOSTIC] PROFILE_READ_ERROR: ${e.message}")
+                throw e
+            }
             
             val user = if (snapshot.exists()) {
                 val existingUser = snapshot.toObject(UserEntity::class.java) ?: throw Exception("Erro ao processar dados do usuário.")
                 
-                // Se for FOUNDER e a role ainda não estiver atualizada
-                if ((claimRole == "FOUNDER" || isAdminClaim || isFounderEmail) && existingUser.role != "FOUNDER") {
+                // Se for o e-mail removido, garante que a role seja USER
+                if (isRemovedFounderEmail && existingUser.role != "USER") {
+                    Log.d(TAG, "[AUTH_DIAGNOSTIC] ROLE_WRITE_START: downgrade to USER for ${fbUser.uid}")
+                    val downgradedUser = existingUser.copy(role = "USER", permissions = UserPermissions(), updatedAt = System.currentTimeMillis())
+                    db.collection("users").document(fbUser.uid).set(downgradedUser, SetOptions.merge()).await()
+                    logFirestoreOp("set", "users", fbUser.uid, "success (downgrade)")
+                    Log.d(TAG, "[AUTH_DIAGNOSTIC] ROLE_WRITE_SUCCESS: downgraded")
+                    downgradedUser
+                } else if ((claimRole == "FOUNDER" || isAdminClaim || isFounderEmail) && existingUser.role != "FOUNDER" && !isRemovedFounderEmail) {
+                    Log.d(TAG, "[AUTH_DIAGNOSTIC] ROLE_WRITE_START: upgrade to FOUNDER for ${fbUser.uid}")
                     val updatedUser = existingUser.copy(role = "FOUNDER", updatedAt = System.currentTimeMillis())
                     db.collection("users").document(fbUser.uid).set(updatedUser, SetOptions.merge()).await()
+                    logFirestoreOp("set", "users", fbUser.uid, "success (upgrade)")
+                    Log.d(TAG, "[AUTH_DIAGNOSTIC] ROLE_WRITE_SUCCESS: upgraded")
                     updatedUser
                 } else {
                     // Atualiza o lastLogin
-                    db.collection("users").document(existingUser.uid).update("lastLoginAt", System.currentTimeMillis()).await()
+                    Log.d(TAG, "[AUTH_DIAGNOSTIC] LOGIN_UPDATE_TIME_START: doc=${fbUser.uid}")
+                    db.collection("users").document(fbUser.uid).update("lastLoginAt", System.currentTimeMillis()).await()
+                    logFirestoreOp("update", "users", fbUser.uid, "success (lastLogin)")
+                    Log.d(TAG, "[AUTH_DIAGNOSTIC] LOGIN_UPDATE_TIME_SUCCESS")
                     existingUser
                 }
             } else {
                 // Cria o perfil do usuário caso não exista
-                val role = if (claimRole == "FOUNDER" || isAdminClaim || isFounderEmail) "FOUNDER" else "USER"
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] PROFILE_CREATE_START: doc=${fbUser.uid}")
+                val role = if ((claimRole == "FOUNDER" || isAdminClaim || isFounderEmail) && !isRemovedFounderEmail) "FOUNDER" else "USER"
                 val newUser = UserEntity(
                     uid = fbUser.uid,
                     email = fbUser.email ?: "",
                     displayName = fbUser.displayName ?: resolvedEmail.substringBefore("@"),
                     role = role,
+                    isVerified = if (isRemovedFounderEmail) false else (role == "FOUNDER"),
                     deviceId = getOrGeneratePersistentDeviceId()
                 )
                 db.collection("users").document(fbUser.uid).set(newUser).await()
+                logFirestoreOp("set", "users", fbUser.uid, "success (create)")
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] PROFILE_CREATE_SUCCESS")
                 newUser
             }
             
             // Inicia os listeners dos perfis
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] START_PROFILE_LISTENERS_START")
             startListeningUserProfile(fbUser.uid)
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] START_PROFILE_LISTENERS_DONE")
 
-            if (isFounderEmail) {
+            if (isFounderEmail && !isRemovedFounderEmail) {
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] FOUNDER_SYNC_START")
                 ensureFounderUsernameSync(fbUser.uid, fbUser.email ?: "ronaldomazive915@gmail.com")
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] FOUNDER_SYNC_DONE")
             }
 
             _currentUser.value = user
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] LOGIN_COMPLETE: uid=${fbUser.uid}")
             Result.success(user)
         } catch (e: Exception) {
-            Log.e(TAG, "SignIn error: ${e.message}")
-            Result.failure(e)
+            Log.e(TAG, "[AUTH_DIAGNOSTIC] SIGN_IN_ERROR: ${e.message}")
+            val friendlyError = when {
+                e is com.google.firebase.auth.FirebaseAuthInvalidCredentialsException -> "E-mail ou senha incorretos."
+                e is com.google.firebase.auth.FirebaseAuthInvalidUserException -> "Usuário não encontrado."
+                e.message?.contains("auth/operation-not-allowed") == true -> "O método de login não está habilitado no Firebase."
+                e.message?.contains("auth/invalid-credential") == true -> "E-mail ou senha incorretos."
+                else -> e.message ?: "Falha ao realizar login."
+            }
+            Result.failure(Exception(friendlyError))
         }
     }
 
@@ -6581,15 +6707,30 @@ class FirebaseService private constructor(private val appContext: Context) {
             val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Serviço de banco de dados indisponível."))
 
             // 1. Pré-verificação de disponibilidade no Firestore
-            val existingUsernameDoc = db.collection("usernames").document(norm).get().await()
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] USERNAME_CHECK_START: doc=$norm")
+            val existingUsernameDoc = try {
+                db.collection("usernames").document(norm).get().await()
+            } catch (e: Exception) {
+                Log.e(TAG, "[AUTH_DIAGNOSTIC] USERNAME_CHECK_ERROR: ${e.message}")
+                throw e
+            }
             if (existingUsernameDoc.exists()) {
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] USERNAME_CHECK_CONFLICT: $norm")
                 return@withContext Result.failure(Exception("O nome de usuário $displayUsername já está em uso."))
             }
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] USERNAME_CHECK_SUCCESS")
 
             // 2. Criação do usuário no Firebase Authentication
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTH_CREATE_START: $trimmedEmail")
             val auth = FirebaseAuth.getInstance()
-            val authResult = auth.createUserWithEmailAndPassword(trimmedEmail, pass).await()
+            val authResult = try {
+                auth.createUserWithEmailAndPassword(trimmedEmail, pass).await()
+            } catch (e: Exception) {
+                Log.e(TAG, "[AUTH_DIAGNOSTIC] AUTH_CREATE_ERROR: ${e.message}")
+                throw e
+            }
             val fbUser = authResult.user ?: throw Exception("Falha ao registrar credenciais de acesso.")
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] AUTH_CREATE_SUCCESS: uid=${fbUser.uid}")
 
             val newUser = UserEntity(
                 uid = fbUser.uid,
@@ -6602,6 +6743,7 @@ class FirebaseService private constructor(private val appContext: Context) {
             )
 
             // 3. Gravação atômica via Batch no Firestore
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] SIGN_UP_BATCH_WRITE_START: uid=${fbUser.uid}")
             val batch = db.batch()
 
             // Documento de usuário
@@ -6631,17 +6773,36 @@ class FirebaseService private constructor(private val appContext: Context) {
             )
             batch.set(profileRef, initialProfile)
 
-            batch.commit().await()
+            try {
+                batch.commit().await()
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] SIGN_UP_BATCH_WRITE_SUCCESS")
+            } catch (e: com.google.firebase.firestore.FirebaseFirestoreException) {
+                if (e.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    Log.e(TAG, "[AUTH_DIAGNOSTIC] SIGN_UP_BATCH_WRITE_PERMISSION_DENIED: ${e.message}")
+                }
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "[AUTH_DIAGNOSTIC] SIGN_UP_BATCH_WRITE_ERROR: ${e.message}")
+                throw e
+            }
 
             // Inicia listeners e atualiza estado
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] START_PROFILE_LISTENERS_START")
             startListeningUserProfile(fbUser.uid)
             _currentUser.value = newUser
             _activeProfile.value = initialProfile
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] SIGN_UP_COMPLETE: uid=${fbUser.uid}")
 
             Result.success(newUser)
         } catch (e: Exception) {
-            Log.e(TAG, "SignUpWithUsername error: ${e.message}")
-            Result.failure(e)
+            Log.e(TAG, "[AUTH_DIAGNOSTIC] SIGN_UP_ERROR: ${e.message}")
+            val friendlyError = when {
+                e is com.google.firebase.auth.FirebaseAuthUserCollisionException -> "Este e-mail já possui uma conta."
+                e is com.google.firebase.auth.FirebaseAuthWeakPasswordException -> "A senha é muito fraca."
+                e.message?.contains("auth/operation-not-allowed") == true -> "O método de login não está habilitado no Firebase."
+                else -> e.message ?: "Falha ao criar conta."
+            }
+            Result.failure(Exception(friendlyError))
         }
     }
 

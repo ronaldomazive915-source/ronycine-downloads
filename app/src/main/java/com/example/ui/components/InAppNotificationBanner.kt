@@ -55,16 +55,13 @@ private fun parseNotificationData(notif: NotificationEntity): FormattedNotificat
     val isEmAlta = typeUpper == "EM_ALTA" || typeUpper == "TRENDING"
 
     val categoryHeader = when {
-        isEpisode -> "📺 NOVO EPISÓDIO"
-        isSeries -> "📺 NOVA SÉRIE"
+        isEpisode -> "📺 NOVO EPISÓDIO DISPONÍVEL!"
+        isSeries -> "📺 NOVA SÉRIE DISPONÍVEL!"
         isEmAlta -> "🔥 EM ALTA NO RONYCINE"
-        else -> "🎬 NOVO NO RONYCINE"
+        else -> "🎬 NOVO FILME DISPONÍVEL!"
     }
 
-    val defaultBtnText = when {
-        isSeries -> "VER AGORA"
-        else -> "ASSISTIR"
-    }
+    val defaultBtnText = "VER AGORA"
 
     val buttonText = notif.buttonText?.ifBlank { null } ?: defaultBtnText
 
@@ -301,7 +298,7 @@ fun InAppNotificationBanner(
                                 )
                                 Spacer(modifier = Modifier.width(2.dp))
                                 Text(
-                                    text = "AGORA",
+                                    text = formatted.buttonText,
                                     color = Color.White,
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.ExtraBold,

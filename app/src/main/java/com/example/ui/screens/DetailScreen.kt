@@ -388,7 +388,10 @@ fun DetailScreen(
                                         AsyncImage(
                                             model = ImageRequest.Builder(context)
                                                 .data(actor.profileUrl)
+                                                .size(120, 120)
                                                 .crossfade(true)
+                                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                                                 .build(),
                                             contentDescription = actor.name,
                                             contentScale = ContentScale.Crop,
@@ -550,7 +553,10 @@ fun DetailScreen(
                 AsyncImage(
                     model = ImageRequest.Builder(context)
                         .data(item.backdropPath?.ifBlank { null } ?: item.posterPath)
+                        .size(800, 450)
                         .crossfade(true)
+                        .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                        .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                         .build(),
                     contentDescription = item.title,
                     contentScale = ContentScale.Crop,
@@ -625,7 +631,10 @@ fun DetailScreen(
                             AsyncImage(
                                 model = ImageRequest.Builder(context)
                                     .data(posterUrl)
+                                    .size(240, 360)
                                     .crossfade(true)
+                                    .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                    .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                                     .build(),
                                 contentDescription = item.title,
                                 contentScale = ContentScale.Crop,
@@ -710,17 +719,22 @@ fun DetailScreen(
                             val count = if (item.seasonsCount > 0) item.seasonsCount else 1
                             if (count == 1) "1 temporada" else "$count temporadas"
                         } else {
-                            val mins = if (item.durationMinutes > 0) item.durationMinutes else 118
-                            val hours = mins / 60
-                            val remMins = mins % 60
-                            if (hours > 0) "${hours}h ${remMins}min" else "${mins}min"
+                            if (item.durationMinutes > 0) {
+                                val hours = item.durationMinutes / 60
+                                val remMins = item.durationMinutes % 60
+                                if (hours > 0) "${hours}h ${remMins}min" else "${item.durationMinutes}min"
+                            } else {
+                                ""
+                            }
                         }
-                        Text(
-                            text = durationOrSeasons,
-                            color = TextSecondary,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        if (durationOrSeasons.isNotBlank()) {
+                            Text(
+                                text = durationOrSeasons,
+                                color = TextSecondary,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
 
                         val cleanGenres = remember(item.genres) {
                             item.genres.split(",")
@@ -1133,7 +1147,10 @@ fun DetailScreen(
                                                 AsyncImage(
                                                     model = ImageRequest.Builder(context)
                                                         .data(actor.profileUrl)
+                                                        .size(120, 120)
                                                         .crossfade(true)
+                                                        .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                                        .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                                                         .build(),
                                                     contentDescription = actor.name,
                                                     contentScale = ContentScale.Crop,
@@ -1509,7 +1526,10 @@ fun DetailScreen(
                                         AsyncImage(
                                             model = ImageRequest.Builder(context)
                                                 .data(relPosterUrl)
+                                                .size(180, 270)
                                                 .crossfade(true)
+                                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                                                 .build(),
                                             contentDescription = rel.title,
                                             contentScale = ContentScale.Crop,
@@ -1631,7 +1651,10 @@ fun ModernEpisodeCard(
                         AsyncImage(
                             model = ImageRequest.Builder(LocalContext.current)
                                 .data("https://image.tmdb.org/t/p/w185${episode.stillPath}")
+                                .size(240, 135)
                                 .crossfade(true)
+                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                                 .build(),
                             contentDescription = "Episódio $epNumberFormatted",
                             contentScale = ContentScale.Crop,

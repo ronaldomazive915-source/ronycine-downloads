@@ -129,57 +129,6 @@ object PlayerUtils {
             return if (isValidPlayerUrl(raw)) raw else ""
         }
 
-        // Check if provider is Videasy (https://player.videasy.to)
-        val isVideasy = provider.contains("videasy", ignoreCase = true) ||
-                (player != null && player.contains("videasy", ignoreCase = true)) ||
-                (templateMovieUrl != null && templateMovieUrl.contains("videasy", ignoreCase = true)) ||
-                (templateTvUrl != null && templateTvUrl.contains("videasy", ignoreCase = true))
-
-        if (isVideasy) {
-            val idSegment = if (hasValidTmdb) tmdbId.toString() else (cleanImdb ?: "")
-            if (idSegment.isEmpty()) return ""
-            val raw = if (isMovie) {
-                "https://player.videasy.to/movie/$idSegment"
-            } else {
-                "https://player.videasy.to/tv/$idSegment/$s/$e"
-            }
-            return if (isValidPlayerUrl(raw)) raw else ""
-        }
-
-        // Check if provider is MultiEmbed (https://multiembed.mov)
-        val isMultiEmbed = provider.contains("multiembed", ignoreCase = true) ||
-                (player != null && player.contains("multiembed", ignoreCase = true)) ||
-                (templateMovieUrl != null && templateMovieUrl.contains("multiembed", ignoreCase = true)) ||
-                (templateTvUrl != null && templateTvUrl.contains("multiembed", ignoreCase = true))
-
-        if (isMultiEmbed) {
-            val idSegment = if (hasValidTmdb) tmdbId.toString() else (cleanImdb ?: "")
-            if (idSegment.isEmpty()) return ""
-            val raw = if (isMovie) {
-                "https://multiembed.mov/?video_id=$idSegment&tmdb=1"
-            } else {
-                "https://multiembed.mov/?video_id=$idSegment&tmdb=1&s=$s&e=$e"
-            }
-            return if (isValidPlayerUrl(raw)) raw else ""
-        }
-
-        // Check if provider is RedeFlixApi (https://redeflixapi.store)
-        val isRedeFlix = provider.contains("redeflix", ignoreCase = true) ||
-                (player != null && player.contains("redeflix", ignoreCase = true)) ||
-                (templateMovieUrl != null && templateMovieUrl.contains("redeflixapi.store", ignoreCase = true)) ||
-                (templateTvUrl != null && templateTvUrl.contains("redeflixapi.store", ignoreCase = true))
-
-        if (isRedeFlix) {
-            val idSegment = if (hasValidTmdb) tmdbId.toString() else (cleanImdb ?: "")
-            if (idSegment.isEmpty()) return ""
-            val raw = if (isMovie) {
-                "https://redeflixapi.store/filme/$idSegment"
-            } else {
-                "https://redeflixapi.store/serie/$idSegment/$s/$e"
-            }
-            return if (isValidPlayerUrl(raw)) raw else ""
-        }
-
         // If custom template URLs are provided (from custom PlayerSource)
         val customTemplate = if (isMovie) templateMovieUrl else templateTvUrl
         if (!customTemplate.isNullOrBlank() && !customTemplate.contains("mgeb.top")) {
@@ -293,7 +242,8 @@ object PlayerUtils {
         tmdbId: Int,
         season: Int? = null,
         episode: Int? = null,
-        megaEmbedConfig: MegaEmbedPlayerConfig? = null
+        megaEmbedConfig: MegaEmbedPlayerConfig? = null,
+        dsLang: String? = null
     ): String {
         val isMegaEmbed = source.id.contains("mgeb", ignoreCase = true) ||
                 source.name.contains("mega", ignoreCase = true) ||
@@ -334,6 +284,7 @@ object PlayerUtils {
             audio = source.language,
             player = effectivePlayer,
             color = effectiveColor,
+            dsLang = dsLang,
             imdbSeriesFormat = format,
             templateMovieUrl = source.movieTmdbUrl.takeIf { it.isNotBlank() },
             templateTvUrl = source.tvTmdbUrl.takeIf { it.isNotBlank() },
@@ -365,5 +316,94 @@ object PlayerUtils {
             templateMovieUrl = player.movieTmdbUrl.takeIf { it.isNotBlank() },
             templateTvUrl = player.tvTmdbUrl.takeIf { it.isNotBlank() }
         )
+    }
+
+    /**
+     * Dedicated URL generator for Mgeb Embed / MegaEmbed Movies
+     */
+    fun buildMgebMovieUrl(
+        tmdbId: Int,
+        player: String? = null,
+        color: String? = null,
+        apiKey: String? = null
+    ): String {
+        return buildPlayerUrl(
+            provider = "Mgeb Embed",
+            mediaType = "movie",
+            tmdbId = tmdbId,
+            player = player,
+            color = color,
+            apiKey = apiKey
+        )
+    }
+
+    /**
+     * Dedicated URL generator for Mgeb Embed / MegaEmbed TV Show Episodes
+     */
+    fun buildMgebEpisodeUrl(
+        tmdbId: Int,
+        season: Int,
+        episode: Int,
+        player: String? = null,
+        color: String? = null,
+        apiKey: String? = null
+    ): String {
+        return buildPlayerUrl(
+            provider = "Mgeb Embed",
+            mediaType = "tv",
+            tmdbId = tmdbId,
+            season = season,
+            episode = episode,
+            player = player,
+            color = color,
+            apiKey = apiKey
+        )
+    }
+
+    /**
+     * Centralized duration formatter for RONYCINE.
+     * Converts seconds (Double, Long, or Int) into HH:MM:SS or MM:SS format accurately.
+     * Ensures no truncation, negative values, or incorrect minute divisions.
+     *
+     * Examples:
+     * - 65.0 -> "01:05"
+     * - 3600.0 -> "01:00:00"
+     * - 3661.0 -> "01:01:01"
+     * - 7200.0 -> "02:00:00"
+     * - 7425.0 -> "02:03:45"
+     */
+    fun formatDuration(seconds: Double, forceHours: Boolean = false): String {
+        if (seconds.isNaN() || seconds.isInfinite() || seconds <= 0.0) {
+            return if (forceHours) "00:00:00" else "00:00"
+        }
+        val totalSec = seconds.toLong()
+        val hours = totalSec / 3600
+        val minutes = (totalSec % 3600) / 60
+        val secs = totalSec % 60
+        return if (hours > 0 || forceHours) {
+            String.format(java.util.Locale.US, "%02d:%02d:%02d", hours, minutes, secs)
+        } else {
+            String.format(java.util.Locale.US, "%02d:%02d", minutes, secs)
+        }
+    }
+
+    fun formatDuration(seconds: Long, forceHours: Boolean = false): String =
+        formatDuration(seconds.toDouble(), forceHours)
+
+    fun formatDuration(seconds: Int, forceHours: Boolean = false): String =
+        formatDuration(seconds.toDouble(), forceHours)
+
+    fun formatDurationMs(ms: Long, forceHours: Boolean = false): String =
+        formatDuration((ms / 1000.0), forceHours)
+
+    /**
+     * Formats current playback time and total duration pair:
+     * e.g., "00:05:32 / 02:03:47" or "01:05 / 45:10"
+     */
+    fun formatTimeProgress(currentTimeSeconds: Double, totalDurationSeconds: Double): String {
+        val showHours = totalDurationSeconds >= 3600.0 || currentTimeSeconds >= 3600.0
+        val curStr = formatDuration(currentTimeSeconds, forceHours = showHours)
+        val durStr = formatDuration(totalDurationSeconds, forceHours = showHours)
+        return "$curStr / $durStr"
     }
 }

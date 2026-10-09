@@ -38,7 +38,10 @@ import kotlinx.coroutines.launch
 @Composable
 fun AdminCineConfigScreen(adminViewModel: AdminViewModel) {
     val context = LocalContext.current
-    val db = remember { FirebaseFirestore.getInstance() }
+    val db = remember { 
+        val dbId = context.getString(com.example.R.string.firestore_database_id)
+        FirebaseFirestore.getInstance(dbId) 
+    }
     val coroutineScope = rememberCoroutineScope()
 
     // Identity

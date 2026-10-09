@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -58,7 +60,7 @@ private val ColorRestricted = Color(0xFFEF4444).copy(alpha = 0.9f)
 fun MediaCard(
     media: MediaEntity,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier.width(115.dp),
+    modifier: Modifier = Modifier.width(105.dp),
     posterHeight: Dp? = null
 ) {
     val category = remember(media.mediaCategory, media.genres, media.title) {
@@ -83,22 +85,35 @@ fun MediaCard(
 
     val context = LocalContext.current
     val imageUrl = remember(media.posterPath, media.backdropPath) {
-        media.posterPath?.ifBlank { null } ?: media.backdropPath
+        val rawUrl = media.posterPath?.ifBlank { null } ?: media.backdropPath
+        // FORCE LOW RESOLUTION for list cards to save memory and bandwidth
+        rawUrl?.replace("/w500/", "/w185/")
+              ?.replace("/w1280/", "/w780/")
+              ?.replace("/original/", "/w185/")
     }
-    val imageRequest = remember(imageUrl) {
+    
+    val imageRequest = remember(imageUrl, context) {
         ImageRequest.Builder(context)
             .data(imageUrl)
-            .size(240, 360)
-            .crossfade(200)
-            .placeholder(android.R.drawable.progress_horizontal) // Simple native placeholder
-            .error(android.R.drawable.ic_menu_report_image)
+            .size(180, 270) // STRICT DOWNSAMPLING
+            .crossfade(false) // REMOVE ANIMATION OVERHEAD
+            .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+            .diskCachePolicy(coil.request.CachePolicy.ENABLED)
             .build()
     }
 
     Column(
         modifier = modifier
             .clip(PosterCardShape)
-            .clickable(onClick = onClick)
+            .clickable(
+                onClick = onClick,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null // REMOVE RIPPLE ANIMATION FOR PERFORMANCE
+            )
+            .graphicsLayer {
+                // HARDWARE ACCELERATION
+                clip = true
+            }
             .testTag("media_card_${media.tmdbId}")
     ) {
         // Poster Card with strictly defined 2:3 aspect ratio (preventing layout shifts)
@@ -109,7 +124,7 @@ fun MediaCard(
             shape = PosterCardShape,
             color = DarkSurface,
             border = PosterBorder,
-            shadowElevation = 2.dp
+            shadowElevation = 0.dp // REMOVE SHADOWS FOR GPU EFFICIENCY
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 AsyncImage(
@@ -139,9 +154,9 @@ fun MediaCard(
                     Text(
                         text = badgeText,
                         color = Color.White,
-                        fontSize = 7.5.sp,
+                        fontSize = 6.5.sp,
                         fontWeight = FontWeight.Black,
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.5.dp)
                     )
                 }
 
@@ -149,12 +164,12 @@ fun MediaCard(
                 if (media.rating > 0.0) {
                     CircularRatingBadge(
                         rating = media.rating,
-                        size = 28.dp,
-                        strokeWidth = 2.dp,
-                        textSize = 8,
+                        size = 24.dp,
+                        strokeWidth = 1.8.dp,
+                        textSize = 7,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(4.dp)
+                            .padding(3.dp)
                     )
                 }
 
@@ -194,9 +209,9 @@ fun MediaCard(
         Text(
             text = media.title,
             color = Color.White,
-            fontSize = 11.5.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.SemiBold,
-            lineHeight = 14.sp,
+            lineHeight = 12.sp,
             maxLines = 2,
             minLines = 2,
             overflow = TextOverflow.Ellipsis
@@ -218,11 +233,11 @@ fun MediaCard(
         Text(
             text = subtitle,
             color = TextSecondary,
-            fontSize = 10.sp,
+            fontSize = 9.5.sp,
             fontWeight = FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 1.dp)
+            modifier = Modifier.padding(top = 0.dp)
         )
     }
 }

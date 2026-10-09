@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.MediaCard
 import com.example.ui.theme.DarkBackground
 import com.example.ui.viewmodel.MainViewModel
@@ -23,7 +24,7 @@ fun MoviesScreen(
     onNavigateToDetail: (Int, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val movies by viewModel.movies.collectAsState()
+    val movies by viewModel.movies.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier

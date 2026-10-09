@@ -64,7 +64,7 @@ enum class AdminSection(val title: String, val iconName: String, val permissionK
     PEDIDOS("Pedidos de Filmes e Séries", "AddBox", "pedidosTmdb"),
     ATUALIZACOES("Atualização Atual", "CloudSync", "atualizacoes"),
     SINCRONIZACAO("Status da Sincronização", "Sync", "sincronizarCatalogo"),
-    PLAYERS("Gerenciador de Players", "PlayCircleOutline", "players"),
+    PLAYERS("Centro de Testes de Players", "PlayCircleOutline", "players"),
     CONFIGURACOES("Configurações", "Settings", "configuracoes"),
     CINE_CONFIG("Configurações do Cine", "SmartToy", "configuracoes"),
     LOGS("Logs do Sistema", "History", "auditoria"),
@@ -75,7 +75,8 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getInstance(application)
     private val firebaseService = com.example.data.remote.FirebaseService.getInstance(application)
-    val mediaRepository = MediaRepository(database.playFilmeDao(), firebaseService)
+    private val notificationRepository = com.example.data.repository.NotificationRepository(application)
+    val mediaRepository = MediaRepository(database.playFilmeDao(), firebaseService, notificationRepository = notificationRepository)
 
     // Auth state - supports custom administrator password (fallback is "200419")
     private val _isAdminLoggedIn = MutableStateFlow(false)
@@ -183,6 +184,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             firebaseService.currentUser.collect { user ->
                 if (user?.role == "FOUNDER" || user?.role == "ADMIN") {
                     _isAdminLoggedIn.value = true
+                    // Inicia listeners apenas se for admin/founder
+                    firebaseService.startListeningAllUsers()
+                    firebaseService.startListeningAuditLogs()
                 } else {
                     _isAdminLoggedIn.value = false
                 }
@@ -195,10 +199,9 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        firebaseService.startListeningAllUsers()
-        firebaseService.startListeningAuditLogs()
         firebaseService.startPlayerSourcesListener()
-        seedDefaultPlayers()
+        // seedDefaultPlayers movido para dentro de uma verificação de permissão se necessário, 
+        // ou executado apenas se for admin confirmado.
     }
 
     fun refreshAuthorization() {
@@ -401,8 +404,8 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             val cleanCode = playerCode.trim().lowercase()
             val currentConfig = playerConfig.value
             
-            // Se for um dos sub-players do MegaEmbed (mgeb, redeflixapi, vidsrc)
-            val isMegaEmbedSubPlayer = cleanCode == "mgeb" || cleanCode == "redeflixapi" || cleanCode == "vidsrc"
+            // Se for um dos sub-players do MegaEmbed (mgeb, vidsrc)
+            val isMegaEmbedSubPlayer = cleanCode == "mgeb" || cleanCode == "vidsrc"
             
             if (isMegaEmbedSubPlayer) {
                 // 1. Configura o MegaEmbed internamente
@@ -588,13 +591,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             delay(1200)
             val currentSources = playerSources.value
             val mgebExists = currentSources.any { it.id == "mgeb" || it.name.contains("mgeb", ignoreCase = true) || it.name.contains("megaembed", ignoreCase = true) }
-            val redeflixExists = currentSources.any { it.id == "redeflixapi" || it.name.contains("redeflix", ignoreCase = true) }
             val vidsrcExists = currentSources.any { it.id == "vidsrc" || it.name.contains("vidsrc", ignoreCase = true) }
 
             if (!mgebExists) {
                 val mgeb = com.example.data.remote.PlayerSource(
                     id = "mgeb",
-                    name = "MegaEmbed",
+                    name = "Mgeb Embed",
                     type = "Embed",
                     priority = 1,
                     language = "Dublado",
@@ -609,30 +611,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 firebaseService.upsertPlayerSourceInCloud(mgeb)
             }
 
-            if (!redeflixExists) {
-                val redeflix = com.example.data.remote.PlayerSource(
-                    id = "redeflixapi",
-                    name = "RedeFlixApi",
-                    type = "Iframe / WebView",
-                    priority = 2,
-                    language = "Dublado",
-                    movieTmdbUrl = "https://redeflixapi.store/filme/{tmdbId}",
-                    tvTmdbUrl = "https://redeflixapi.store/serie/{tmdbId}/{seasonNumber}/{episodeNumber}",
-                    internalPlayer = "redeflixapi",
-                    playerColor = "#E50914",
-                    isDefault = false,
-                    enabled = true,
-                    providerOrigin = "RedeFlixApi"
-                )
-                firebaseService.upsertPlayerSourceInCloud(redeflix)
-            }
-
             if (!vidsrcExists) {
                 val vidsrc = com.example.data.remote.PlayerSource(
                     id = "vidsrc",
                     name = "VidSrc",
                     type = "Embed",
-                    priority = 3,
+                    priority = 2,
                     language = "Legendado",
                     movieTmdbUrl = "https://vidsrc.tw/embed/movie/{tmdb_id}",
                     tvTmdbUrl = "https://vidsrc.tw/embed/tv/{tmdb_id}/{season_number}/{episode_number}",
@@ -827,6 +811,54 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isGeneratingTop10 = MutableStateFlow(false)
     val isGeneratingTop10 = _isGeneratingTop10.asStateFlow()
+
+    private val _autoNotificationConfig = MutableStateFlow(com.example.data.remote.AutoNotificationConfig())
+    val autoNotificationConfig = _autoNotificationConfig.asStateFlow()
+
+    fun loadAutoNotificationsConfig() {
+        viewModelScope.launch {
+            try {
+                val config = notificationRepository.getAutoNotificationConfig()
+                _autoNotificationConfig.value = config
+                _autoNotificationsEnabled.value = config.enabled
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Error loading auto notifications config: ${e.message}")
+            }
+        }
+    }
+
+    fun setAutoNotificationsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                val newConfig = _autoNotificationConfig.value.copy(enabled = enabled, updatedAt = System.currentTimeMillis())
+                _autoNotificationConfig.value = newConfig
+                _autoNotificationsEnabled.value = enabled
+                notificationRepository.saveAutoNotificationConfig(newConfig)
+                firebaseService.setNotificationConfigAutoEnabled(enabled)
+                addAuditLog("${if (enabled) "Ativou" else "Desativou"} notificações automáticas", "Notificações")
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Error updating auto notifications config: ${e.message}")
+            }
+        }
+    }
+
+    fun updateAutoNotificationDetailedConfig(
+        notifyMovies: Boolean,
+        notifySeries: Boolean,
+        notifyEpisodes: Boolean
+    ) {
+        viewModelScope.launch {
+            val newConfig = _autoNotificationConfig.value.copy(
+                notifyNewMovies = notifyMovies,
+                notifyNewSeries = notifySeries,
+                notifyNewEpisodes = notifyEpisodes,
+                updatedAt = System.currentTimeMillis()
+            )
+            _autoNotificationConfig.value = newConfig
+            notificationRepository.saveAutoNotificationConfig(newConfig)
+            addAuditLog("Atualizou regras de notificações automáticas", "Notificações")
+        }
+    }
 
     private val _top10GeneratingMessage = MutableStateFlow("")
     val top10GeneratingMessage = _top10GeneratingMessage.asStateFlow()
@@ -1133,6 +1165,28 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     private val _mgebCandidates = MutableStateFlow<List<TmdbSearchResultItem>>(emptyList())
     val mgebCandidates: StateFlow<List<TmdbSearchResultItem>> = _mgebCandidates.asStateFlow()
 
+    private val _mgebNewCandidates = MutableStateFlow<List<TmdbSearchResultItem>>(emptyList())
+    val mgebNewCandidates: StateFlow<List<TmdbSearchResultItem>> = _mgebNewCandidates.asStateFlow()
+
+    private val _mgebExistingCandidates = MutableStateFlow<List<TmdbSearchResultItem>>(emptyList())
+    val mgebExistingCandidates: StateFlow<List<TmdbSearchResultItem>> = _mgebExistingCandidates.asStateFlow()
+
+    // Dynamic metrics for MGE API
+    private val _mgebMoviesCount = MutableStateFlow(0)
+    val mgebMoviesCount: StateFlow<Int> = _mgebMoviesCount.asStateFlow()
+
+    private val _mgebSeriesCount = MutableStateFlow(0)
+    val mgebSeriesCount: StateFlow<Int> = _mgebSeriesCount.asStateFlow()
+
+    private val _mgebInCatalogCount = MutableStateFlow(0)
+    val mgebInCatalogCount: StateFlow<Int> = _mgebInCatalogCount.asStateFlow()
+
+    private val _mgebNewCount = MutableStateFlow(0)
+    val mgebNewCount: StateFlow<Int> = _mgebNewCount.asStateFlow()
+
+    private val _mgebStatusFilter = MutableStateFlow("ALL") // "ALL", "NEW_ONLY", "IN_CATALOG_ONLY"
+    val mgebStatusFilter: StateFlow<String> = _mgebStatusFilter.asStateFlow()
+
     // Advanced selection & pagination states
     private val mgebEnrichedCache = mutableMapOf<Pair<Int, String>, MediaEntity>()
 
@@ -1159,8 +1213,10 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 val series = MegaEmbedService.fetchMegaEmbedSeries(forceRefresh)
                 _mgebMovies.value = movies
                 _mgebSeries.value = series
+                _mgebMoviesCount.value = movies.size
+                _mgebSeriesCount.value = series.size
                 
-                // Initially populate candidates with first page
+                // Initially populate candidates with first page & catalog checks
                 updateMgebCandidates()
             } catch (e: Exception) {
                 Log.e("AdminViewModel", "Error loading Mgeb catalog: ${e.message}")
@@ -1182,6 +1238,12 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         updateMgebCandidates()
     }
 
+    fun setMgebStatusFilter(filter: String) {
+        _mgebStatusFilter.value = filter
+        _mgebPage.value = 1
+        updateMgebCandidates()
+    }
+
     fun setMgebPage(page: Int) {
         val total = _mgebTotalPages.value
         if (page in 1..total) {
@@ -1192,51 +1254,90 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun updateMgebCandidates() {
         viewModelScope.launch {
-            val query = _mgebSearchQuery.value.lowercase()
+            val query = _mgebSearchQuery.value.trim().lowercase()
             val typeFilter = _mgebTypeFilter.value
+            val statusFilter = _mgebStatusFilter.value
             val allMovies = _mgebMovies.value
             val allSeries = _mgebSeries.value
-            
-            val allCombined = (allMovies + allSeries).map { item ->
-                val type = if (item.type == "tv") "tv" else "movie"
-                Pair(item.tmdbId ?: 0, type)
-            }
-            
-            // Filter combined results
-            val filteredList = allCombined.filter { (tmdbId, type) ->
-                val matchesType = typeFilter == "ALL" || type == typeFilter
-                
-                val cached = mgebEnrichedCache[Pair(tmdbId, type)]
+
+            // Build snapshot of local database media catalog for instant O(1) comparison
+            val localCatalogList = database.playFilmeDao().getAllMediaSync()
+            val localCatalogSet = localCatalogList.map { Pair(it.tmdbId, it.mediaType) }.toSet()
+            val localCatalogMap = localCatalogList.associateBy { Pair(it.tmdbId, it.mediaType) }
+
+            val allCombined = (allMovies.map { Pair(it.tmdbId ?: 0, "movie") } +
+                    allSeries.map { Pair(it.tmdbId ?: 0, "tv") }).filter { it.first > 0 }
+
+            // Update overall global counts
+            val totalAvailable = allCombined.size
+            val inCatalogCount = allCombined.count { localCatalogSet.contains(it) }
+            val newAvailableCount = totalAvailable - inCatalogCount
+
+            _mgebTotalCount.value = totalAvailable
+            _mgebMoviesCount.value = allMovies.size
+            _mgebSeriesCount.value = allSeries.size
+            _mgebInCatalogCount.value = inCatalogCount
+            _mgebNewCount.value = newAvailableCount
+
+            // Filter combined list by type, status, and search query
+            val filteredList = allCombined.filter { pair ->
+                val (tmdbId, type) = pair
+                val matchesType = when (typeFilter) {
+                    "movie" -> type == "movie"
+                    "tv" -> type == "tv"
+                    else -> true
+                }
+
+                val isInCatalog = localCatalogSet.contains(pair)
+                val matchesStatus = when (statusFilter) {
+                    "NEW_ONLY" -> !isInCatalog
+                    "IN_CATALOG_ONLY" -> isInCatalog
+                    else -> true
+                }
+
+                val cached = mgebEnrichedCache[pair] ?: localCatalogMap[pair]
                 val title = cached?.title?.lowercase() ?: "tmdb #$tmdbId"
-                val matchesQuery = query.isBlank() || 
-                        tmdbId.toString().contains(query) || 
+                val matchesQuery = query.isBlank() ||
+                        tmdbId.toString().contains(query) ||
                         title.contains(query)
-                
-                matchesType && matchesQuery
+
+                matchesType && matchesStatus && matchesQuery
             }
-            
-            _mgebTotalCount.value = filteredList.size
-            val pageSize = 24
-            val pages = if (filteredList.isEmpty()) 1 else (filteredList.size + pageSize - 1) / pageSize
+
+            // SMART SORTING: Priority for contents that DO NOT exist in catalog (NEW first, existing at the end)
+            val sortedList = filteredList.sortedWith(
+                compareBy<Pair<Int, String>> { pair ->
+                    if (localCatalogSet.contains(pair)) 1 else 0 // 0 = New (Top priority), 1 = Already in Catalog
+                }.thenByDescending { it.first }
+            )
+
+            val pageSize = 30
+            val pages = if (sortedList.isEmpty()) 1 else (sortedList.size + pageSize - 1) / pageSize
             _mgebTotalPages.value = pages
-            
-            // Safety adjustment
+
+            // Safety adjustment for page bounds
             if (_mgebPage.value > pages) {
                 _mgebPage.value = pages
             } else if (_mgebPage.value < 1) {
                 _mgebPage.value = 1
             }
-            
+
             val startIndex = (_mgebPage.value - 1) * pageSize
-            val pageSlice = filteredList.drop(startIndex).take(pageSize)
-            
-            val candidates = mutableListOf<TmdbSearchResultItem>()
-            for ((tmdbId, type) in pageSlice) {
-                val existing = database.playFilmeDao().getMediaByTmdbIdAndType(tmdbId, type)
+            val pageSlice = sortedList.drop(startIndex).take(pageSize)
+
+            val allCandidates = mutableListOf<TmdbSearchResultItem>()
+            val newCandidates = mutableListOf<TmdbSearchResultItem>()
+            val existingCandidates = mutableListOf<TmdbSearchResultItem>()
+
+            for (pair in pageSlice) {
+                val (tmdbId, type) = pair
+                val existing = localCatalogMap[pair]
                 if (existing != null) {
-                    candidates.add(TmdbSearchResultItem(existing, true))
+                    val item = TmdbSearchResultItem(existing, true)
+                    allCandidates.add(item)
+                    existingCandidates.add(item)
                 } else {
-                    val cached = mgebEnrichedCache[Pair(tmdbId, type)]
+                    val cached = mgebEnrichedCache[pair]
                     val placeholder = cached ?: MediaEntity(
                         tmdbId = tmdbId,
                         title = "TMDB #$tmdbId",
@@ -1248,14 +1349,18 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                         rating = 0.0,
                         genres = ""
                     )
-                    candidates.add(TmdbSearchResultItem(placeholder, false))
+                    val item = TmdbSearchResultItem(placeholder, false)
+                    allCandidates.add(item)
+                    newCandidates.add(item)
                 }
             }
-            
-            _mgebCandidates.value = candidates
-            
-            // Background metadata enrichment for placeholders
-            val toEnrich = candidates.filter { !it.isAlreadyInCatalog && (it.entity.posterPath == null || it.entity.posterPath.isEmpty()) }
+
+            _mgebCandidates.value = allCandidates
+            _mgebNewCandidates.value = newCandidates
+            _mgebExistingCandidates.value = existingCandidates
+
+            // Background metadata enrichment for placeholders without posters
+            val toEnrich = allCandidates.filter { !it.isAlreadyInCatalog && (it.entity.posterPath == null || it.entity.posterPath.isEmpty()) }
             enrichMgebMetadata(toEnrich)
         }
     }
@@ -1271,21 +1376,28 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         com.example.data.remote.TmdbNetwork.apiService.getSeriesDetails(tmdbId, com.example.BuildConfig.TMDB_API_KEY)
                     }
-                    
+
                     val enrichedEntity = item.entity.copy(
                         title = dto.title ?: dto.name ?: item.entity.title,
                         posterPath = dto.posterPath ?: "",
                         releaseYear = (dto.releaseDate ?: dto.firstAirDate ?: "").take(4),
                         rating = dto.voteAverage ?: 0.0
                     )
-                    
+
                     mgebEnrichedCache[Pair(tmdbId, type)] = enrichedEntity
-                    
+
                     val current = _mgebCandidates.value.toMutableList()
                     val index = current.indexOfFirst { it.entity.tmdbId == tmdbId && it.entity.mediaType == type }
                     if (index != -1) {
                         current[index] = TmdbSearchResultItem(enrichedEntity, false)
                         _mgebCandidates.value = current
+                    }
+
+                    val currentNew = _mgebNewCandidates.value.toMutableList()
+                    val newIndex = currentNew.indexOfFirst { it.entity.tmdbId == tmdbId && it.entity.mediaType == type }
+                    if (newIndex != -1) {
+                        currentNew[newIndex] = TmdbSearchResultItem(enrichedEntity, false)
+                        _mgebNewCandidates.value = currentNew
                     }
                 } catch (e: Exception) {
                     // Silent fail for background enrichment
@@ -1317,28 +1429,57 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _mgebSelectedIds.value = emptySet()
     }
 
-    fun selectAllMgebResults() {
+    fun selectOnlyNewMgeb() {
         viewModelScope.launch {
-            val query = _mgebSearchQuery.value.lowercase()
+            val query = _mgebSearchQuery.value.trim().lowercase()
             val typeFilter = _mgebTypeFilter.value
             val allMovies = _mgebMovies.value
             val allSeries = _mgebSeries.value
-            
-            val allCombined = (allMovies + allSeries).map { item ->
-                val type = if (item.type == "tv") "tv" else "movie"
-                Pair(item.tmdbId ?: 0, type)
+
+            val localCatalogSet = database.playFilmeDao().getAllMediaSync().map { Pair(it.tmdbId, it.mediaType) }.toSet()
+
+            val allCombined = (allMovies.map { Pair(it.tmdbId ?: 0, "movie") } +
+                    allSeries.map { Pair(it.tmdbId ?: 0, "tv") }).filter { it.first > 0 }
+
+            val newFiltered = allCombined.filter { pair ->
+                val (tmdbId, type) = pair
+                val matchesType = when (typeFilter) {
+                    "movie" -> type == "movie"
+                    "tv" -> type == "tv"
+                    else -> true
+                }
+                val isNew = !localCatalogSet.contains(pair)
+                val cached = mgebEnrichedCache[pair]
+                val title = cached?.title?.lowercase() ?: "tmdb #$tmdbId"
+                val matchesQuery = query.isBlank() || tmdbId.toString().contains(query) || title.contains(query)
+
+                matchesType && isNew && matchesQuery
             }
-            
+
+            _mgebSelectedIds.value = _mgebSelectedIds.value + newFiltered
+        }
+    }
+
+    fun selectAllMgebResults() {
+        viewModelScope.launch {
+            val query = _mgebSearchQuery.value.trim().lowercase()
+            val typeFilter = _mgebTypeFilter.value
+            val allMovies = _mgebMovies.value
+            val allSeries = _mgebSeries.value
+
+            val allCombined = (allMovies.map { Pair(it.tmdbId ?: 0, "movie") } +
+                    allSeries.map { Pair(it.tmdbId ?: 0, "tv") }).filter { it.first > 0 }
+
             val filtered = allCombined.filter { (tmdbId, type) ->
                 val matchesType = typeFilter == "ALL" || type == typeFilter
                 val cached = mgebEnrichedCache[Pair(tmdbId, type)]
                 val title = cached?.title?.lowercase() ?: "tmdb #$tmdbId"
-                val matchesQuery = query.isBlank() || 
-                        tmdbId.toString().contains(query) || 
+                val matchesQuery = query.isBlank() ||
+                        tmdbId.toString().contains(query) ||
                         title.contains(query)
                 matchesType && matchesQuery
             }
-            
+
             _mgebSelectedIds.value = _mgebSelectedIds.value + filtered
         }
     }
@@ -1346,10 +1487,10 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun getMgebSelectionSummary(onResult: (total: Int, novos: Int, existentes: Int) -> Unit) {
         viewModelScope.launch {
             val selected = _mgebSelectedIds.value
+            val localCatalogSet = database.playFilmeDao().getAllMediaSync().map { Pair(it.tmdbId, it.mediaType) }.toSet()
             var existentesCount = 0
-            for ((tmdbId, type) in selected) {
-                val exists = database.playFilmeDao().getMediaByTmdbIdAndType(tmdbId, type) != null
-                if (exists) {
+            for (pair in selected) {
+                if (localCatalogSet.contains(pair)) {
                     existentesCount++
                 }
             }
@@ -1361,15 +1502,15 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     fun startMgebSelectedImport(onComplete: () -> Unit) {
         viewModelScope.launch {
             val selected = _mgebSelectedIds.value
+            val localCatalogSet = database.playFilmeDao().getAllMediaSync().map { Pair(it.tmdbId, it.mediaType) }.toSet()
             val idsToImport = mutableListOf<Pair<Int, String>>()
-            
-            for ((tmdbId, type) in selected) {
-                val exists = database.playFilmeDao().getMediaByTmdbIdAndType(tmdbId, type) != null
-                if (!exists) {
-                    idsToImport.add(Pair(tmdbId, type))
+
+            for (pair in selected) {
+                if (!localCatalogSet.contains(pair)) {
+                    idsToImport.add(pair)
                 }
             }
-            
+
             if (idsToImport.isNotEmpty()) {
                 startMgebMassImport(idsToImport)
             }
@@ -2330,6 +2471,59 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _isImportingSingle.value = false
                 _importStepMessage.value = null
+            }
+        }
+    }
+
+    fun importSingleDirect(
+        tmdbId: Int,
+        mediaType: String,
+        onResult: (Boolean, String) -> Unit = { _, _ -> }
+    ) {
+        val permissionKey = if (mediaType == "movie") "importFilme" else "importSerie"
+        if (!requirePermission(permissionKey)) {
+            onResult(false, "Sem permissão de importação.")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val existsInDb = mediaRepository.getMediaByTmdbId(tmdbId, mediaType) != null
+                if (existsInDb) {
+                    val msg = "⚠️ Este conteúdo já existe no catálogo do RONYCINE."
+                    _importMessage.value = msg
+                    onResult(false, msg)
+                    return@launch
+                }
+
+                val (entity, _) = mediaRepository.fetchTmdbPreview(tmdbId, mediaType)
+                if (entity == null) {
+                    val msg = "❌ Não foi possível obter dados do TMDB para ID $tmdbId."
+                    _importMessage.value = msg
+                    onResult(false, msg)
+                    return@launch
+                }
+
+                val (success, msg) = mediaRepository.importMediaEntity(entity)
+                if (success) {
+                    addHistory(entity.tmdbId, entity.title, entity.mediaType, "success")
+                    addAuditLog("Importou conteúdo individual", entity.title)
+                    _importMessage.value = "✓ Conteúdo “${entity.title}” importado com sucesso!"
+                    _mgebSelectedIds.value = _mgebSelectedIds.value - Pair(entity.tmdbId, entity.mediaType)
+                    updateMgebCandidates()
+                    loadStats()
+                    onSearchQueryChanged(_searchQuery.value)
+                    onResult(true, "Importado com sucesso!")
+                } else {
+                    val errorMsg = msg ?: "Erro ao importar conteúdo."
+                    _importMessage.value = "❌ $errorMsg"
+                    onResult(false, errorMsg)
+                }
+            } catch (e: Exception) {
+                Log.e("AdminViewModel", "Error in importSingleDirect: ${e.message}", e)
+                val err = "Erro ao importar: ${e.localizedMessage}"
+                _importMessage.value = "❌ $err"
+                onResult(false, err)
             }
         }
     }
@@ -3456,28 +3650,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             mediaRepository.deleteNotification(id)
             _catalogActionMessage.value = "Notificação removida com sucesso!"
-        }
-    }
-
-    fun loadAutoNotificationsConfig() {
-        viewModelScope.launch {
-            try {
-                _autoNotificationsEnabled.value = firebaseService.getNotificationConfigAutoEnabled()
-            } catch (e: Exception) {
-                Log.e("AdminViewModel", "Error loading auto notifications config: ${e.message}")
-            }
-        }
-    }
-
-    fun setAutoNotificationsEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            try {
-                _autoNotificationsEnabled.value = enabled
-                firebaseService.setNotificationConfigAutoEnabled(enabled)
-                addAuditLog("Alterou config de notificações automáticas", if (enabled) "Ativado" else "Desativado")
-            } catch (e: Exception) {
-                Log.e("AdminViewModel", "Error updating auto notifications config: ${e.message}")
-            }
         }
     }
 

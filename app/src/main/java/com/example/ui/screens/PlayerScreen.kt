@@ -58,6 +58,7 @@ import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
 import com.example.ui.theme.DarkSurface
+import com.example.util.PlayerUtils
 import com.example.ui.theme.TextSecondary
 import com.example.ui.theme.RatingYellow
 import com.example.ui.viewmodel.MainViewModel
@@ -214,11 +215,14 @@ fun PlayerScreen(
     var nextEpisodeTarget by remember { mutableStateOf<NextEpisodeTarget?>(null) }
     var remainingSecondsUntilEnd by remember { mutableIntStateOf(0) }
     var currentVideoDuration by remember { mutableDoubleStateOf(0.0) }
+    var currentVideoPosition by remember { mutableDoubleStateOf(0.0) }
 
-    LaunchedEffect(currentSeasonNum, currentEpisodeNum, playerLoadId, selectedAudioSource) {
+    LaunchedEffect(currentSeasonNum, currentEpisodeNum, playerLoadId, selectedAudioSource, selectedPlayerSourceId) {
         showNextEpisodeButton = false
         nextEpisodeTarget = null
         remainingSecondsUntilEnd = 0
+        currentVideoDuration = 0.0
+        currentVideoPosition = 0.0
     }
 
     val downloadState by viewModel.downloadState.collectAsState()
@@ -289,10 +293,12 @@ fun PlayerScreen(
     var initialResumePosition by remember { mutableDoubleStateOf(0.0) }
     var lastSavedTimeSeconds by remember { mutableDoubleStateOf(0.0) }
     var lastSavedTimestamp by remember { mutableLongStateOf(0L) }
-    var currentVideoPosition by remember { mutableDoubleStateOf(0.0) }
 
     // Load real saved progress on entry or when episode changes
     LaunchedEffect(tmdbId, mediaType, currentSeasonNum, currentEpisodeNum) {
+        initialResumePosition = 0.0
+        currentVideoDuration = 0.0
+        currentVideoPosition = 0.0
         if (isValidId) {
             val isTv = mediaType == "tv" || mediaType == "serie"
             val saved = viewModel.getWatchHistoryItemSync(
@@ -361,18 +367,22 @@ fun PlayerScreen(
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose {
-            if (currentVideoDuration > 0.0 && currentVideoPosition > 0.0) {
-                persistProgress(currentVideoPosition, currentVideoDuration, true)
-            }
-        }
-    }
-
     // WebView reference and URL tracking to safely handle ad redirects
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
     var currentWebViewUrl by remember { mutableStateOf("") }
     var ageGateAccepted by remember { mutableStateOf(false) }
+
+    DisposableEffect(activeWebView) {
+        onDispose {
+            if (currentVideoDuration > 0.0 && currentVideoPosition > 0.0) {
+                persistProgress(currentVideoPosition, currentVideoDuration, true)
+            }
+            activeWebView?.let { wv ->
+                com.example.util.WebViewUtils.safeDestroy(wv)
+            }
+            activeWebView = null
+        }
+    }
 
     val playerSources by viewModel.playerSources.collectAsState()
     val playerConfig by viewModel.playerConfig.collectAsState()
@@ -396,18 +406,43 @@ fun PlayerScreen(
         mutableStateOf(setOf<String>())
     }
 
-    val originalEmbedUrl = remember(mediaType, tmdbId, currentSeasonNum, currentEpisodeNum, selectedAudioSource, selectedPlayerSourceId, playerSources, playerConfig, fallbackSourceIndex, attemptedPlayerIds) {
+    val originalEmbedUrl = remember(mediaType, tmdbId, currentSeasonNum, currentEpisodeNum, selectedAudioSource, selectedPlayerSourceId, playerSources, playerConfig, fallbackSourceIndex, attemptedPlayerIds, initialResumePosition) {
         if (selectedAudioSource == EmbedAudioSource.LEGENDADO) {
-            // LEGENDADO uses VidSrc exclusively
-            com.example.util.PlayerUtils.buildPlayerUrl(
-                provider = "vidsrc",
-                mediaType = mediaType,
-                tmdbId = tmdbId,
-                season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
-                episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
-                audio = "Legendado",
-                dsLang = playerConfig.subtitledPlayer.defaultLanguage.ifBlank { "pt" }
-            )
+            val compatibleSources = playerSources
+                .filter { it.enabled && (it.language.equals("Legendado", ignoreCase = true) || it.language.equals("Subtitled", ignoreCase = true)) && !it.id.equals("r2", ignoreCase = true) }
+                .sortedBy { it.priority }
+            val unattempted = compatibleSources.filter { !attemptedPlayerIds.contains(it.id) }
+            val source = if (selectedPlayerSourceId != null && !attemptedPlayerIds.contains(selectedPlayerSourceId)) {
+                compatibleSources.find { it.id == selectedPlayerSourceId }
+            } else if (unattempted.isNotEmpty()) {
+                unattempted.first()
+            } else if (compatibleSources.isNotEmpty()) {
+                compatibleSources.first()
+            } else {
+                null
+            }
+
+            if (source != null) {
+                com.example.util.PlayerUtils.buildPlayerUrl(
+                    source = source,
+                    mediaType = mediaType,
+                    tmdbId = tmdbId,
+                    season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
+                    episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
+                    megaEmbedConfig = playerConfig.megaEmbed,
+                    dsLang = playerConfig.subtitledPlayer.defaultLanguage.ifBlank { "pt" }
+                )
+            } else {
+                com.example.util.PlayerUtils.buildPlayerUrl(
+                    provider = "vidsrc",
+                    mediaType = mediaType,
+                    tmdbId = tmdbId,
+                    season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
+                    episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
+                    audio = "Legendado",
+                    dsLang = playerConfig.subtitledPlayer.defaultLanguage.ifBlank { "pt" }
+                )
+            }
         } else {
             val audioLabel = "Dublado"
             
@@ -448,14 +483,10 @@ fun PlayerScreen(
                     megaEmbedConfig = playerConfig.megaEmbed
                 )
             } else {
-                // Fallback to legacy builder if absolutely no dynamic sources found
-                android.util.Log.w("RONYCINE_PLAYER", "PLAY_SOURCE: Nenhuma fonte dinâmica encontrada para $audioLabel. Usando fallback padrão.")
-                EmbedUrlBuilder.buildUrl(
-                    mediaType = mediaType,
+                // Fallback to Mgeb Embed builder if absolutely no dynamic sources found
+                android.util.Log.w("RONYCINE_PLAYER", "PLAY_SOURCE: Nenhuma fonte dinâmica encontrada para $audioLabel. Usando Mgeb Embed padrão.")
+                com.example.util.PlayerUtils.buildMgebMovieUrl(
                     tmdbId = tmdbId,
-                    season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
-                    episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
-                    audioSource = EmbedAudioSource.DUBLADO,
                     player = playerConfig.megaEmbed.player,
                     color = playerConfig.megaEmbed.color
                 )
@@ -1086,79 +1117,68 @@ fun PlayerScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Audio selector (Dublado / Legendado)
+                        // Audio selector (Servers / Languages)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState())
                         ) {
                             Text(
-                                text = "ÁUDIO:",
+                                text = "PLAYERS:",
                                 color = Color(0xFF888892),
                                 fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(end = 2.dp)
                             )
 
-                            val isDub = selectedAudioSource == EmbedAudioSource.DUBLADO
-                            Surface(
-                                color = if (isDub) accentColor else Color(0xFF14141A),
-                                shape = RoundedCornerShape(4.dp),
-                                border = BorderStroke(1.dp, if (isDub) accentColor else Color(0xFF282834)),
-                                modifier = Modifier
-                                    .clickable { 
-                                        if (selectedAudioSource != EmbedAudioSource.DUBLADO) {
-                                            selectedAudioSource = EmbedAudioSource.DUBLADO
-                                            fallbackSourceIndex = 0
-                                            playerLoadId++
-                                        }
-                                    }
-                                    .testTag("audio_dublado_chip")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    if (isDub) {
-                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
-                                        Spacer(modifier = Modifier.width(3.dp))
-                                    }
-                                    Text(
-                                        text = "DUBLADO",
-                                        color = if (isDub) Color.White else Color(0xFFCCCCCC),
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
+                            listOf(
+                                EmbedAudioSource.DUBLADO,
+                                EmbedAudioSource.LEGENDADO
+                            ).forEach { source ->
+                                val isSelected = selectedAudioSource == source
+                                val chipLabel = source.label.uppercase()
+                                Surface(
+                                    color = if (isSelected) accentColor else Color(0xFF14141A),
+                                    shape = RoundedCornerShape(4.dp),
+                                    border = BorderStroke(1.dp, if (isSelected) accentColor else Color(0xFF282834)),
+                                    modifier = Modifier
+                                        .clickable {
+                                            if (selectedAudioSource != source) {
+                                                val isEnabledInConfig = when (source) {
+                                                    else -> true
+                                                }
 
-                            val isLeg = selectedAudioSource == EmbedAudioSource.LEGENDADO
-                            Surface(
-                                color = if (isLeg) accentColor else Color(0xFF14141A),
-                                shape = RoundedCornerShape(4.dp),
-                                border = BorderStroke(1.dp, if (isLeg) accentColor else Color(0xFF282834)),
-                                modifier = Modifier
-                                    .clickable { 
-                                        if (selectedAudioSource != EmbedAudioSource.LEGENDADO) {
-                                            selectedAudioSource = EmbedAudioSource.LEGENDADO
-                                            fallbackSourceIndex = 0
-                                            playerLoadId++
+                                                if (!isEnabledInConfig) {
+                                                    android.widget.Toast.makeText(context, "Esta fonte está desativada nas configurações.", android.widget.Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    selectedAudioSource = source
+                                                    fallbackSourceIndex = 0
+                                                    playerLoadId++
+                                                }
+                                            }
                                         }
-                                    }
-                                    .testTag("audio_legendado_chip")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        .testTag("audio_${source.name.lowercase()}_chip")
                                 ) {
-                                    if (isLeg) {
-                                        Icon(Icons.Default.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
-                                        Spacer(modifier = Modifier.width(3.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        if (isSelected) {
+                                            Icon(
+                                                Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(11.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(3.dp))
+                                        }
+                                        Text(
+                                            text = chipLabel,
+                                            color = if (isSelected) Color.White else Color(0xFFCCCCCC),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
-                                    Text(
-                                        text = "LEGENDADO",
-                                        color = if (isLeg) Color.White else Color(0xFFCCCCCC),
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
                                 }
                             }
 
@@ -1166,13 +1186,13 @@ fun PlayerScreen(
                             val dubSources = remember(playerSources) {
                                 playerSources.filter { it.enabled && it.language.equals("Dublado", ignoreCase = true) }.sortedBy { it.priority }
                             }
-                            if (isDub && dubSources.size > 1) {
+                            if (selectedAudioSource == EmbedAudioSource.DUBLADO && dubSources.size > 1) {
                                 var showServerMenu by remember { mutableStateOf(false) }
-                                val effectiveCurrentSourceId = selectedPlayerSourceId 
+                                val effectiveCurrentSourceId = selectedPlayerSourceId
                                     ?: (if (dubSources.any { it.id == playerConfig.defaultPlayerId }) playerConfig.defaultPlayerId else dubSources.firstOrNull()?.id)
-                                val activeSourceName = dubSources.find { it.id == effectiveCurrentSourceId }?.name 
+                                val activeSourceName = dubSources.find { it.id == effectiveCurrentSourceId }?.name
                                     ?: "Servidor"
-                                
+
                                 Box {
                                     Surface(
                                         color = Color(0xFF1C1C26),
@@ -1189,7 +1209,7 @@ fun PlayerScreen(
                                             Text(
                                                 text = activeSourceName,
                                                 color = Color(0xFFE0E0E8),
-                                                fontSize = 10.5.sp,
+                                                fontSize = 10.sp,
                                                 fontWeight = FontWeight.SemiBold
                                             )
                                             Spacer(modifier = Modifier.width(2.dp))
@@ -1347,17 +1367,31 @@ fun PlayerScreen(
                             )
 
                             val durationOrSeasons = if (mediaType == "tv" || mediaType == "serie") {
-                                val sCount = media?.seasonsCount ?: 1
-                                "$sCount ${if (sCount > 1) "Temporadas" else "Temporada"}"
+                                if (currentVideoDuration > 0.0) {
+                                    "Ep. $currentEpisodeNum • ${PlayerUtils.formatDuration(currentVideoDuration)}"
+                                } else if (activeEpisode?.duration?.isNotBlank() == true) {
+                                    "Ep. $currentEpisodeNum • ${activeEpisode.duration}"
+                                } else {
+                                    val sCount = media?.seasonsCount ?: 1
+                                    "$sCount ${if (sCount > 1) "Temporadas" else "Temporada"}"
+                                }
                             } else {
-                                "${media?.durationMinutes ?: 120} min"
+                                if (currentVideoDuration > 0.0) {
+                                    PlayerUtils.formatDuration(currentVideoDuration)
+                                } else if ((media?.durationMinutes ?: 0) > 0) {
+                                    PlayerUtils.formatDuration(media!!.durationMinutes * 60.0)
+                                } else {
+                                    ""
+                                }
                             }
-                            Text(
-                                text = durationOrSeasons,
-                                color = Color(0xFFB0B0B8),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                            if (durationOrSeasons.isNotBlank()) {
+                                Text(
+                                    text = durationOrSeasons,
+                                    color = Color(0xFFB0B0B8),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
 
                             Surface(
                                 color = Color(0xFF202028),
@@ -1770,9 +1804,14 @@ fun PlayerScreen(
                                                                 )
                                                                 Spacer(modifier = Modifier.height(2.dp))
                                                                 
-                                                                val durationStr = if (ep.duration.isNotBlank()) ep.duration else "45 min"
+                                                                val durationStr = if (ep.duration.isNotBlank()) ep.duration else ""
+                                                                val episodeMeta = if (durationStr.isNotBlank()) {
+                                                                    "S${String.format("%02d", ep.seasonNumber)} · $durationStr"
+                                                                } else {
+                                                                    "S${String.format("%02d", ep.seasonNumber)} · Ep. ${ep.episodeNumber}"
+                                                                }
                                                                 Text(
-                                                                    text = "S${String.format("%02d", ep.seasonNumber)} · $durationStr",
+                                                                    text = episodeMeta,
                                                                     color = if (isCurrentEp) accentColor else Color.Gray,
                                                                     fontSize = 9.sp,
                                                                     fontWeight = FontWeight.Medium,
@@ -1822,7 +1861,10 @@ fun PlayerScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(recommendations) { rec ->
+                            items(
+                                items = recommendations,
+                                key = { "${it.mediaType}_${it.tmdbId}" }
+                            ) { rec ->
                                 Column(
                                     modifier = Modifier
                                         .width(120.dp)
@@ -1843,7 +1885,10 @@ fun PlayerScreen(
                                         AsyncImage(
                                             model = ImageRequest.Builder(LocalContext.current)
                                                 .data(rec.posterPath)
+                                                .size(180, 270)
                                                 .crossfade(true)
+                                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                                                 .build(),
                                             contentDescription = rec.title,
                                             contentScale = ContentScale.Crop,

@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.components.MediaCard
 import com.example.ui.theme.DarkBackground
 import com.example.ui.viewmodel.MainViewModel
@@ -23,7 +24,7 @@ fun SeriesScreen(
     onNavigateToDetail: (Int, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val series by viewModel.series.collectAsState()
+    val series by viewModel.series.collectAsStateWithLifecycle()
 
     Column(
         modifier = modifier

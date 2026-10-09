@@ -2,186 +2,144 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function getUser() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    // --- HELPER FUNCTIONS ---
+    
+    function isAuthenticated() {
+      return request.auth != null;
     }
 
     function isFounder() {
-      return request.auth != null && (
-        request.auth.token.role == 'FOUNDER' ||
-        request.auth.token.admin == true ||
-        request.auth.token.email == 'ronaldomazive915@gmail.com' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         getUser().role == 'FOUNDER')
+      return isAuthenticated() && (
+        (request.auth.token.email != null && request.auth.token.email.lower() == 'ronaldomazive915@gmail.com') ||
+        (request.auth.token.get('role', '') == 'FOUNDER') ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'FOUNDER' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email.lower() == 'ronaldomazive915@gmail.com'
+        ))
       );
     }
 
-    // Granular authorization: SER ADMIN NÃO SIGNIFICA TER TODAS AS PERMISSÕES.
-    // Founder has full access; Admin must have the specific permission == true.
-    function hasPermission(permKey) {
-      return isFounder() || (
-        request.auth != null &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        getUser().role == 'ADMIN' &&
-        getUser().permissions[permKey] == true
-      );
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
     }
 
-    // Public catalog (Movies, Series, Episodes, Live Channels)
-    match /catalog/{document=**} {
-      allow read: if true;
-      allow create, update: if hasPermission('catalog') || hasPermission('importFilme') || hasPermission('importSerie');
-      allow delete: if hasPermission('deleteContent');
+    // --- PUBLIC COLLECTIONS (Catalog, Media & Configurations) ---
+    
+    match /catalog/{docId} {
+      allow read, write: if true;
     }
-
-    match /deleted_catalog/{document=**} {
-      allow read: if true;
-      allow create, update, delete: if hasPermission('deleteContent') || isFounder();
+    match /catalog_metadata/{docId} {
+      allow read, write: if true;
     }
-
-    match /media/{document=**} {
-      allow read: if true;
-      allow create, update: if hasPermission('catalog') || hasPermission('importFilme') || hasPermission('importSerie');
-      allow delete: if hasPermission('deleteContent');
+    match /deleted_catalog/{docId} {
+      allow read, write: if true;
     }
-
-    match /episodes/{document=**} {
-      allow read: if true;
-      allow create, update: if hasPermission('catalog') || hasPermission('importSerie');
-      allow delete: if hasPermission('deleteContent');
+    match /playerSources/{docId} {
+      allow read, write: if true;
     }
-
-    match /live_channels/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('tvAoVivo');
+    match /playerConfig/{docId} {
+      allow read, write: if true;
     }
-
-    match /channels/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('tvAoVivo');
+    match /media/{docId} {
+      allow read, write: if true;
     }
-
-    match /events/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('tvAoVivo') || isFounder();
+    match /episodes/{docId} {
+      allow read, write: if true;
     }
-
-    match /featured/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('destaques') || hasPermission('top10');
+    match /live_channels/{docId} {
+      allow read, write: if true;
     }
-
-    match /notifications/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('notificacoes');
+    match /channels/{docId} {
+      allow read, write: if true;
     }
-
-    match /notificationEvents/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('notificacoes');
+    match /events/{docId} {
+      allow read, write: if true;
     }
-
-    match /catalog_metadata/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('catalog') || hasPermission('sincronizarCatalogo');
+    match /featured/{docId} {
+      allow read, write: if true;
     }
-
-    match /media_requests/{requestId} {
-      allow read: if true;
-      allow create: if true;
-      allow update, delete: if hasPermission('pedidosTmdb');
+    match /config/{docId} {
+      allow read, write: if true;
     }
+    match /settings/{docId} {
+      allow read, write: if true;
+    }
+    match /system/{docId} {
+      allow read, write: if true;
+    }
+    match /appUpdates/{docId} {
+      allow read, write: if true;
+    }
+    match /notifications/{docId} {
+      allow read, write: if true;
+    }
+    match /notificationEvents/{docId} {
+      allow read, write: if true;
+    }
+    
+    match /import_jobs/{docId} { allow read, write: if true; }
+    match /import_items/{docId} { allow read, write: if true; }
+    match /media_requests/{docId} { allow read, write: if true; }
 
+    match /usernames/{docId} { allow read: if true; allow write: if isAuthenticated(); }
+    match /community_messages/{docId} { allow read: if true; allow write: if isAuthenticated(); }
+    match /community_moderation/{docId} { allow read: if true; allow write: if isFounder(); }
+
+    // --- PROTECTED COLLECTIONS ---
+
+    match /devices {
+      allow list, get: if isFounder();
+      allow write: if true; 
+    }
     match /devices/{deviceId} {
-      allow read: if true;
-      allow write: if true; // Devices register themselves
+      allow get: if true; // Allow anyone to check if their device exists
+      allow read: if isFounder() || (isAuthenticated() && resource != null && resource.data.uid == request.auth.uid);
+      allow write: if true;
     }
 
-    match /import_jobs/{jobId} {
-      allow read: if true;
-      allow write: if hasPermission('importFilme') || hasPermission('importSerie') || hasPermission('importacaoMassa');
+    match /users {
+      allow list, get: if isFounder();
     }
-
-    match /import_items/{itemId} {
-      allow read: if true;
-      allow write: if hasPermission('importFilme') || hasPermission('importSerie') || hasPermission('importacaoMassa');
-    }
-
-    // Player Sources & Configurations
-    match /playerSources/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('players') || hasPermission('configurarPlayers');
-    }
-
-    match /playerConfig/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('configurarPlayers') || hasPermission('players');
-    }
-
-    // App Settings & Live Configuration
-    match /config/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('configuracoes') || hasPermission('configurarPlayers');
-    }
-
-    match /settings/{document=**} {
-      allow read: if true;
-      allow write: if hasPermission('configuracoes') || hasPermission('configurarPlayers');
-    }
-
-    // User profiles & Administration
     match /users/{uid} {
-      allow read: if (request.auth != null && request.auth.uid == uid) || hasPermission('users') || hasPermission('administrators') || hasPermission('administradores');
-      allow create: if request.auth != null && request.auth.uid == uid;
-      allow update: if (request.auth != null && request.auth.uid == uid) || hasPermission('manageAdmins') || hasPermission('managePermissions') || hasPermission('users');
-      allow delete: if hasPermission('deleteUsers');
-
-      match /profiles/{profileId} {
-        allow read: if request.auth != null;
-        
-        // Prevent ordinary users from setting isVerified to true on creation
-        allow create: if request.auth != null && request.auth.uid == uid 
-                      && (!request.resource.data.keys().contains('isVerified') || request.resource.data.isVerified == false);
-                      
-        // Prevent ordinary users from tampering with isVerified on update
-        allow update: if request.auth != null && request.auth.uid == uid 
-                      && (!request.resource.data.keys().contains('isVerified') || request.resource.data.isVerified == resource.data.isVerified);
-                      
-        // Founder / admin override
-        allow write: if hasPermission('users') || isFounder();
-
-        match /watch_history/{historyId} {
-          allow read, write: if request.auth != null && request.auth.uid == uid;
-        }
+      allow get: if isOwner(uid) || isFounder();
+      allow list: if isFounder();
+      allow write: if isOwner(uid) || isFounder();
+      
+      match /{allSubpaths=**} {
+        allow read, write: if isOwner(uid) || isFounder();
       }
     }
 
-    // Audit logs
-    match /audit_logs/{logId} {
-      allow read: if hasPermission('auditoria');
-      allow create: if request.auth != null; // Auditing action
-      allow update, delete: if isFounder();
+    // --- COLLECTION GROUPS ---
+    match /{path=**}/profiles {
+      allow list: if isAuthenticated();
+    }
+    match /{path=**}/profiles/{profileId} {
+      allow get, list: if isAuthenticated() && (
+        isFounder() || 
+        (path.size() >= 2 && path[1] == request.auth.uid)
+      );
+      allow write: if isFounder() || (isAuthenticated() && path.size() >= 2 && path[1] == request.auth.uid);
+    }
+    
+    match /{path=**}/watch_history {
+      allow list: if isAuthenticated();
+    }
+    match /{path=**}/watch_history/{historyId} {
+      allow read, write: if isAuthenticated() && (
+        isFounder() || 
+        (path.size() >= 2 && path[1] == request.auth.uid)
+      );
     }
 
-    // Community Messages rules
-    match /community_messages/{messageId} {
-      allow read: if true; // anyone can read public messages
-      allow create: if request.auth != null 
-                    && request.resource.data.userId == request.auth.uid
-                    && (!request.resource.data.keys().contains('isVerified') || request.resource.data.isVerified == false || isFounder());
-      allow update: if isFounder() || hasPermission('users'); // moderation
-      allow delete: if isFounder() || hasPermission('users');
-    }
+    // --- ADMIN & LOGS ---
+    match /audit_logs/{document=**} { allow read, write: if isFounder(); }
+    match /adminAuditLogs/{document=**} { allow read, write: if isFounder(); }
+    match /admin_settings/{document=**} { allow read, write: if isFounder(); }
 
-    // Community Moderation rules (Bans, Mutes)
-    match /community_moderation/{document=**} {
-      allow read: if true; // anyone can check their ban/mute status
-      allow write: if isFounder() || hasPermission('users');
-    }
-
-    // Default deny all other collections
+    // --- DEFAULT DENY ---
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if isFounder();
     }
   }
 }

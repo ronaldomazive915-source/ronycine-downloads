@@ -190,6 +190,15 @@ object AdminRegistry {
             testTag = "admin_menu_configuracoes"
         ),
         AdminModule(
+            id = "players",
+            section = AdminSection.PLAYERS,
+            title = "Centro de Testes de Players",
+            subtitle = "Teste os players configurados no sistema usando um filme ou série",
+            category = AdminCategory.SISTEMA,
+            icon = Icons.Default.PlayCircleOutline,
+            testTag = "admin_menu_players"
+        ),
+        AdminModule(
             id = "logs",
             section = AdminSection.LOGS,
             title = "Logs",

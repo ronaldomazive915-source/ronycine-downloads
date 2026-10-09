@@ -43,6 +43,7 @@ import com.example.ui.viewmodel.CalendarViewModel
 import com.example.ui.viewmodel.MainViewModel
 import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.CommunityViewModel
+import com.example.ui.viewmodel.NotificationViewModel
 import com.example.data.local.NotificationEntity
 import com.example.ui.components.InAppNotificationBanner
 import com.example.ui.components.TopBar
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
     private val mainViewModel: MainViewModel by viewModels()
     private val adminViewModel: AdminViewModel by viewModels()
     private val authViewModel: AuthViewModel by viewModels()
+    private val notificationViewModel: NotificationViewModel by viewModels()
 
     private val pendingActionUrl = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
@@ -808,6 +810,16 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                            composable(ScreenRoute.WHATS_NEW.route) {
+                                WhatsNewScreen(
+                                    viewModel = mainViewModel,
+                                    onNavigateBack = { navController.popBackStack() },
+                                    onNavigateToDetail = { tmdbId, type ->
+                                        navController.navigate("detail/$tmdbId/$type")
+                                    }
+                                )
+                            }
+
                             composable(ScreenRoute.DOWNLOADS.route) {
                                 DownloadsScreen(
                                     onBack = { navController.popBackStack() },
@@ -981,6 +993,7 @@ class MainActivity : ComponentActivity() {
                             composable("notifications") {
                                 NotificationScreen(
                                     viewModel = mainViewModel,
+                                    notificationViewModel = notificationViewModel,
                                     onNavigateBack = { navController.popBackStack() },
                                     onNavigateToDetail = { tmdbId, type ->
                                         navController.navigate("detail/$tmdbId/$type")
@@ -990,6 +1003,19 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onNavigateToUpdateScreen = {
                                         navController.navigate(ScreenRoute.UPDATE_SCREEN.route)
+                                    },
+                                    onNavigateToWhatsNew = {
+                                        navController.navigate(ScreenRoute.WHATS_NEW.route)
+                                    }
+                                )
+                            }
+
+                            composable("whats_new") {
+                                WhatsNewScreen(
+                                    viewModel = mainViewModel,
+                                    onNavigateBack = { navController.popBackStack() },
+                                    onNavigateToDetail = { tmdbId, type ->
+                                        navController.navigate("detail/$tmdbId/$type")
                                     }
                                 )
                             }

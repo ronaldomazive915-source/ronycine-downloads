@@ -86,12 +86,17 @@ object EmbedUrlBuilder {
         color: String? = null,
         dsLang: String? = null
     ): String {
-        val audioLabel = if (audioSource == EmbedAudioSource.DUBLADO) "Dublado" else "Legendado"
+        val audioLabel = if (audioSource == EmbedAudioSource.LEGENDADO) "Legendado" else "Dublado"
         val effectivePlayer = player ?: DEFAULT_PLAYER
         val effectiveColor = color ?: RONYCINE_COLOR
 
+        val provider = when (audioSource) {
+            EmbedAudioSource.LEGENDADO -> "vidsrc"
+            else -> "MegaEmbed"
+        }
+
         return com.example.util.PlayerUtils.buildPlayerUrl(
-            provider = if (audioSource == EmbedAudioSource.DUBLADO) "MegaEmbed" else "vidsrc",
+            provider = provider,
             mediaType = mediaType,
             tmdbId = if (tmdbId > 0) tmdbId else null,
             imdbId = imdbId,
@@ -173,21 +178,6 @@ fun EmbedPlayer(
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
     var isCustomViewShowing by remember { mutableStateOf(false) }
 
-    // State for specific authorization error from RedeFlixApi
-    var isAuthorizationError by remember(embedUrl, retryCount) { mutableStateOf(false) }
-
-    // Unified logs for debugging (only in DEBUG mode)
-    LaunchedEffect(embedUrl, audioSource) {
-        val isRedeFlix = embedUrl.contains("redeflix", ignoreCase = true)
-        if (isRedeFlix) {
-            android.util.Log.d("REDEFLIX", "Player selecionado: RedeFlixApi")
-            android.util.Log.d("REDEFLIX", "URL: $embedUrl")
-            android.util.Log.d("REDEFLIX", "TMDB ID: $tmdbId")
-            android.util.Log.d("REDEFLIX", "Tipo: $mediaType")
-            android.util.Log.d("REDEFLIX", "Temporada: ${season ?: "N/A"}")
-            android.util.Log.d("REDEFLIX", "Episódio: ${episode ?: "N/A"}")
-        }
-    }
     var customViewContainerRef by remember { mutableStateOf<FrameLayout?>(null) }
     var customViewCallbackRef by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
 
@@ -288,7 +278,6 @@ fun EmbedPlayer(
                 androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
                     try {
                         activeWebView?.onPause()
-                        activeWebView?.pauseTimers()
                     } catch (_: Exception) {}
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> {
@@ -299,9 +288,7 @@ fun EmbedPlayer(
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_DESTROY -> {
                     try {
-                        activeWebView?.stopLoading()
-                        activeWebView?.loadUrl("about:blank")
-                        activeWebView?.destroy()
+                        WebViewUtils.safeDestroy(activeWebView)
                     } catch (_: Exception) {}
                 }
                 else -> {}
@@ -342,7 +329,6 @@ fun EmbedPlayer(
 
         isLoading = true
         hasError = false
-        isAuthorizationError = false
         errorMessage = null
         loadProgress = 0
 
@@ -378,11 +364,8 @@ fun EmbedPlayer(
     }
 
     // Back handler for fullscreen HTML5 custom video views or player fullscreen mode
-    BackHandler(enabled = isCustomViewShowing || isFullscreen || isAuthorizationError) {
-        if (isAuthorizationError) {
-            isAuthorizationError = false
-            onTryAgain?.invoke()
-        } else if (isCustomViewShowing) {
+    BackHandler(enabled = isCustomViewShowing || isFullscreen) {
+        if (isCustomViewShowing) {
             hideCustomView()
         } else if (isFullscreen) {
             android.util.Log.i("RONYCINE_FULLSCREEN", "FULLSCREEN_EXIT: Exit triggered by BackHandler")
@@ -437,8 +420,9 @@ fun EmbedPlayer(
 
                             // Mitigation for MESA / RenderNode errors: 
                             // Software layer on emulators or after crash, avoiding forced LAYER_TYPE_HARDWARE.
-                            WebViewUtils.applySafeLayerType(this, forceSoftware = false)
+                            WebViewUtils.applySafeLayerType(this, forceSoftware = WebViewUtils.isSoftwareRendererNeeded || retryCount > 0)
                             setBackgroundColor(android.graphics.Color.BLACK)
+                            try { resumeTimers() } catch (_: Exception) {}
 
                             // Third party cookies required for embeds
                             try {
@@ -467,8 +451,8 @@ fun EmbedPlayer(
                                 }
                                 setGeolocationEnabled(false)
                                 
-                                // Clean User-Agent: Modern mobile browser to avoid bot detection
-                                userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
+                                // Modern mobile browser User-Agent to avoid Cloudflare/bot detection
+                                userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
                             }
 
                             addJavascriptInterface(object {
@@ -504,15 +488,6 @@ fun EmbedPlayer(
                                         "PLAYER_ERROR: contentType=$mediaType, tmdbId=$tmdbId, playerUrl=$embedUrl, finalUrl=${activeWebView?.url ?: "N/A"}, reason=$reason"
                                     )
                                     handlePlayerFailure(reason)
-                                }
-
-                                @android.webkit.JavascriptInterface
-                                fun onAuthorizationError(type: String) {
-                                    android.util.Log.e("REDEFLIX", "Authorization error detected: $type")
-                                    (context as? Activity)?.runOnUiThread {
-                                        isAuthorizationError = true
-                                        isLoading = false
-                                    }
                                 }
 
                                 @android.webkit.JavascriptInterface
@@ -667,13 +642,6 @@ fun EmbedPlayer(
                                                     lower.includes('site em manutenção')) {
                                                     if (window.RonycineBridge && window.RonycineBridge.onContentFailed) {
                                                         window.RonycineBridge.onContentFailed('Servidor do provedor offline (Falha de banco de dados)');
-                                                    }
-                                                    return;
-                                                }
-                                                
-                                                if (lower.includes('esta autorização pertence a outro dispositivo')) {
-                                                    if (window.RonycineBridge && window.RonycineBridge.onAuthorizationError) {
-                                                        window.RonycineBridge.onAuthorizationError('redeflix_device_mismatch');
                                                     }
                                                     return;
                                                 }
@@ -834,24 +802,35 @@ fun EmbedPlayer(
                                                         if (window.RonycineBridge && window.RonycineBridge.onPlayerEvent) {
                                                             var now = Date.now();
                                                             if (event === 'timeupdate') {
-                                                                if (now - lastReportedTime < 2500) return;
+                                                                if (now - lastReportedTime < 1000) return;
                                                                 lastReportedTime = now;
                                                             }
-                                                            window.RonycineBridge.onPlayerEvent(event, time || 0, dur || 0);
+                                                            var validDur = (typeof dur === 'number' && !isNaN(dur) && isFinite(dur) && dur > 0) ? dur : 0;
+                                                            var validTime = (typeof time === 'number' && !isNaN(time) && isFinite(time) && time >= 0) ? time : 0;
+                                                            window.RonycineBridge.onPlayerEvent(event, validTime, validDur);
                                                         }
                                                     } catch(e) {}
                                                 }
 
                                                 function setupVideo(v) {
-                                                    if (v.__rc_hooked) return;
+                                                    if (v.__rc_hooked) {
+                                                        if (v.duration && isFinite(v.duration) && v.duration > 0) {
+                                                            notifyBridge('durationchange', v.currentTime, v.duration);
+                                                        }
+                                                        return;
+                                                    }
                                                     v.__rc_hooked = true;
                                                     applyResumeSeek(v);
                                                     v.addEventListener('loadedmetadata', function() {
                                                         applyResumeSeek(v);
                                                         notifyBridge('loadedmetadata', v.currentTime, v.duration);
                                                     });
+                                                    v.addEventListener('loadeddata', function() {
+                                                        notifyBridge('loadeddata', v.currentTime, v.duration);
+                                                    });
                                                     v.addEventListener('canplay', function() {
                                                         applyResumeSeek(v);
+                                                        notifyBridge('canplay', v.currentTime, v.duration);
                                                     });
                                                     v.addEventListener('play', function() {
                                                         lastState = true;
@@ -865,7 +844,7 @@ fun EmbedPlayer(
                                                         notifyBridge('timeupdate', v.currentTime, v.duration);
                                                     });
                                                     v.addEventListener('durationchange', function() {
-                                                        notifyBridge('timeupdate', v.currentTime, v.duration);
+                                                        notifyBridge('durationchange', v.currentTime, v.duration);
                                                     });
                                                     v.addEventListener('pause', function() {
                                                         notifyBridge('pause', v.currentTime, v.duration);
@@ -884,6 +863,18 @@ fun EmbedPlayer(
                                                         notifyBridge('ended', v.currentTime, v.duration);
                                                     });
                                                 }
+
+                                                document.addEventListener('loadedmetadata', function(e) {
+                                                    if (e.target && (e.target.tagName === 'VIDEO' || e.target.nodeName === 'VIDEO')) {
+                                                        notifyBridge('loadedmetadata', e.target.currentTime, e.target.duration);
+                                                    }
+                                                }, true);
+
+                                                document.addEventListener('durationchange', function(e) {
+                                                    if (e.target && (e.target.tagName === 'VIDEO' || e.target.nodeName === 'VIDEO')) {
+                                                        notifyBridge('durationchange', e.target.currentTime, e.target.duration);
+                                                    }
+                                                }, true);
 
                                                 document.addEventListener('ended', function(e) {
                                                     if (e.target && (e.target.tagName === 'VIDEO' || e.target.nodeName === 'VIDEO')) {
@@ -947,7 +938,7 @@ fun EmbedPlayer(
                                                     }, 800);
                                                 }
 
-                                                // VidSrc Player Events Listener (window.postMessage)
+                                                // Player Events Listener (window.postMessage)
                                                 window.addEventListener('message', function(event) {
                                                     try {
                                                         var msg = event.data;
@@ -1009,7 +1000,11 @@ fun EmbedPlayer(
                                     val statusCode = errorResponse?.statusCode ?: -1
                                     val isMainFrame = request?.isForMainFrame == true
                                     
-                                    android.util.Log.e("RONYCINE_DIAG", "[LIVE_STREAM_STATUS] Erro HTTP detectado: $statusCode. URL=${request?.url}. isMainFrame=$isMainFrame")
+                                    if (isMainFrame) {
+                                        android.util.Log.e("RONYCINE_DIAG", "[LIVE_STREAM_STATUS] Erro HTTP detectado no frame principal: $statusCode. URL=${request?.url}")
+                                    } else {
+                                        android.util.Log.d("RONYCINE_DIAG", "[LIVE_STREAM_STATUS] Sub-recurso HTTP: $statusCode. URL=${request?.url}")
+                                    }
 
                                     super.onReceivedHttpError(view, request, errorResponse)
                                     
@@ -1035,11 +1030,16 @@ fun EmbedPlayer(
                                     view: WebView?,
                                     detail: RenderProcessGoneDetail?
                                 ): Boolean {
+                                    val didCrash = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                        detail?.didCrash() ?: false
+                                    } else {
+                                        true
+                                    }
                                     android.util.Log.w(
                                         "RONYCINE_PLAYER",
-                                        "PLAYER_CRASH: WebView render process crashed (didCrash=${detail?.didCrash()}), recovering safely..."
+                                        "PLAYER_CRASH: WebView render process crashed (didCrash=$didCrash), recovering safely..."
                                     )
-                                    WebViewUtils.safeDestroy(view)
+                                    WebViewUtils.safeDestroy(view, isDead = true)
 
                                     if (activeWebView == view) {
                                         activeWebView = null
@@ -1095,19 +1095,50 @@ fun EmbedPlayer(
                             activeWebView = this
                             onWebViewCreated?.invoke(this)
                             
-                            // Inject Referer header to avoid 403 Forbidden errors from providers
-                            val referer = when {
-                                embedUrl.contains("rdembed") || embedUrl.contains("reidosembeds") -> "https://reidosembeds.online"
-                                embedUrl.contains("redeflix") -> "https://redeflixapi.store"
-                                else -> "https://ronycine.app"
+                            // Limpa e sanitiza URL caso venha encapsulada em tag de iframe
+                            val cleanUrl = if (embedUrl.trim().startsWith("<iframe", ignoreCase = true)) {
+                                val regex = Regex("""src=["']([^"']+)["']""")
+                                regex.find(embedUrl)?.groupValues?.get(1) ?: embedUrl.trim()
+                            } else {
+                                embedUrl.trim()
                             }
-                            val extraHeaders = mapOf("Referer" to referer)
-                            loadUrl(embedUrl, extraHeaders)
+
+                            if (embedUrl.trim().startsWith("<iframe", ignoreCase = true)) {
+                                val iframeHtml = """
+                                    <!DOCTYPE html>
+                                    <html lang="pt-BR">
+                                    <head>
+                                        <meta charset="utf-8">
+                                        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                                        <title>RONYCINE Player</title>
+                                        <style>
+                                            * { margin: 0; padding: 0; border: 0; box-sizing: border-box; }
+                                            html, body { width: 100%; height: 100%; background-color: #000000; overflow: hidden; }
+                                            iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; display: block; }
+                                        </style>
+                                    </head>
+                                    <body>
+                                        $embedUrl
+                                    </body>
+                                    </html>
+                                """.trimIndent()
+                                loadDataWithBaseURL("https://ronycine.app", iframeHtml, "text/html", "UTF-8", null)
+                            } else {
+                                // Inject Referer header to avoid 403 Forbidden errors from providers
+                                val referer = when {
+                                    cleanUrl.contains("rdembed") || cleanUrl.contains("reidosembeds") -> "https://reidosembeds.online"
+                                    else -> "https://ronycine.app"
+                                }
+                                val extraHeaders = mapOf("Referer" to referer)
+                                loadUrl(cleanUrl, extraHeaders)
+                            }
                         }
                     },
                     update = { view ->
-                        activeWebView = view
-                        onWebViewCreated?.invoke(view)
+                        if (activeWebView != view) {
+                            activeWebView = view
+                            onWebViewCreated?.invoke(view)
+                        }
                     },
                     onRelease = { webView ->
                         onWebViewCreated?.invoke(null)
@@ -1123,7 +1154,7 @@ fun EmbedPlayer(
 
         // --- PROFESSIONAL COMPACT LOADING STATE ---
         AnimatedVisibility(
-            visible = isLoading && !hasError && !isAuthorizationError,
+            visible = isLoading && !hasError,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
@@ -1184,117 +1215,6 @@ fun EmbedPlayer(
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
-                    }
-                }
-            }
-        }
-
-        // --- REDEFLIX AUTHORIZATION ERROR OVERLAY ---
-        if (isAuthorizationError) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.95f))
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Security,
-                        contentDescription = null,
-                        tint = BrandRed,
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = "REDEFLIXAPI",
-                        color = BrandRed,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "Esta autorização pertence a outro dispositivo.",
-                        color = Color.White,
-                        fontSize = 15.sp,
-                        textAlign = TextAlign.Center,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = "O servidor da RedeFlixApi detectou um conflito de identidade. Isso pode ocorrer se o seu IP mudou ou se há dados de sessão antigos.",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(Modifier.height(32.dp))
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                android.util.Log.i("REDEFLIX", "User chose to try another player")
-                                isAuthorizationError = false
-                                onTryAgain?.invoke()
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.3f))
-                        ) {
-                            Text("OUTRO PLAYER", color = Color.White)
-                        }
-                        
-                                Button(
-                                    onClick = {
-                                        android.util.Log.i("REDEFLIX", "Resetting all web storage and authorization data for RedeFlixApi")
-                                        // Clear all cookies, localStorage, and web storage to completely reset identity
-                                        try {
-                                            // 1. Clear Cookies
-                                            val cookieManager = CookieManager.getInstance()
-                                            cookieManager.removeAllCookies {
-                                                android.util.Log.d("REDEFLIX", "Cookies removed: $it")
-                                            }
-                                            
-                                            // 2. Clear WebStorage (LocalStorage, IndexedDB, etc)
-                                            WebStorage.getInstance().deleteAllData()
-                                            
-                                            // 3. Clear WebView Cache
-                                            activeWebView?.clearCache(true)
-                                            activeWebView?.clearFormData()
-                                            activeWebView?.clearHistory()
-
-                                            (context as? Activity)?.runOnUiThread {
-                                                isAuthorizationError = false
-                                                retryCount++ // Triggers reload with fresh state
-                                            }
-                                        } catch (e: Exception) {
-                                            android.util.Log.e("REDEFLIX", "Error during reset: ${e.message}")
-                                            isAuthorizationError = false
-                                            retryCount++
-                                        }
-                                    },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = BrandRed)
-                        ) {
-                            Text("REDEFINIR", color = Color.White)
-                        }
-                    }
-                    
-                    Spacer(Modifier.height(16.dp))
-                    TextButton(onClick = {
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://redeflixapi.store/"))
-                            context.startActivity(intent)
-                        } catch (_: Exception) {}
-                    }) {
-                        Text("Verificar no Navegador", color = Color.Gray, fontSize = 12.sp)
                     }
                 }
             }

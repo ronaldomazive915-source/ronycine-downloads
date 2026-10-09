@@ -611,7 +611,7 @@ fun HeroTrailerPlayer(
                                 detail: android.webkit.RenderProcessGoneDetail?
                             ): Boolean {
                                 Log.w("TRAILER", "[TRAILER] WebView render process crash detected, recovering safely...")
-                                WebViewUtils.safeDestroy(view)
+                                WebViewUtils.safeDestroy(view, isDead = true)
                                 webViewRef = null
                                 playbackState = TrailerPlaybackState.ERROR
                                 val errInfo = TrailerErrorInfo(

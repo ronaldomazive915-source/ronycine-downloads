@@ -140,4 +140,26 @@ class PlayerUtilsTest {
         )
         assertEquals("https://vidsrc.tw/embed/tv/1399/1/1", url)
     }
+
+    @Test
+    fun testBuildMgebMovieUrl() {
+        val url = PlayerUtils.buildMgebMovieUrl(
+            tmdbId = 550,
+            player = "megaplay",
+            color = "#fb542b"
+        )
+        assertEquals("https://mgeb.top/embed/550?player=megaplay#color:fb542b", url)
+    }
+
+    @Test
+    fun testBuildMgebEpisodeUrl() {
+        val url = PlayerUtils.buildMgebEpisodeUrl(
+            tmdbId = 1399,
+            season = 1,
+            episode = 1,
+            player = "vidstack",
+            color = "E50914"
+        )
+        assertEquals("https://mgeb.top/embed/1399/1/1?player=vidstack#color:E50914", url)
+    }
 }

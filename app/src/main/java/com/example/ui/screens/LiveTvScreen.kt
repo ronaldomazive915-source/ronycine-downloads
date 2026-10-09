@@ -722,7 +722,7 @@ fun LiveTVPlayer(
     onToggleFullscreen: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val activity = LocalContext.current as? Activity
+    val activity = androidx.activity.compose.LocalActivity.current
     var retryCount by remember { mutableIntStateOf(0) }
     var isChannelLoading by remember { mutableStateOf(false) }
     var channelHasError by remember { mutableStateOf(false) }

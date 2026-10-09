@@ -7024,21 +7024,25 @@ fun AdminConfiguracoesScreen(
                         )
                     }
 
-                    // Seletor de Players: MegaPlay, MegaTube, Vidstack, Vidcore, RedeFlixApi e Customizados
+                    // Seletor de Players: MegaPlay, MegaTube, Vidstack, Vidcore e Customizados
                     val allSelectableOptions = remember(playerSources) {
                         val baseList = com.example.data.remote.MegaEmbedPlayerType.ALL_PLAYERS
-                        val customSources = playerSources.filter { 
-                            it.enabled && !it.id.equals("vidsrc", ignoreCase = true) &&
-                            !it.id.equals("mgeb", ignoreCase = true) &&
-                            !baseList.any { base -> base.code.equals(it.id, ignoreCase = true) || base.code.equals(it.internalPlayer, ignoreCase = true) }
-                        }.map {
-                            com.example.data.remote.MegaEmbedPlayerOption(
-                                code = it.id,
-                                displayName = it.name,
-                                description = it.description.ifBlank { "Player externo (${it.type})" }
-                            )
+                        val sources = playerSources.filter { it.enabled }
+                        
+                        // Combine base options with additional enabled sources not in baseList
+                        val combined = baseList.toMutableList()
+                        
+                        sources.forEach { source ->
+                            val alreadyInBase = baseList.any { it.code.equals(source.id, ignoreCase = true) || it.code.equals(source.internalPlayer, ignoreCase = true) }
+                            if (!alreadyInBase) {
+                                combined.add(com.example.data.remote.MegaEmbedPlayerOption(
+                                    code = source.id,
+                                    displayName = source.name,
+                                    description = source.description.ifBlank { "Player externo (${source.type})" }
+                                ))
+                            }
                         }
-                        baseList + customSources
+                        combined
                     }
 
                     Column(
@@ -7047,7 +7051,6 @@ fun AdminConfiguracoesScreen(
                     ) {
                         allSelectableOptions.forEach { option ->
                             val isSelected = selectedPlayer.equals(option.code, ignoreCase = true) ||
-                                    (option.code == "redeflixapi" && selectedPlayer.equals("redeflix", ignoreCase = true)) ||
                                     (option.code == "vidcore" && selectedPlayer.equals("clappr", ignoreCase = true))
 
                             val onSelectOption = {
@@ -7059,35 +7062,32 @@ fun AdminConfiguracoesScreen(
 
                             // Metadados do Player (Ícone, Badge e Nome limpo)
                             val playerIcon = when (option.code.lowercase()) {
-                                "megaplay" -> Icons.Default.PlayArrow
+                                "megaplay", "mgeb" -> Icons.Default.PlayArrow
                                 "megatube" -> Icons.Default.SmartDisplay
                                 "vidstack" -> Icons.Default.Tv
                                 "vidcore", "clappr" -> Icons.Default.VideoLibrary
-                                "redeflixapi", "redeflix" -> Icons.Default.Movie
                                 else -> Icons.Default.Link
                             }
                             val badgeText = when (option.code.lowercase()) {
-                                "megaplay" -> "Premium"
+                                "megaplay", "mgeb" -> "Premium"
                                 "megatube" -> "Youtube"
                                 "vidstack" -> "Moderno"
                                 "vidcore", "clappr" -> "Clássico"
-                                "redeflixapi", "redeflix" -> "TMDB"
                                 else -> "Custom"
                             }
                             val badgeColor = when (option.code.lowercase()) {
-                                "megaplay" -> BrandRed
+                                "megaplay", "mgeb" -> BrandRed
                                 "megatube" -> Color(0xFFFF3333)
                                 "vidstack" -> Color(0xFF38BDF8)
                                 "vidcore", "clappr" -> Color(0xFF4ADE80)
-                                "redeflixapi", "redeflix" -> Color(0xFFF97316)
                                 else -> Color(0xFFA78BFA)
                             }
                             val cleanDisplayName = when (option.code.lowercase()) {
                                 "megaplay" -> "MegaPlay"
+                                "mgeb" -> "Mgeb Embed"
                                 "megatube" -> "MegaTube"
                                 "vidstack" -> "Vidstack"
                                 "vidcore", "clappr" -> "Vidcore"
-                                "redeflixapi", "redeflix" -> "RedeFlixApi"
                                 else -> option.displayName.substringBefore(" (")
                             }
 
@@ -7486,7 +7486,7 @@ fun AdminConfiguracoesScreen(
                                             }
 
                                             // Botão Excluir (se customizado)
-                                            if (!source.isSystem && source.id != "mgeb" && source.id != "vidsrc" && source.id != "redeflix" && source.id != "redeflixapi") {
+                                            if (!source.isSystem && source.id != "mgeb" && source.id != "vidsrc") {
                                                 IconButton(
                                                     onClick = {
                                                         adminViewModel.deletePlayerSource(source.id)
@@ -14567,8 +14567,8 @@ fun AddEditPlayerModal(
     var id by remember { mutableStateOf(playerToEdit?.id ?: "") }
     var description by remember { mutableStateOf(playerToEdit?.description ?: "") }
     var type by remember { mutableStateOf(playerToEdit?.type ?: "Iframe / WebView") }
-    var movieTmdbUrl by remember { mutableStateOf(playerToEdit?.movieTmdbUrl ?: "https://redeflixapi.store/filme/{tmdbId}") }
-    var tvTmdbUrl by remember { mutableStateOf(playerToEdit?.tvTmdbUrl ?: "https://redeflixapi.store/serie/{tmdbId}/{seasonNumber}/{episodeNumber}") }
+    var movieTmdbUrl by remember { mutableStateOf(playerToEdit?.movieTmdbUrl ?: "https://api.exemplo.com/filme/{tmdbId}") }
+    var tvTmdbUrl by remember { mutableStateOf(playerToEdit?.tvTmdbUrl ?: "https://api.exemplo.com/serie/{tmdbId}/{seasonNumber}/{episodeNumber}") }
     var enabled by remember { mutableStateOf(playerToEdit?.enabled ?: true) }
     var forMovies by remember { mutableStateOf(playerToEdit?.supportedContent?.contains("movie") ?: true) }
     var forSeries by remember { mutableStateOf(playerToEdit?.supportedContent?.contains("tv") ?: true) }
@@ -14603,7 +14603,7 @@ fun AddEditPlayerModal(
                             id = it.trim().lowercase().replace(Regex("[^a-z0-9]"), "")
                         }
                     },
-                    label = { Text("Nome do Player (ex: RedeFlixApi)") },
+                    label = { Text("Nome do Player (ex: Player VIP)") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -14620,7 +14620,7 @@ fun AddEditPlayerModal(
                 OutlinedTextField(
                     value = id,
                     onValueChange = { id = it },
-                    label = { Text("ID Interno (ex: redeflixapi)") },
+                    label = { Text("ID Interno (ex: playervip)") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     enabled = !isEditing || !playerToEdit.isSystem,
@@ -14686,7 +14686,7 @@ fun AddEditPlayerModal(
                     value = movieTmdbUrl,
                     onValueChange = { movieTmdbUrl = it },
                     label = { Text("URL Template Filmes") },
-                    placeholder = { Text("https://redeflixapi.store/filme/{tmdbId}") },
+                    placeholder = { Text("https://api.exemplo.com/filme/{tmdbId}") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -14704,7 +14704,7 @@ fun AddEditPlayerModal(
                     value = tvTmdbUrl,
                     onValueChange = { tvTmdbUrl = it },
                     label = { Text("URL Template Séries") },
-                    placeholder = { Text("https://redeflixapi.store/serie/{tmdbId}/{seasonNumber}/{episodeNumber}") },
+                    placeholder = { Text("https://api.exemplo.com/serie/{tmdbId}/{seasonNumber}/{episodeNumber}") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(

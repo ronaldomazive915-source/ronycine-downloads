@@ -1,7 +1,12 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
+import com.example.data.remote.CentralWebSocketClient
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.*
 import com.example.data.repository.MediaRepository
@@ -153,7 +158,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getInstance(application)
     private val firebaseService = com.example.data.remote.FirebaseService.getInstance(application)
-    val mediaRepository = MediaRepository(database.playFilmeDao(), firebaseService)
+    
+    // Central API Components
+    private val centralApiService = com.example.data.remote.CentralNetwork.apiService
+    private val centralRepository = com.example.data.repository.CentralRepository(centralApiService, database.playFilmeDao())
+    val centralAuthManager = com.example.data.remote.CentralAuthManager(centralApiService, database.playFilmeDao(), application)
+    val centralConnectionManager = com.example.data.remote.CentralConnectionManager(centralApiService, database.playFilmeDao(), application)
+    
+    private val notificationRepository = com.example.data.repository.NotificationRepository(application)
+    val mediaRepository = MediaRepository(database.playFilmeDao(), firebaseService, centralRepository, notificationRepository)
+
+    init {
+        // Sync Central API state
+        viewModelScope.launch {
+            centralAuthManager.isLoggedIn.collect { loggedIn ->
+                if (loggedIn) {
+                    val token = getApplication<Application>().getSharedPreferences("central_auth_prefs", Context.MODE_PRIVATE).getString("auth_token", null)
+                    com.example.data.remote.CentralNetwork.setAuthToken(token)
+                    initWebSocket()
+                } else {
+                    webSocketClient?.disconnect()
+                    webSocketClient = null
+                }
+            }
+        }
+    }
+
+    private var webSocketClient: CentralWebSocketClient? = null
+
+    private fun initWebSocket() {
+        if (webSocketClient != null) return
+        
+        webSocketClient = CentralWebSocketClient("https://api.ronycine.com/api/v1/") { type, data ->
+            viewModelScope.launch(Dispatchers.IO) {
+                handleCentralMessage(type, data)
+            }
+        }
+        
+        val token = getApplication<Application>().getSharedPreferences("central_auth_prefs", Context.MODE_PRIVATE).getString("auth_token", null)
+        webSocketClient?.connect(token)
+    }
+
+    fun refreshContentFromCentralApi() {
+        if (!_centralApiEnabled.value) return
+        
+        viewModelScope.launch {
+            centralRepository.getMovies(1)
+            centralRepository.getSeries(1)
+            centralRepository.getAnimes(1)
+            centralRepository.getDoramas(1)
+        }
+    }
+
+    private suspend fun handleCentralMessage(type: String, data: String) {
+        val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+        try {
+            when (type) {
+                "content.created", "content.updated" -> {
+                    val entity = moshi.adapter(MediaEntity::class.java).fromJson(data)
+                    if (entity != null) database.playFilmeDao().insertMedia(entity)
+                }
+                "content.deleted" -> {
+                    val json = moshi.adapter(Map::class.java).fromJson(data) as? Map<String, Any>
+                    val tmdbId = (json?.get("tmdbId") as? Double)?.toInt() ?: (json?.get("tmdbId") as? Int)
+                    if (tmdbId != null) database.playFilmeDao().deleteMediaByTmdbId(tmdbId)
+                }
+                "request.created", "request.updated" -> {
+                    // Logic for requests if needed locally
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("MainViewModel", "Error handling central message: ${e.message}")
+        }
+    }
 
     fun canStartPlayback(): Boolean {
         return true
@@ -542,6 +619,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _notificationsEnabled = MutableStateFlow(appPrefs.getBoolean("notificationsEnabled", true))
     val notificationsEnabled: StateFlow<Boolean> = _notificationsEnabled.asStateFlow()
 
+    private val _centralApiEnabled = MutableStateFlow(appPrefs.getBoolean("centralApiEnabled", false))
+    val centralApiEnabled: StateFlow<Boolean> = _centralApiEnabled.asStateFlow()
+
     private val _newMoviesEnabled = MutableStateFlow(appPrefs.getBoolean("newMoviesEnabled", true))
     val newMoviesEnabled: StateFlow<Boolean> = _newMoviesEnabled.asStateFlow()
 
@@ -569,6 +649,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             database.playFilmeDao().saveSetting(AppSettingsEntity("notificationsEnabled", enabled.toString()))
             syncNotificationSettingsToCloud()
+        }
+    }
+
+    fun setCentralApiEnabled(enabled: Boolean) {
+        _centralApiEnabled.value = enabled
+        appPrefs.edit().putBoolean("centralApiEnabled", enabled).apply()
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            database.playFilmeDao().saveSetting(AppSettingsEntity("centralApiEnabled", enabled.toString()))
+            mediaRepository.setCentralApiEnabled(enabled)
+            if (enabled) {
+                refreshContentFromCentralApi()
+            }
         }
     }
 
@@ -949,74 +1041,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf("Todos", "Recentes", "Populares", "8+ ⭐"))
     // --- Categorized Media Sections for Home (Optimized) ---
     val topMovies: StateFlow<List<MediaEntity>> = movies
-        .debounce(300L)
         .map { it.take(15) }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val releaseMovies: StateFlow<List<MediaEntity>> = movies
-        .debounce(300L)
         .map { it.sortedByDescending { m -> m.releaseYear } }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val topRatedMovies: StateFlow<List<MediaEntity>> = movies
-        .debounce(300L)
         .map { it.filter { m -> m.rating >= 7.0 } }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val topSeries: StateFlow<List<MediaEntity>> = series
-        .debounce(300L)
         .map { it.take(15) }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val releaseSeries: StateFlow<List<MediaEntity>> = series
-        .debounce(300L)
         .map { it.sortedByDescending { m -> m.releaseYear } }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val filteredRecentlyAdded: StateFlow<List<MediaEntity>> = recentlyAddedMedia
-        .debounce(400L)
         .map { list -> list.filter { MediaClassifier.isMovieOrSeries(it) }.take(15) }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val filteredTrending: StateFlow<List<MediaEntity>> = trendingMedia
-        .debounce(400L)
         .map { list -> list.filter { MediaClassifier.isMovieOrSeries(it) }.take(15) }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val filteredReleases: StateFlow<List<MediaEntity>> = releases
-        .debounce(400L)
         .map { list -> list.filter { MediaClassifier.isMovieOrSeries(it) }.take(15) }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val filteredTopRated: StateFlow<List<MediaEntity>> = topRated
-        .debounce(400L)
         .map { list -> list.filter { MediaClassifier.isMovieOrSeries(it) }.take(15) }
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Fix for filteredPopularMovies and series to use debounced flows
     val filteredPopularMovies: StateFlow<List<MediaEntity>> = movies
-        .debounce(400L)
         .map { it.take(15) }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
         
     val filteredPopularSeries: StateFlow<List<MediaEntity>> = series
-        .debounce(400L)
         .map { it.take(15) }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val displayAnimes: StateFlow<List<MediaEntity>> = combine(recentAnimes, animes) { recent, all ->
         if (recent.isNotEmpty()) recent else all
     }
-    .debounce(500L)
     .map { it.take(20) }
     .flowOn(kotlinx.coroutines.Dispatchers.Default)
     .distinctUntilChanged()
@@ -1025,7 +1106,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val displayDoramas: StateFlow<List<MediaEntity>> = combine(recentDoramas, doramas) { recent, all ->
         if (recent.isNotEmpty()) recent else all
     }
-    .debounce(500L)
     .map { it.take(20) }
     .flowOn(kotlinx.coroutines.Dispatchers.Default)
     .distinctUntilChanged()
@@ -1478,6 +1558,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 android.util.Log.e("MainViewModel", "Error loading media details for $tmdbId: ${e.message}")
             }
         }
@@ -1493,6 +1574,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val castList = mediaRepository.fetchCastForMedia(tmdbId, mediaType, rawCastStr)
                 _mediaCastMap.value = _mediaCastMap.value + (tmdbId to castList)
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 android.util.Log.e("MainViewModel", "Error in fetchCastForMedia: ${e.message}")
             } finally {
                 _mediaCastLoadingMap.value = _mediaCastLoadingMap.value + (tmdbId to false)
@@ -1538,6 +1620,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // 3. Fetch/update in background
             try {
                 mediaRepository.fetchAndStoreEpisodes(tmdbId, season)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 android.util.Log.e("MainViewModel", "Erro ao buscar episódios: ${e.message}")
             }
@@ -1829,4 +1913,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun fetchDoramaFromTMDB(page: Int = 1) = mediaRepository.fetchDoramaFromTMDB(page)
     suspend fun importAnimeFromTMDB(tmdbId: Int) = mediaRepository.importAnimeFromTMDB(tmdbId)
     suspend fun importDoramaFromTMDB(tmdbId: Int) = mediaRepository.importDoramaFromTMDB(tmdbId)
+
+    // --- Central Central Connection Actions ---
+    val centralConnectionState = centralConnectionManager.connectionState
+
+    fun pairWithCentral(pairingCode: String) {
+        centralConnectionManager.pair(pairingCode)
+    }
+
+    fun disconnectFromCentral() {
+        centralConnectionManager.disconnect()
+    }
 }

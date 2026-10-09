@@ -729,9 +729,9 @@ private fun ExploreMediaGrid(
     onNavigateToDetail: (Int, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Responsive column count: minimum width 100dp gives 3 columns on standard phones, 4-5 on tablet, 6+ on desktop
+    // Responsive column count: minimum width 95dp gives 4 columns on many phones
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 102.dp),
+        columns = GridCells.Adaptive(minSize = 95.dp),
         contentPadding = PaddingValues(
             start = 14.dp,
             end = 14.dp,
@@ -797,7 +797,7 @@ private fun ExplorePosterCard(
     val imageRequest = remember(imageUrl) {
         ImageRequest.Builder(context)
             .data(imageUrl)
-            .size(240, 360) // Optimized for 3-column grid
+            .size(200, 300) // Optimized for smaller grid
             .crossfade(200)
             .placeholder(android.R.drawable.progress_horizontal)
             .error(android.R.drawable.ic_menu_report_image)
@@ -861,10 +861,10 @@ private fun ExplorePosterCard(
                     Text(
                         text = categoryBadgeText,
                         color = Color.White,
-                        fontSize = 7.5.sp,
+                        fontSize = 6.5.sp,
                         fontWeight = FontWeight.Black,
                         letterSpacing = 0.4.sp,
-                        modifier = Modifier.padding(horizontal = 4.5.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.5.dp)
                     )
                 }
 
@@ -905,9 +905,9 @@ private fun ExplorePosterCard(
         Text(
             text = media.title,
             color = Color.White,
-            fontSize = 11.5.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.SemiBold,
-            lineHeight = 14.sp,
+            lineHeight = 12.sp,
             maxLines = 2,
             minLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -918,11 +918,11 @@ private fun ExplorePosterCard(
         Text(
             text = yearText,
             color = TextSecondary,
-            fontSize = 10.5.sp,
+            fontSize = 9.5.sp,
             fontWeight = FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 1.dp)
+            modifier = Modifier.padding(top = 0.dp)
         )
     }
 }
@@ -945,7 +945,7 @@ private fun ExploreSkeletonGrid(modifier: Modifier = Modifier) {
     )
 
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 102.dp),
+        columns = GridCells.Adaptive(minSize = 95.dp),
         contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 100.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),

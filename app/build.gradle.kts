@@ -21,6 +21,8 @@ android {
     versionName = "1.1.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    
+    buildConfigField("String", "API_BASE_URL", "\"https://api.ronycine.com/api/v1\"")
   }
 
   signingConfigs {

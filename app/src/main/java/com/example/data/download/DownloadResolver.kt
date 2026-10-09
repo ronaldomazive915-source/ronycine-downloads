@@ -185,47 +185,7 @@ class DownloadResolver(private val context: Context) {
             }
 
             // -------------------------------------------------------------
-            // ETAPA 3: Tentar RedeFlix (redeflixapi.store)
-            // -------------------------------------------------------------
-            val redeflixUrl = if (type == "movie") {
-                "https://redeflixapi.store/filme/$tmdbId"
-            } else {
-                "https://redeflixapi.store/serie/$tmdbId/$season/$episode"
-            }
-
-            Log.d("DOWNLOAD_TRACE_$traceId", "[ETAPA 3] Consultando RedeFlix: $redeflixUrl")
-            try {
-                val rfRequest = Request.Builder()
-                    .url(redeflixUrl)
-                    .header("User-Agent", USER_AGENT)
-                    .header("Referer", "https://redeflixapi.store/")
-                    .build()
-
-                val rfResponse = client.newCall(rfRequest).execute()
-                if (rfResponse.isSuccessful) {
-                    val rfBody = rfResponse.body?.string() ?: ""
-                    val rfMatch = Regex("""https?://[^\s"'<>]+?\.(mp4|m3u8)[^\s"'<>]*""").find(rfBody)
-                    if (rfMatch != null) {
-                        val videoUrl = rfMatch.value
-                        val ext = if (videoUrl.contains(".m3u8")) "m3u8" else "mp4"
-                        Log.d("DOWNLOAD_TRACE_$traceId", "SUCESSO: Link direto extraído da RedeFlix: $videoUrl")
-                        return@withContext DownloadResolutionResult.Success(
-                            url = videoUrl,
-                            fileName = formatFileName(mediaTitle ?: "Media", type, season, episode, ext),
-                            mimeType = if (ext == "m3u8") "application/x-mpegURL" else "video/mp4",
-                            source = "RedeFlix (Direto)"
-                        )
-                    }
-                    if (candidateStreamUrl == null) {
-                        candidateStreamUrl = redeflixUrl
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w("DOWNLOAD_TRACE_$traceId", "[ETAPA 3] RedeFlix erro: ${e.message}")
-            }
-
-            // -------------------------------------------------------------
-            // ETAPA 4: Resolução Garantida via Stream / Player Embed
+            // ETAPA 3: Resolução Garantida via Stream / Player Embed
             // Quando a fonte reproduz em JavaScript/iframe protegido,
             // resolvemos para a URL de stream/embed compatível com 1DM / ADM.
             // -------------------------------------------------------------

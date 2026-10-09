@@ -135,12 +135,10 @@ class RemoteUpdateManager private constructor(private val appContext: Context) {
             if (isNewCache || config.forceRefresh) {
                 withContext(Dispatchers.Main) {
                     try {
-                        val tempWebView = WebView(appContext)
-                        tempWebView.clearCache(true)
-                        com.example.util.WebViewUtils.safeDestroy(tempWebView)
-                        Log.d(TAG, "[REMOTE-UPDATE] Cache do WebView/HTTP limpo com sucesso.")
+                        android.webkit.WebStorage.getInstance().deleteAllData()
+                        Log.d(TAG, "[REMOTE-UPDATE] Cache do WebStorage limpo com sucesso.")
                     } catch (e: Exception) {
-                        Log.w(TAG, "[REMOTE-UPDATE] Aviso ao limpar WebView cache: ${e.message}")
+                        Log.w(TAG, "[REMOTE-UPDATE] Aviso ao limpar WebStorage: ${e.message}")
                     }
                 }
             }

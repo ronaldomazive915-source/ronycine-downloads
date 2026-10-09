@@ -6,13 +6,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,10 +25,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -35,12 +37,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.ui.components.RonycineSmileLoader
+import com.example.data.local.MediaEntity
 import com.example.data.local.TmdbAutoSyncHistoryEntity
 import com.example.data.remote.ImportConfig
 import com.example.data.remote.ImportItem
 import com.example.data.remote.ImportJob
 import com.example.data.repository.TmdbSearchResultItem
+import com.example.ui.components.RonycineSmileLoader
 import com.example.ui.theme.BrandRed
 import com.example.ui.theme.CardBorder
 import com.example.ui.theme.DarkBackground
@@ -69,7 +72,7 @@ fun AdminImportCentralScreen(
     var selectedTypeFilter by remember { mutableStateOf("ALL") } // "ALL", "movie", "tv"
     val importMessage by adminViewModel.importMessage.collectAsState()
 
-    // Auto load config and recent on start
+    // Auto load config and recent candidates on start
     LaunchedEffect(Unit) {
         adminViewModel.loadTmdbAutoSyncConfig()
         adminViewModel.loadRecentCandidatesFromTmdb()
@@ -80,16 +83,16 @@ fun AdminImportCentralScreen(
             .fillMaxSize()
             .background(DarkBackground)
     ) {
-        // --- HEADER PRINCIPAL DE IMPORTAÇÃO ---
+        // --- HEADER PRINCIPAL DE IMPORTAÇÃO (DARK PREMIUM RONYCINE) ---
         Surface(
             color = DarkSurface,
-            shadowElevation = 4.dp,
+            shadowElevation = 6.dp,
             border = BorderStroke(1.dp, CardBorder)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -102,27 +105,27 @@ fun AdminImportCentralScreen(
                                 imageVector = Icons.Default.CloudDownload,
                                 contentDescription = null,
                                 tint = BrandRed,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(22.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "IMPORTAR CONTEÚDO",
                                 color = Color.White,
-                                fontSize = 16.sp,
+                                fontSize = 17.sp,
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = 0.5.sp
                             )
                         }
                         Text(
-                            text = "Módulo oficial de gestão e integração de filmes e séries TMDB",
+                            text = "Painel Profissional de Gestão e Importação do Catálogo TMDB",
                             color = Color.Gray,
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
 
-                    // Top Type Filter Badges (Filme / Série / Todos)
+                    // Filters by media type (Todos / Filmes / Séries)
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -145,9 +148,9 @@ fun AdminImportCentralScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // --- NAVEGAÇÃO DE MODOS DE IMPORTAÇÃO (SCROLLABLE BAR - NO TEXT WRAPPING) ---
+                // --- NAVEGAÇÃO DE MODOS DE IMPORTAÇÃO (SCROLLABLE TAB BAR) ---
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -159,37 +162,37 @@ fun AdminImportCentralScreen(
                 ) {
                     ModeTabButton(
                         icon = Icons.Default.Search,
-                        label = "Inteligente",
+                        label = "⚡ Inteligente",
                         selected = selectedMode == ImportMode.INDIVIDUAL,
                         onClick = { selectedMode = ImportMode.INDIVIDUAL }
                     )
                     ModeTabButton(
                         icon = Icons.Default.DynamicFeed,
-                        label = "Em Massa",
+                        label = "📦 Em Massa",
                         selected = selectedMode == ImportMode.MASS,
                         onClick = { selectedMode = ImportMode.MASS }
                     )
                     ModeTabButton(
                         icon = Icons.Default.Language,
-                        label = "Mgeb API",
+                        label = "🌐 Mgeb API",
                         selected = selectedMode == ImportMode.MGEB,
                         onClick = { selectedMode = ImportMode.MGEB }
                     )
                     ModeTabButton(
                         icon = Icons.Default.AutoMode,
-                        label = "Automática",
+                        label = "🤖 Automática",
                         selected = selectedMode == ImportMode.AUTOMATIC,
                         onClick = { selectedMode = ImportMode.AUTOMATIC }
                     )
                     ModeTabButton(
                         icon = Icons.Default.NewReleases,
-                        label = "Recentes",
+                        label = "🔥 Recentes",
                         selected = selectedMode == ImportMode.RECENT,
                         onClick = { selectedMode = ImportMode.RECENT }
                     )
                     ModeTabButton(
                         icon = Icons.Default.History,
-                        label = "Histórico",
+                        label = "📋 Histórico",
                         selected = selectedMode == ImportMode.HISTORY,
                         onClick = { selectedMode = ImportMode.HISTORY }
                     )
@@ -197,12 +200,14 @@ fun AdminImportCentralScreen(
             }
         }
 
-        // Global message banner if present
+        // Global message notification banner
         importMessage?.let { msg ->
             Surface(
-                color = if (msg.contains("sucesso") || msg.contains("✓") || msg.contains("🚀")) Color(0xFF1B5E20)
-                else if (msg.contains("já existe") || msg.contains("⚠️")) Color(0xFFE65100)
-                else Color(0xFFB71C1C),
+                color = when {
+                    msg.contains("sucesso") || msg.contains("✓") || msg.contains("🚀") || msg.contains("Importado") -> Color(0xFF1B5E20)
+                    msg.contains("já existe") || msg.contains("⚠️") -> Color(0xFFE65100)
+                    else -> Color(0xFFB71C1C)
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
@@ -215,8 +220,8 @@ fun AdminImportCentralScreen(
                     Text(
                         text = msg,
                         color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
                         modifier = Modifier.weight(1f)
                     )
                     IconButton(
@@ -234,11 +239,11 @@ fun AdminImportCentralScreen(
             }
         }
 
-        // --- CONTEÚDO PRINCIPAL DE ACORDO COM O MODO SELECIONADO ---
+        // --- CONTEÚDO DA CENTRAL DE IMPORTAÇÃO ---
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(12.dp)
+                .padding(10.dp)
         ) {
             when (selectedMode) {
                 ImportMode.INDIVIDUAL -> SmartImportSection(
@@ -271,10 +276,9 @@ fun AdminImportCentralScreen(
 }
 
 // ============================================================================
-// 1. IMPORTAÇÃO INTELIGENTE (SMART IMPORT)
+// 1. REESTRUTURAÇÃO VISUAL E FUNCIONAL: IMPORTAÇÃO INTELIGENTE (SMART IMPORT)
 // ============================================================================
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SmartImportSection(
     adminViewModel: AdminViewModel,
@@ -282,41 +286,115 @@ fun SmartImportSection(
     onNavigateToMedia: ((Int, String) -> Unit)?
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var selectedMediaType by remember { mutableStateOf(if (typeFilter == "tv") "tv" else "movie") }
-
-    val isPreviewLoading by adminViewModel.isPreviewLoading.collectAsState()
-    val previewMedia by adminViewModel.selectedPreviewMedia.collectAsState()
-    val previewExists by adminViewModel.selectedPreviewExists.collectAsState()
-    val isImportingSingle by adminViewModel.isImportingSingle.collectAsState()
-    val isSeriesUpdateRunning by adminViewModel.isSeriesUpdateRunning.collectAsState()
-    val isRunning = isImportingSingle || isSeriesUpdateRunning
-    val importStepMessage by adminViewModel.importStepMessage.collectAsState()
     val searchResults by adminViewModel.searchResults.collectAsState()
     val isSearching by adminViewModel.isSearching.collectAsState()
 
+    val allCatalogMedia by adminViewModel.allCatalogMedia.collectAsState()
     val recentCandidates by adminViewModel.recentCandidates.collectAsState()
     val isLoadingRecent by adminViewModel.isLoadingRecentCandidates.collectAsState()
-    var recentFilter by remember { mutableStateOf("ALL") }
 
-    LaunchedEffect(Unit) {
-        adminViewModel.loadRecentCandidatesFromTmdb()
-    }
+    // Status filter: "ALL", "NEW", "CATALOG", "UPDATE", "ERROR"
+    var selectedStatusFilter by remember { mutableStateOf("ALL") }
 
-    val filteredRecent = recentCandidates.filter {
-        val matchesType = if (typeFilter == "ALL") {
-            if (recentFilter == "ALL") true else it.mediaType == recentFilter
+    // Sort option: "RELEVANCE", "RECENT", "AZ", "ZA", "RATING"
+    var selectedSortOption by remember { mutableStateOf("RELEVANCE") }
+
+    // Selection mode toggle
+    var isSelectionModeActive by remember { mutableStateOf(false) }
+
+    // Set of selected items: Pair(tmdbId, mediaType)
+    var selectedItemIds by remember { mutableStateOf<Set<Pair<Int, String>>>(emptySet()) }
+
+    // State for direct import processing (tmdbId_type -> Boolean)
+    var activeImportingIds by remember { mutableStateOf<Set<Pair<Int, String>>>(emptySet()) }
+
+    // Mass import confirmation modal state
+    var showMassImportConfirmModal by remember { mutableStateOf(false) }
+
+    // Prepare unified grid list from search results OR recent candidates
+    val rawGridList = remember(searchResults, recentCandidates, searchQuery) {
+        if (searchQuery.isNotBlank() && searchResults.isNotEmpty()) {
+            searchResults.map { item ->
+                val entity = item.entity
+                val exists = allCatalogMedia.any { it.tmdbId == entity.tmdbId && it.mediaType == entity.mediaType }
+                AdminViewModel.MassCandidateItem(
+                    tmdbId = entity.tmdbId,
+                    mediaType = entity.mediaType,
+                    title = entity.title,
+                    originalTitle = entity.originalTitle,
+                    year = entity.releaseYear,
+                    rating = entity.rating,
+                    posterPath = entity.posterPath,
+                    overview = entity.overview,
+                    genres = entity.genres,
+                    isAlreadyInCatalog = exists
+                )
+            }
         } else {
-            it.mediaType == typeFilter
+            recentCandidates.map { cand ->
+                val exists = allCatalogMedia.any { it.tmdbId == cand.tmdbId && it.mediaType == cand.mediaType }
+                cand.copy(isAlreadyInCatalog = exists)
+            }
         }
-        matchesType
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // Header & Search Bar Card
-        item {
+    // Apply Type Filter
+    val typeFilteredList = remember(rawGridList, typeFilter) {
+        if (typeFilter == "ALL") rawGridList
+        else rawGridList.filter { it.mediaType == typeFilter }
+    }
+
+    // Apply Status Filter
+    val statusFilteredList = remember(typeFilteredList, selectedStatusFilter) {
+        when (selectedStatusFilter) {
+            "NEW" -> typeFilteredList.filter { !it.isAlreadyInCatalog }
+            "CATALOG" -> typeFilteredList.filter { it.isAlreadyInCatalog }
+            "UPDATE" -> typeFilteredList.filter { it.isAlreadyInCatalog && it.mediaType == "tv" }
+            else -> typeFilteredList
+        }
+    }
+
+    // Apply Sorting
+    val finalDisplayList = remember(statusFilteredList, selectedSortOption) {
+        when (selectedSortOption) {
+            "AZ" -> statusFilteredList.sortedBy { it.title.lowercase() }
+            "ZA" -> statusFilteredList.sortedByDescending { it.title.lowercase() }
+            "RATING" -> statusFilteredList.sortedByDescending { it.rating }
+            "RECENT" -> statusFilteredList.sortedByDescending { it.year }
+            else -> statusFilteredList
+        }
+    }
+
+    // Tab Counts calculation
+    val allCount = rawGridList.size
+    val moviesCount = rawGridList.count { it.mediaType == "movie" }
+    val seriesCount = rawGridList.count { it.mediaType == "tv" }
+
+    // Calculate selection statistics
+    val selectedList = remember(selectedItemIds, finalDisplayList) {
+        finalDisplayList.filter { Pair(it.tmdbId, it.mediaType) in selectedItemIds }
+    }
+    val selectedMoviesCount = selectedList.count { it.mediaType == "movie" }
+    val selectedSeriesCount = selectedList.count { it.mediaType == "tv" }
+
+    val selectedAlreadyInCatalogCount = selectedList.count { it.isAlreadyInCatalog }
+    val selectedNewToImportCount = selectedList.size - selectedAlreadyInCatalogCount
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val screenWidth = maxWidth
+        // Responsive Grid: 6 on Desktop, 4 on Tablet, 3 on Mobile (User Request)
+        val columns = when {
+            screenWidth >= 1200.dp -> 6
+            screenWidth >= 900.dp -> 5
+            screenWidth >= 600.dp -> 4
+            else -> 3
+        }
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            // --- TOP SEARCH & CONTROLS PANEL ---
             Card(
                 colors = CardDefaults.cardColors(containerColor = DarkSurface),
                 shape = RoundedCornerShape(12.dp),
@@ -324,45 +402,30 @@ fun SmartImportSection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
-                    modifier = Modifier.padding(14.dp),
+                    modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "IMPORTAÇÃO INTELIGENTE",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Black
-                        )
-                        Text(
-                            text = "Pesquise um filme ou série e encontre rapidamente conteúdos que ainda não estão no catálogo.",
-                            color = Color.Gray,
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    // Search Field
+                    // Search Input
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = {
                             searchQuery = it
                             adminViewModel.onSearchQueryChanged(it)
                         },
-                        placeholder = { Text("🔎 Pesquisar filme ou série...", color = Color.Gray, fontSize = 13.sp) },
+                        placeholder = {
+                            Text("🔎 Pesquisar filmes ou séries (por Título, TMDB ID ou Ano)...", color = Color.Gray, fontSize = 12.sp)
+                        },
                         singleLine = true,
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = BrandRed) },
                         trailingIcon = {
                             if (isSearching) {
-                                RonycineSmileLoader(
-                                    color = BrandRed,
-                                    size = 16.dp
-                                )
+                                RonycineSmileLoader(color = BrandRed, size = 16.dp)
                             } else if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = {
                                     searchQuery = ""
                                     adminViewModel.onSearchQueryChanged("")
                                 }) {
-                                    Icon(Icons.Default.Clear, contentDescription = null, tint = Color.Gray)
+                                    Icon(Icons.Default.Clear, contentDescription = "Limpar busca", tint = Color.Gray)
                                 }
                             }
                         },
@@ -376,319 +439,788 @@ fun SmartImportSection(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(52.dp),
+                            .height(50.dp),
                         shape = RoundedCornerShape(8.dp)
                     )
-                }
-            }
-        }
 
-        // Preview Card if media selected
-        if (previewMedia != null) {
-            item {
-                val media = previewMedia!!
-                val isMovie = media.mediaType.lowercase() == "movie"
-                var showFullOverview by remember { mutableStateOf(false) }
+                    // ABAS COM CONTADORES REAIS DE CONTEÚDO
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TabBadge(
+                                label = "Todos ($allCount)",
+                                selected = typeFilter == "ALL",
+                                onClick = { adminViewModel.setSearchFilter("all") }
+                            )
+                            TabBadge(
+                                label = "Filmes ($moviesCount)",
+                                selected = typeFilter == "movie",
+                                onClick = { adminViewModel.setSearchFilter("movie") }
+                            )
+                            TabBadge(
+                                label = "Séries ($seriesCount)",
+                                selected = typeFilter == "tv",
+                                onClick = { adminViewModel.setSearchFilter("tv") }
+                            )
+                        }
 
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, if (previewExists) Color(0xFFFFA000) else BrandRed),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        // Toggle Selection Mode Button
+                        Button(
+                            onClick = {
+                                isSelectionModeActive = !isSelectionModeActive
+                                if (!isSelectionModeActive) {
+                                    selectedItemIds = emptySet()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isSelectionModeActive) BrandRed else Color.Black.copy(alpha = 0.5f)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, if (isSelectionModeActive) BrandRed else CardBorder),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp)
                         ) {
+                            Icon(
+                                imageVector = if (isSelectionModeActive) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "MÍDIA SELECIONADA",
-                                color = Color.White,
-                                fontSize = 12.sp,
+                                text = if (isSelectionModeActive) "Modo Seleção (Ativo)" else "☑ SELECIONAR MAIS",
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                    }
+
+                    // FILTROS & ORDENAÇÃO
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Status Filter
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Status:", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            FilterPill("Todos", selectedStatusFilter == "ALL") { selectedStatusFilter = "ALL" }
+                            FilterPill("Novos", selectedStatusFilter == "NEW") { selectedStatusFilter = "NEW" }
+                            FilterPill("No Catálogo", selectedStatusFilter == "CATALOG") { selectedStatusFilter = "CATALOG" }
+                            FilterPill("Atualização", selectedStatusFilter == "UPDATE") { selectedStatusFilter = "UPDATE" }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .height(16.dp)
+                                .background(CardBorder)
+                        )
+
+                        // Sort Options
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Ordem:", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            FilterPill("Relevantes", selectedSortOption == "RELEVANCE") { selectedSortOption = "RELEVANCE" }
+                            FilterPill("Recentes", selectedSortOption == "RECENT") { selectedSortOption = "RECENT" }
+                            FilterPill("A-Z", selectedSortOption == "AZ") { selectedSortOption = "AZ" }
+                            FilterPill("Z-A", selectedSortOption == "ZA") { selectedSortOption = "ZA" }
+                            FilterPill("★ Nota", selectedSortOption == "RATING") { selectedSortOption = "RATING" }
+                        }
+                    }
+
+                    // GENERAL SELECT ALL CONTROL
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable {
+                                if (selectedItemIds.size == finalDisplayList.size && finalDisplayList.isNotEmpty()) {
+                                    selectedItemIds = emptySet()
+                                } else {
+                                    selectedItemIds = finalDisplayList.map { Pair(it.tmdbId, it.mediaType) }.toSet()
+                                }
+                            }
+                        ) {
+                            Checkbox(
+                                checked = selectedItemIds.isNotEmpty() && selectedItemIds.size == finalDisplayList.size && finalDisplayList.isNotEmpty(),
+                                onCheckedChange = { checked ->
+                                    if (checked) {
+                                        selectedItemIds = finalDisplayList.map { Pair(it.tmdbId, it.mediaType) }.toSet()
+                                    } else {
+                                        selectedItemIds = emptySet()
+                                    }
+                                },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = BrandRed,
+                                    uncheckedColor = Color.Gray,
+                                    checkmarkColor = Color.White
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Text(
+                                text = "Selecionar tudo nesta página",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        if (selectedItemIds.isNotEmpty()) {
                             TextButton(
-                                onClick = { adminViewModel.clearPreview() },
+                                onClick = { selectedItemIds = emptySet() },
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
                             ) {
-                                Text("Voltar para a Busca", color = BrandRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Limpar seleção", color = BrandRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(media.posterPath)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = media.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier
-                                    .width(70.dp)
-                                    .height(105.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.Black)
+                        } else {
+                            Text(
+                                text = "Mostrando ${finalDisplayList.size} itens",
+                                color = Color.Gray,
+                                fontSize = 11.sp
                             )
+                        }
+                    }
+                }
+            }
 
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Text(
-                                    text = media.title,
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+            // --- RESPONSIVE GRID DE CARDS ---
+            if (isLoadingRecent && finalDisplayList.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        RonycineSmileLoader(color = BrandRed, size = 32.dp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Buscando dados no TMDB...", color = Color.Gray, fontSize = 12.sp)
+                    }
+                }
+            } else if (finalDisplayList.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkSurface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.SearchOff, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Nenhum conteúdo encontrado para os filtros selecionados.", color = Color.Gray, fontSize = 13.sp)
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    items(finalDisplayList, key = { "${it.tmdbId}_${it.mediaType}" }) { item ->
+                        val itemKey = Pair(item.tmdbId, item.mediaType)
+                        val isSelected = selectedItemIds.contains(itemKey)
+                        val isImporting = activeImportingIds.contains(itemKey)
 
-                                if (media.originalTitle.isNotBlank() && media.originalTitle != media.title) {
-                                    Text(
-                                        text = media.originalTitle,
-                                        color = Color.Gray,
-                                        fontSize = 11.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    BadgeBox(
-                                        text = if (isMovie) "FILME" else "SÉRIE",
-                                        color = if (isMovie) BrandRed else Color(0xFF1976D2)
-                                    )
-                                    BadgeBox(text = "★ ${String.format(Locale.US, "%.1f", media.rating)}", color = Color(0xFFF57C00))
-                                    if (media.releaseYear.isNotBlank()) {
-                                        BadgeBox(text = media.releaseYear, color = Color.DarkGray)
+                        ModernImportGridCard(
+                            item = item,
+                            isSelected = isSelected,
+                            isImporting = isImporting,
+                            isSelectionMode = isSelectionModeActive,
+                            onToggleSelect = {
+                                selectedItemIds = if (isSelected) selectedItemIds - itemKey else selectedItemIds + itemKey
+                            },
+                            onImportClick = {
+                                if (item.isAlreadyInCatalog) {
+                                    if (onNavigateToMedia != null) {
+                                        onNavigateToMedia(item.tmdbId, item.mediaType)
+                                    } else {
+                                        adminViewModel.reimportOrUpdateSeries(item.tmdbId)
+                                    }
+                                } else {
+                                    activeImportingIds = activeImportingIds + itemKey
+                                    adminViewModel.importSingleDirect(
+                                        tmdbId = item.tmdbId,
+                                        mediaType = item.mediaType
+                                    ) { success, _ ->
+                                        activeImportingIds = activeImportingIds - itemKey
                                     }
                                 }
+                            },
+                            onNavigateToMedia = onNavigateToMedia
+                        )
+                    }
+                }
+            }
 
-                                if (media.genres.isNotBlank()) {
-                                    Text(
-                                        text = media.genres,
-                                        color = Color.LightGray,
-                                        fontSize = 10.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-
-                                Text(
-                                    text = media.overview.ifBlank { "Sem sinopse cadastrada no TMDB." },
-                                    color = Color.Gray,
-                                    fontSize = 11.sp,
-                                    maxLines = if (showFullOverview) 10 else 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.clickable { showFullOverview = !showFullOverview }
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        if (previewExists) {
-                            Surface(
-                                color = Color(0xFF3E2723),
-                                shape = RoundedCornerShape(6.dp),
-                                border = BorderStroke(1.dp, Color(0xFFFF8F00)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 8.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFFFFB300), modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = "✓ JÁ ESTÁ NO CATÁLOGO",
-                                        color = Color(0xFFFFE082),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-
-                        importStepMessage?.let { stepMsg ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            ) {
-                                RonycineSmileLoader(
-                                    color = BrandRed,
-                                    size = 14.dp
-                                )
+            // --- BARRA FIXA FLUTUANTE DE IMPORTAÇÃO EM MASSA ---
+            AnimatedVisibility(
+                visible = selectedItemIds.isNotEmpty(),
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                Surface(
+                    color = Color(0xFF1E1012),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.5.dp, BrandRed),
+                    shadowElevation = 12.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BrandRed, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text(text = stepMsg, color = Color.LightGray, fontSize = 11.sp)
+                                Text(
+                                    text = "${selectedItemIds.size} selecionados",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black
+                                )
                             }
+                            Text(
+                                text = "$selectedMoviesCount filmes • $selectedSeriesCount séries",
+                                color = Color.Gray,
+                                fontSize = 11.sp
+                            )
                         }
 
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (previewExists && onNavigateToMedia != null) {
-                                OutlinedButton(
-                                    onClick = { onNavigateToMedia(media.tmdbId, media.mediaType) },
-                                    shape = RoundedCornerShape(6.dp),
-                                    border = BorderStroke(1.dp, CardBorder),
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                    modifier = Modifier.height(36.dp)
-                                ) {
-                                    Text("Ver no Catálogo", color = Color.White, fontSize = 11.sp)
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
+                            OutlinedButton(
+                                onClick = { selectedItemIds = emptySet() },
+                                border = BorderStroke(1.dp, CardBorder),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Text("Limpar", color = Color.White, fontSize = 11.sp)
                             }
 
                             Button(
-                                onClick = {
-                                    if (!isRunning) {
-                                        if (previewExists) {
-                                            adminViewModel.reimportOrUpdateSeries(media.tmdbId)
-                                        } else {
-                                            adminViewModel.confirmImportSelectedMedia()
-                                        }
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (previewExists) Color(0xFFD84315) else BrandRed
-                                ),
-                                enabled = !isRunning,
-                                shape = RoundedCornerShape(6.dp),
+                                onClick = { showMassImportConfirmModal = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                                shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
                                 modifier = Modifier.height(36.dp)
                             ) {
-                                if (isRunning) {
-                                    RonycineSmileLoader(
-                                        color = Color.White,
-                                        size = 14.dp
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(text = importStepMessage ?: "Importando...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                } else {
-                                    Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text(
-                                        text = if (previewExists) "Atualizar no Catálogo" else "Importar Conteúdo",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Importar selecionados (${selectedItemIds.size})",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Black
+                                )
                             }
                         }
                     }
                 }
             }
-        } else if (searchResults.isNotEmpty()) {
-            item {
-                Text(
-                    text = "RESULTADOS DA PESQUISA (${searchResults.size}):",
-                    color = Color.Gray,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            items(searchResults) { result ->
-                SearchResultCompactCard(
-                    result = result,
-                    onSelect = {
-                        adminViewModel.selectTmdbIdForPreview(result.entity.tmdbId.toString(), result.entity.mediaType)
-                    }
-                )
-            }
         }
+    }
 
-        // --- SECTION: ✨ NOVIDADES PARA IMPORTAR ---
-        item {
-            Spacer(modifier = Modifier.height(8.dp))
+    // --- MODAL INTELIGENTE DE CONFIRMAÇÃO DE IMPORTAÇÃO EM MASSA ---
+    if (showMassImportConfirmModal) {
+        AlertDialog(
+            onDismissRequest = { showMassImportConfirmModal = false },
+            containerColor = DarkSurface,
+            titleContentColor = Color.White,
+            textContentColor = Color.LightGray,
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(Icons.Default.CloudSync, contentDescription = null, tint = BrandRed)
+                    Text("CONFIRMAÇÃO DE IMPORTAÇÃO", fontSize = 15.sp, fontWeight = FontWeight.Black)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Você selecionou ${selectedItemIds.size} conteúdos.",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+
+                    HorizontalDivider(color = CardBorder, thickness = 1.dp)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Já existem no catálogo:", fontSize = 12.sp, color = Color.Gray)
+                        Text("$selectedAlreadyInCatalogCount", fontWeight = FontWeight.Bold, color = Color(0xFFFFB300), fontSize = 12.sp)
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Disponíveis para importação:", fontSize = 12.sp, color = Color.Gray)
+                        Text("$selectedNewToImportCount", fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50), fontSize = 12.sp)
+                    }
+
+                    if (selectedAlreadyInCatalogCount > 0) {
+                        Text(
+                            text = "ℹ Os $selectedAlreadyInCatalogCount conteúdos que já existem serão mantidos sem duplicação.",
+                            color = Color.Gray,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val candidatesToImport = selectedList.filter { !it.isAlreadyInCatalog }
+                        if (candidatesToImport.isNotEmpty()) {
+                            adminViewModel.addMassCandidates(candidatesToImport.map { it.copy(selected = true) })
+                            adminViewModel.startMassImportForSelectedCandidates(ImportConfig(concurrentWorkers = 3))
+                        }
+                        selectedItemIds = emptySet()
+                        showMassImportConfirmModal = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                    shape = RoundedCornerShape(6.dp),
+                    enabled = selectedNewToImportCount > 0
+                ) {
+                    Text(
+                        text = if (selectedNewToImportCount > 0) "Importar $selectedNewToImportCount novos" else "Nada de novo para importar",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMassImportConfirmModal = false }) {
+                    Text("Cancelar", color = Color.Gray, fontSize = 12.sp)
+                }
+            }
+        )
+    }
+}
+
+// ============================================================================
+// COMPONENTE DO CARD PROFISSIONAL DO GRID (ESTRUTURA COMPACTA & ALTURA IGUAL)
+// ============================================================================
+
+@Composable
+fun MediaDetailsModal(
+    item: AdminViewModel.MassCandidateItem,
+    onDismiss: () -> Unit,
+    onImportClick: () -> Unit,
+    onNavigateToMedia: ((Int, String) -> Unit)?
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = DarkSurface,
+        titleContentColor = Color.White,
+        textContentColor = Color.LightGray,
+        title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = "✨ NOVIDADES PARA IMPORTAR",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Lançamentos recentes do TMDB que ainda não estão no catálogo",
-                        color = Color.Gray,
-                        fontSize = 11.sp
-                    )
-                }
-
-                // Filter pills
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    FilterBadge(label = "Todos", selected = recentFilter == "ALL") { recentFilter = "ALL" }
-                    FilterBadge(label = "Filmes", selected = recentFilter == "movie") { recentFilter = "movie" }
-                    FilterBadge(label = "Séries", selected = recentFilter == "tv") { recentFilter = "tv" }
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-        }
-
-        if (isLoadingRecent) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    RonycineSmileLoader(
-                        color = BrandRed,
-                        size = 32.dp
-                    )
-                }
-            }
-        } else if (filteredRecent.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(DarkSurface)
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Nenhuma novidade pendente encontrada.", color = Color.Gray, fontSize = 12.sp)
-                }
-            }
-        } else {
-            items(filteredRecent) { candidate ->
-                RecentCandidateCompactCard(
-                    candidate = candidate,
-                    onImportDirect = {
-                        adminViewModel.selectTmdbIdForPreview(candidate.tmdbId.toString(), candidate.mediaType)
-                    },
-                    onSelectForMass = {
-                        adminViewModel.selectTmdbIdForPreview(candidate.tmdbId.toString(), candidate.mediaType)
-                    }
+                Text(
+                    text = item.title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Fechar", tint = Color.Gray)
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(90.dp)
+                            .height(135.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black)
+                    ) {
+                        if (!item.posterPath.isNullOrBlank()) {
+                            AsyncImage(
+                                model = item.posterPath,
+                                contentDescription = item.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("SEM POSTER", color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            color = if (item.mediaType == "movie") BrandRed else Color(0xFF1976D2),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = if (item.mediaType == "movie") "FILME" else "SÉRIE",
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+
+                        if (item.year.isNotBlank()) {
+                            Text("Ano: ${item.year}", color = Color.White, fontSize = 12.sp)
+                        }
+                        Text("TMDB ID: #${item.tmdbId}", color = Color.Gray, fontSize = 11.sp)
+
+                        if (item.rating > 0) {
+                            Text("Nota: ⭐ ${String.format(Locale.US, "%.1f", item.rating)}", color = Color(0xFFFFA000), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        Surface(
+                            color = if (item.isAlreadyInCatalog) Color(0xFF1B5E20) else Color(0xFF0D47A1),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = if (item.isAlreadyInCatalog) "✓ No Catálogo" else "↓ Disponível para Importação",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                if (!item.overview.isNullOrBlank()) {
+                    HorizontalDivider(color = CardBorder, thickness = 1.dp)
+                    Text("SINOPSE:", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = item.overview,
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (item.isAlreadyInCatalog) {
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onNavigateToMedia?.invoke(item.tmdbId, item.mediaType)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Ver no Catálogo", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onImportClick()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Importar Conteúdo", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Fechar", color = Color.Gray, fontSize = 11.sp)
             }
         }
+    )
+}
+
+@Composable
+fun ModernImportGridCard(
+    item: AdminViewModel.MassCandidateItem,
+    isSelected: Boolean,
+    isImporting: Boolean,
+    isSelectionMode: Boolean,
+    onToggleSelect: () -> Unit,
+    onImportClick: () -> Unit,
+    onNavigateToMedia: ((Int, String) -> Unit)?
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    var showDetailsModal by remember { mutableStateOf(false) }
+    val isMovie = item.mediaType == "movie"
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) Color(0xFF1E1012) else Color(0xFF0F0F12)
+        ),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(
+            width = if (isSelected) 1.5.dp else 1.dp,
+            color = if (isSelected) BrandRed else CardBorder
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .wrapContentHeight()
+            .clickable {
+                if (isSelectionMode) {
+                    onToggleSelect()
+                } else {
+                    showDetailsModal = true
+                }
+            }
+            .testTag("import_card_${item.tmdbId}")
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // 1. POSTER AREA (Compact Vertical 2:3)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2f / 3f)
+                    .background(Color.Black)
+            ) {
+                if (!item.posterPath.isNullOrBlank()) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(item.posterPath)
+                            .crossfade(true)
+                            .size(200, 300) // Smaller cache size for performance in grid
+                            .build(),
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.ImageNotSupported, contentDescription = null, tint = Color.DarkGray, modifier = Modifier.size(20.dp))
+                    }
+                }
+
+                // Selection Overlay
+                if (isSelectionMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(if (isSelected) BrandRed.copy(alpha = 0.2f) else Color.Transparent)
+                    ) {
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = { onToggleSelect() },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = BrandRed,
+                                uncheckedColor = Color.White.copy(alpha = 0.7f),
+                                checkmarkColor = Color.White
+                            ),
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(2.dp)
+                                .scale(0.7f)
+                        )
+                    }
+                }
+
+                // Status Badge Overlay (Top Left)
+                if (item.isAlreadyInCatalog) {
+                    Surface(
+                        color = Color(0xFF1B5E20).copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(bottomEnd = 4.dp),
+                        modifier = Modifier.align(Alignment.TopStart)
+                    ) {
+                        Text(
+                            text = "✓",
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                }
+
+                // Type Badge (Top Right)
+                Surface(
+                    color = (if (isMovie) Color(0xFFE53935) else Color(0xFF1E88E5)).copy(alpha = 0.8f),
+                    shape = RoundedCornerShape(bottomStart = 4.dp),
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Text(
+                        text = if (isMovie) "FILME" else "SÉRIE",
+                        color = Color.White,
+                        fontSize = 7.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
+                }
+            }
+
+            // 2. METADATA AREA (Ultra Compact)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = item.title,
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (item.year.isNotBlank()) item.year else "S/A",
+                        color = Color.Gray,
+                        fontSize = 8.sp
+                    )
+                    if (item.rating > 0) {
+                        Text(
+                            text = "⭐ ${String.format(Locale.US, "%.1f", item.rating)}",
+                            color = Color(0xFFFFA000),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // Compact Action Button
+                if (isImporting) {
+                    Surface(
+                        color = Color(0xFF1A1A1A),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier.fillMaxWidth().height(26.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(10.dp), color = BrandRed, strokeWidth = 1.5.dp)
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = onImportClick,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (item.isAlreadyInCatalog) Color(0xFF26262E) else BrandRed
+                        ),
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier.fillMaxWidth().height(26.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(
+                            text = if (item.isAlreadyInCatalog) {
+                                if (!isMovie) "ATUALIZAR" else "DETALHES"
+                            } else "IMPORTAR",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    if (showDetailsModal) {
+        MediaDetailsModal(
+            item = item,
+            onDismiss = { showDetailsModal = false },
+            onImportClick = onImportClick,
+            onNavigateToMedia = onNavigateToMedia
+        )
+    }
+}
+
+// Sub-componentes visuais auxiliares
+@Composable
+fun TabBadge(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = if (selected) BrandRed else Color.Transparent,
+        shape = RoundedCornerShape(6.dp),
+        border = BorderStroke(1.dp, if (selected) BrandRed else CardBorder)
+    ) {
+        Text(
+            text = label,
+            color = if (selected) Color.White else Color.Gray,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+        )
+    }
+}
+
+@Composable
+fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        color = if (selected) BrandRed.copy(alpha = 0.25f) else Color.Transparent,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, if (selected) BrandRed else CardBorder.copy(alpha = 0.4f))
+    ) {
+        Text(
+            text = label,
+            color = if (selected) BrandRed else Color.Gray,
+            fontSize = 10.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
     }
 }
 
 // ============================================================================
-// 2. IMPORTAÇÃO EM MASSA
+// 2. IMPORTAÇÃO EM MASSA (MASS IMPORT)
 // ============================================================================
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -721,8 +1253,8 @@ fun MassImportSection(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
                     text = "📦 GERENCIADOR DE IMPORTAÇÃO EM MASSA",
@@ -731,11 +1263,11 @@ fun MassImportSection(
                     fontWeight = FontWeight.Bold
                 )
 
-                // Input para adicionar lista de IDs ou Nomes
+                // Input de lista de IDs TMDB
                 OutlinedTextField(
                     value = rawInputText,
                     onValueChange = { rawInputText = it },
-                    placeholder = { Text("Cole IDs TMDB separados por vírgula (ex: 550, 1399)...", color = Color.Gray, fontSize = 12.sp) },
+                    placeholder = { Text("Cole IDs TMDB separados por vírgula (ex: 550, 1399, 157336)...", color = Color.Gray, fontSize = 12.sp) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = Color.Black,
                         unfocusedContainerColor = Color.Black,
@@ -746,12 +1278,12 @@ fun MassImportSection(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 80.dp, max = 120.dp), // Height limited
+                        .heightIn(min = 70.dp, max = 110.dp),
                     shape = RoundedCornerShape(8.dp),
                     maxLines = 4
                 )
 
-                // Action Bar Responsiva
+                // Barra de Ações Responsiva
                 FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -801,12 +1333,11 @@ fun MassImportSection(
                         Text("Rem. Sel.", color = Color.Gray, fontSize = 11.sp, maxLines = 1)
                     }
 
-                    // Submit Mass Import Button
                     Button(
                         onClick = {
                             if (!isRunning && selectedCandidatesCount > 0) {
                                 adminViewModel.startMassImportForSelectedCandidates(
-                                    config = ImportConfig(concurrentWorkers = 2)
+                                    config = ImportConfig(concurrentWorkers = 3)
                                 )
                             }
                         },
@@ -831,7 +1362,7 @@ fun MassImportSection(
             }
         }
 
-        // Active Mass Job Progress Viewer if selected or running
+        // Card do Job Ativo de Importação em Massa
         if (selectedJobId != null && currentJob != null) {
             MassJobProgressCard(
                 job = currentJob!!,
@@ -843,14 +1374,14 @@ fun MassImportSection(
             )
         }
 
-        // Candidate Items Grid/List Header
+        // Header de Resultados da Fila
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "${candidates.size} resultados",
+                text = "${candidates.size} candidatos no lote",
                 color = Color.White,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
@@ -863,7 +1394,7 @@ fun MassImportSection(
             )
         }
 
-        // Candidate Items Grid
+        // Grid de Candidatos do Lote
         if (candidates.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -880,26 +1411,36 @@ fun MassImportSection(
                 }
             }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 110.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                items(candidates) { candidate ->
-                    MassCandidateCompactCard(
-                        candidate = candidate,
-                        onToggleSelect = {
-                            adminViewModel.toggleMassCandidateSelected(candidate.tmdbId, candidate.mediaType)
-                        }
-                    )
+            BoxWithConstraints(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                val screenWidth = maxWidth
+                val columns = when {
+                    screenWidth >= 1200.dp -> 6
+                    screenWidth >= 900.dp -> 5
+                    screenWidth >= 600.dp -> 4
+                    else -> 3
+                }
+
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(candidates) { candidate ->
+                        MassCandidateCompactCard(
+                            candidate = candidate,
+                            onToggleSelect = {
+                                adminViewModel.toggleMassCandidateSelected(candidate.tmdbId, candidate.mediaType)
+                            }
+                        )
+                    }
                 }
             }
         }
     }
 }
 
-// Card do Job Ativo de Importação em Massa
+// Card de Progresso do Job de Importação em Massa
 @Composable
 fun MassJobProgressCard(
     job: ImportJob,
@@ -938,7 +1479,7 @@ fun MassJobProgressCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "PROGRESSO DO LOTE #${job.id.takeLast(6)}",
+                        text = "LOTE #${job.id.takeLast(6)}",
                         color = Color.White,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
@@ -964,7 +1505,6 @@ fun MassJobProgressCard(
                 }
             }
 
-            // Real Progress Bar
             Text(
                 text = "IMPORTANDO ${job.processed} DE ${job.total} ITENS ($progressPercent%)",
                 color = Color.White,
@@ -973,7 +1513,7 @@ fun MassJobProgressCard(
             )
 
             LinearProgressIndicator(
-                progress = { job.processed.toFloat() / job.total.coerceAtLeast(1) },
+                progress = { (job.processed.toFloat() / job.total.coerceAtLeast(1)).coerceIn(0f, 1f) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp)
@@ -982,7 +1522,6 @@ fun MassJobProgressCard(
                 trackColor = Color.Black
             )
 
-            // Item status breakdown summary
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -991,52 +1530,12 @@ fun MassJobProgressCard(
                 Text("ℹ Duplicados: ${job.duplicates}", color = Color.Yellow, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Text("✕ Erros: ${job.failed}", color = BrandRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
-
-            // Realtime items status list
-            if (items.isNotEmpty()) {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 120.dp)
-                        .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                        .padding(6.dp)
-                ) {
-                    items(items.take(15)) { item ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "• ${item.mediaType.uppercase()} TMDB #${item.tmdbId} - ${item.title ?: "Processando..."}",
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            BadgeBox(
-                                text = item.status.uppercase(),
-                                color = when (item.status) {
-                                    "success" -> Color(0xFF2E7D32)
-                                    "duplicate" -> Color(0xFFF57F17)
-                                    "processing" -> Color(0xFF1565C0)
-                                    "failed" -> Color(0xFFC62828)
-                                    else -> Color.DarkGray
-                                }
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
 }
 
 // ============================================================================
-// 3. MGEB API IMPORT
+// 3. IMPORTAÇÃO MGEB API
 // ============================================================================
 
 @Composable
@@ -1045,15 +1544,22 @@ fun MgebImportSection(
     typeFilter: String
 ) {
     val candidates by adminViewModel.mgebCandidates.collectAsState()
+    val newCandidates by adminViewModel.mgebNewCandidates.collectAsState()
+    val existingCandidates by adminViewModel.mgebExistingCandidates.collectAsState()
     val isMgebLoading by adminViewModel.isMgebLoading.collectAsState()
     val mgebSearchQuery by adminViewModel.mgebSearchQuery.collectAsState()
 
     val mgebPage by adminViewModel.mgebPage.collectAsState()
     val mgebTotalPages by adminViewModel.mgebTotalPages.collectAsState()
     val mgebTotalCount by adminViewModel.mgebTotalCount.collectAsState()
+    val mgebMoviesCount by adminViewModel.mgebMoviesCount.collectAsState()
+    val mgebSeriesCount by adminViewModel.mgebSeriesCount.collectAsState()
+    val mgebInCatalogCount by adminViewModel.mgebInCatalogCount.collectAsState()
+    val mgebNewCount by adminViewModel.mgebNewCount.collectAsState()
+    val mgebStatusFilter by adminViewModel.mgebStatusFilter.collectAsState()
+    val mgebTypeFilter by adminViewModel.mgebTypeFilter.collectAsState()
     val mgebSelectedIds by adminViewModel.mgebSelectedIds.collectAsState()
 
-    // Sync parental typeFilter to ViewModel dynamically
     LaunchedEffect(typeFilter) {
         adminViewModel.setMgebTypeFilter(typeFilter)
     }
@@ -1062,12 +1568,147 @@ fun MgebImportSection(
         adminViewModel.loadMgebCatalog()
     }
 
-    // Identify visible items for selection calculations
     val visiblePairs = remember(candidates) {
         candidates.map { Pair(it.entity.tmdbId, it.entity.mediaType) }
     }
     val selectedVisibleCount = remember(mgebSelectedIds, visiblePairs) {
         visiblePairs.count { mgebSelectedIds.contains(it) }
+    }
+
+    var detailModalItem by remember { mutableStateOf<TmdbSearchResultItem?>(null) }
+
+    detailModalItem?.let { selectedItem ->
+        AlertDialog(
+            onDismissRequest = { detailModalItem = null },
+            containerColor = DarkSurface,
+            title = {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = selectedItem.entity.title,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { detailModalItem = null },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Fechar", tint = Color.Gray)
+                    }
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        val poster = selectedItem.entity.posterPath
+                        if (!poster.isNullOrBlank()) {
+                            AsyncImage(
+                                model = if (poster.startsWith("http")) poster else "https://image.tmdb.org/t/p/w342$poster",
+                                contentDescription = selectedItem.entity.title,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .width(80.dp)
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.Black)
+                            )
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "TMDB ID: #${selectedItem.entity.tmdbId}",
+                                color = BrandRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Tipo: ${if (selectedItem.entity.mediaType == "movie") "Filme" else "Série"}",
+                                color = Color.White,
+                                fontSize = 11.sp
+                            )
+                            if (!selectedItem.entity.releaseYear.isNullOrBlank()) {
+                                Text(
+                                    text = "Ano: ${selectedItem.entity.releaseYear}",
+                                    color = Color.LightGray,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            if (selectedItem.entity.rating > 0.0) {
+                                Text(
+                                    text = "Avaliação: ★ ${String.format(Locale.US, "%.1f", selectedItem.entity.rating)}",
+                                    color = Color(0xFFFFB300),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Text(
+                                text = if (selectedItem.isAlreadyInCatalog) "✓ Já está no catálogo" else "✨ Disponível para importar",
+                                color = if (selectedItem.isAlreadyInCatalog) Color(0xFF81C784) else BrandRed,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (!selectedItem.entity.overview.isNullOrBlank()) {
+                        Text(
+                            text = "Sinopse:",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = selectedItem.entity.overview ?: "",
+                            color = Color.LightGray,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (!selectedItem.isAlreadyInCatalog) {
+                    Button(
+                        onClick = {
+                            detailModalItem = null
+                            adminViewModel.importSingleDirect(selectedItem.entity.tmdbId, selectedItem.entity.mediaType)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text("Importar Agora", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = { detailModalItem = null },
+                    shape = RoundedCornerShape(6.dp),
+                    border = BorderStroke(1.dp, CardBorder),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                ) {
+                    Text("Fechar", fontSize = 11.sp)
+                }
+            }
+        )
     }
 
     val mainCheckboxState = remember(selectedVisibleCount, visiblePairs.size) {
@@ -1079,24 +1720,21 @@ fun MgebImportSection(
         }
     }
 
-    val onMainCheckboxClick = {
-        val selectAll = mainCheckboxState != ToggleableState.On
-        adminViewModel.toggleMgebPageSelection(visiblePairs, selectAll)
-    }
-
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // --- FILTERS & SEARCH ROW ---
+        // --- 1. CABEÇALHO PROFISSIONAL DA ÁREA MGE API ---
         Card(
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
             border = BorderStroke(1.dp, CardBorder),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
@@ -1104,42 +1742,153 @@ fun MgebImportSection(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "🌐 EXPLORAR CATÁLOGO MGEB API",
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                    
-                    if (isMgebLoading) {
-                        RonycineSmileLoader(
-                            color = BrandRed,
-                            size = 16.dp
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                color = BrandRed.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp),
+                                border = BorderStroke(1.dp, BrandRed.copy(alpha = 0.4f)),
+                                modifier = Modifier.padding(end = 8.dp)
+                            ) {
+                                Text(
+                                    text = "MGE API",
+                                    color = BrandRed,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Black,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Text(
+                                text = "IMPORTAR CONTEÚDO",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = "Importe filmes e séries disponíveis no MGE sem duplicar conteúdos que já existem no catálogo.",
+                            color = Color.Gray,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
                         )
+                    }
+
+                    if (isMgebLoading) {
+                        RonycineSmileLoader(color = BrandRed, size = 18.dp)
                     } else {
                         IconButton(
                             onClick = { adminViewModel.loadMgebCatalog(forceRefresh = true) },
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier
+                                .size(32.dp)
+                                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                .border(1.dp, CardBorder, CircleShape)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Recarregar", tint = Color.Gray, modifier = Modifier.size(18.dp))
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Recarregar catálogo MGE",
+                                tint = Color.LightGray,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
                 }
 
-                Text(
-                    text = "Busca direta no catálogo remoto Mgeb (Dublado). Selecione múltiplos itens e clique no botão de importação em lote.",
-                    color = Color.Gray,
-                    fontSize = 11.sp
-                )
+                HorizontalDivider(color = CardBorder.copy(alpha = 0.6f))
 
+                // --- 2. INDICADORES COMPACTOS REAIS E DINÂMICOS ---
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    MgeStatChip(
+                        icon = Icons.Default.Language,
+                        label = "MGE disponível",
+                        value = "$mgebTotalCount",
+                        accentColor = Color(0xFF64B5F6)
+                    )
+                    MgeStatChip(
+                        icon = Icons.Default.Movie,
+                        label = "Filmes encontrados",
+                        value = "$mgebMoviesCount",
+                        accentColor = Color(0xFFFFB74D)
+                    )
+                    MgeStatChip(
+                        icon = Icons.Default.Tv,
+                        label = "Séries encontradas",
+                        value = "$mgebSeriesCount",
+                        accentColor = Color(0xFFBA68C8)
+                    )
+                    MgeStatChip(
+                        icon = Icons.Default.CheckCircle,
+                        label = "Já no catálogo",
+                        value = "$mgebInCatalogCount",
+                        accentColor = Color(0xFF81C784)
+                    )
+                    MgeStatChip(
+                        icon = Icons.Default.AutoAwesome,
+                        label = "Novos disponíveis",
+                        value = "$mgebNewCount",
+                        accentColor = BrandRed
+                    )
+                    if (mgebSelectedIds.isNotEmpty()) {
+                        MgeStatChip(
+                            icon = Icons.Default.Checklist,
+                            label = "Selecionados",
+                            value = "${mgebSelectedIds.size}",
+                            accentColor = Color(0xFFFFD54F)
+                        )
+                    }
+                }
+            }
+        }
+
+        // --- 3. ABAS MODERNAS DE TIPO (Todos / Filmes / Séries) ---
+        Surface(
+            color = DarkSurface,
+            shape = RoundedCornerShape(10.dp),
+            border = BorderStroke(1.dp, CardBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    MgeTabButton(
+                        icon = Icons.Default.GridView,
+                        label = "Todos ($mgebTotalCount)",
+                        selected = mgebTypeFilter == "ALL",
+                        onClick = { adminViewModel.setMgebTypeFilter("ALL") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    MgeTabButton(
+                        icon = Icons.Default.Movie,
+                        label = "Filmes ($mgebMoviesCount)",
+                        selected = mgebTypeFilter == "movie",
+                        onClick = { adminViewModel.setMgebTypeFilter("movie") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    MgeTabButton(
+                        icon = Icons.Default.Tv,
+                        label = "Séries ($mgebSeriesCount)",
+                        selected = mgebTypeFilter == "tv",
+                        onClick = { adminViewModel.setMgebTypeFilter("tv") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // --- 4. CAMPO DE PESQUISA FUNCIONAL & FILTROS DE STATUS ---
                 OutlinedTextField(
                     value = mgebSearchQuery,
                     onValueChange = { adminViewModel.onMgebSearchQueryChanged(it) },
-                    placeholder = { Text("Pesquisar por ID ou título...", color = Color.Gray, fontSize = 12.sp) },
+                    placeholder = { Text("🔎 Pesquisar por título ou TMDB ID...", color = Color.Gray, fontSize = 12.sp) },
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = Color.Black,
-                        unfocusedContainerColor = Color.Black,
+                        unfocusedContainerColor = Color.Black.copy(alpha = 0.7f),
                         focusedBorderColor = BrandRed,
                         unfocusedBorderColor = CardBorder,
                         focusedTextColor = Color.White,
@@ -1147,25 +1896,355 @@ fun MgebImportSection(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp),
+                        .height(46.dp),
                     shape = RoundedCornerShape(8.dp),
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(18.dp)) }
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(18.dp))
+                    },
+                    trailingIcon = {
+                        if (mgebSearchQuery.isNotEmpty()) {
+                            IconButton(onClick = { adminViewModel.onMgebSearchQueryChanged("") }) {
+                                Icon(Icons.Default.Close, contentDescription = "Limpar busca", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
                 )
+
+                // Sub-filtros: Todos / Apenas Novos / No Catálogo
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(
+                        selected = mgebStatusFilter == "ALL",
+                        onClick = { adminViewModel.setMgebStatusFilter("ALL") },
+                        label = { Text("Todos", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = BrandRed.copy(alpha = 0.2f),
+                            selectedLabelColor = Color.White,
+                            containerColor = Color.Black.copy(alpha = 0.4f),
+                            labelColor = Color.Gray
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            borderColor = if (mgebStatusFilter == "ALL") BrandRed else CardBorder,
+                            enabled = true,
+                            selected = mgebStatusFilter == "ALL"
+                        )
+                    )
+                    FilterChip(
+                        selected = mgebStatusFilter == "NEW_ONLY",
+                        onClick = { adminViewModel.setMgebStatusFilter("NEW_ONLY") },
+                        label = { Text("✨ Apenas Novos ($mgebNewCount)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF1B5E20).copy(alpha = 0.3f),
+                            selectedLabelColor = Color.Green,
+                            containerColor = Color.Black.copy(alpha = 0.4f),
+                            labelColor = Color.Gray
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            borderColor = if (mgebStatusFilter == "NEW_ONLY") Color(0xFF4CAF50) else CardBorder,
+                            enabled = true,
+                            selected = mgebStatusFilter == "NEW_ONLY"
+                        )
+                    )
+                    FilterChip(
+                        selected = mgebStatusFilter == "IN_CATALOG_ONLY",
+                        onClick = { adminViewModel.setMgebStatusFilter("IN_CATALOG_ONLY") },
+                        label = { Text("✓ No Catálogo ($mgebInCatalogCount)", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = Color(0xFF37474F).copy(alpha = 0.4f),
+                            selectedLabelColor = Color.LightGray,
+                            containerColor = Color.Black.copy(alpha = 0.4f),
+                            labelColor = Color.Gray
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            borderColor = if (mgebStatusFilter == "IN_CATALOG_ONLY") Color(0xFF78909C) else CardBorder,
+                            enabled = true,
+                            selected = mgebStatusFilter == "IN_CATALOG_ONLY"
+                        )
+                    )
+                }
+
+                // --- 5. AÇÕES DE SELEÇÃO RÁPIDA ---
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(
+                            onClick = { adminViewModel.selectOnlyNewMgeb() },
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, Color(0xFF4CAF50).copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF81C784)),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Selecionar Novos", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val selectAll = mainCheckboxState != ToggleableState.On
+                                adminViewModel.toggleMgebPageSelection(visiblePairs, selectAll)
+                            },
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, CardBorder),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text(
+                                text = if (mainCheckboxState == ToggleableState.On) "Desmarcar Página" else "Marcar Página",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    if (mgebSelectedIds.isNotEmpty()) {
+                        TextButton(
+                            onClick = { adminViewModel.clearMgebSelection() },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Text("Limpar (${mgebSelectedIds.size})", color = Color.Gray, fontSize = 10.sp)
+                        }
+                    }
+                }
             }
         }
 
-        // --- STICKY / COMPACT ACTION BAR (Appears dynamically if any selected) ---
-        AnimatedVisibility(
-            visible = mgebSelectedIds.isNotEmpty(),
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
-        ) {
+        // --- 6. ACTION BAR FIXA QUANDO HOUVER ITENS SELECIONADOS ---
+        AnimatedVisibility(visible = mgebSelectedIds.isNotEmpty()) {
+            Surface(
+                color = Color(0xFF1B1113),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.5.dp, BrandRed),
+                shadowElevation = 8.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(BrandRed, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "${mgebSelectedIds.size} selecionados",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                        Text(
+                            text = "Prontos para importação em lote",
+                            color = Color.Gray,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { adminViewModel.clearMgebSelection() },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.LightGray),
+                            border = BorderStroke(1.dp, CardBorder),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Text("Limpar", fontSize = 11.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                adminViewModel.startMgebSelectedImport {}
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.height(36.dp)
+                        ) {
+                            Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "IMPORTAR (${mgebSelectedIds.size})",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 7. APRESENTAÇÃO INTELIGENTE DOS RESULTADOS (NOVOS PRIMEIRO, DEPOIS CATÁLOGO) ---
+        if (isMgebLoading && candidates.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(260.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    RonycineSmileLoader(color = BrandRed, size = 32.dp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Carregando catálogo da MGE API...", color = Color.Gray, fontSize = 12.sp)
+                }
+            }
+        } else if (candidates.isEmpty()) {
             Surface(
                 color = DarkSurface,
-                shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, BrandRed.copy(alpha = 0.5f)),
-                modifier = Modifier.fillMaxWidth(),
-                shadowElevation = 8.dp
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, CardBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(modifier = Modifier.padding(24.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = if (mgebSearchQuery.isNotEmpty()) "Nenhum resultado encontrado para \"$mgebSearchQuery\"." else "Nenhum conteúdo disponível nesta categoria.",
+                        color = Color.Gray,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        } else {
+            // SEÇÃO 1: NOVOS PARA IMPORTAR (PRIORIDADE)
+            if (newCandidates.isNotEmpty()) {
+                Surface(
+                    color = Color(0xFF121A14),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, Color(0xFF2E7D32).copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color(0xFF81C784),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "NOVOS PARA IMPORTAR",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                        Surface(
+                            color = Color(0xFF2E7D32),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                text = "${newCandidates.size} novos",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                MgebCandidateGrid(
+                    items = newCandidates,
+                    selectedIds = mgebSelectedIds,
+                    onToggle = { tmdbId, type ->
+                        adminViewModel.toggleMgebSelection(tmdbId, type)
+                    },
+                    onImportSingle = { item ->
+                        adminViewModel.importSingleDirect(item.entity.tmdbId, item.entity.mediaType)
+                    },
+                    onShowDetail = { item ->
+                        detailModalItem = item
+                    }
+                )
+            }
+
+            // SEÇÃO 2: JÁ ESTÃO NO CATÁLOGO (FINAL DA LISTA)
+            if (existingCandidates.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Surface(
+                    color = Color(0xFF16181C),
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, CardBorder),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF90A4AE),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "JÁ ESTÃO NO CATÁLOGO",
+                                color = Color.LightGray,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Surface(
+                            color = Color(0xFF37474F),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                text = "${existingCandidates.size} no catálogo",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                MgebCandidateGrid(
+                    items = existingCandidates,
+                    selectedIds = mgebSelectedIds,
+                    onToggle = { tmdbId, type ->
+                        adminViewModel.toggleMgebSelection(tmdbId, type)
+                    },
+                    onImportSingle = { item ->
+                        adminViewModel.importSingleDirect(item.entity.tmdbId, item.entity.mediaType)
+                    },
+                    onShowDetail = { item ->
+                        detailModalItem = item
+                    }
+                )
+            }
+
+            // --- 8. PAGINAÇÃO MODERNA E COMPACTA ---
+            Surface(
+                color = DarkSurface,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, CardBorder),
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Row(
                     modifier = Modifier
@@ -1174,274 +2253,141 @@ fun MgebImportSection(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    OutlinedButton(
+                        onClick = { adminViewModel.setMgebPage(mgebPage - 1) },
+                        enabled = mgebPage > 1,
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, CardBorder),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        modifier = Modifier.height(32.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = BrandRed,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = "${mgebSelectedIds.size} selecionados",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Icon(Icons.Default.ChevronLeft, contentDescription = "Anterior", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text("Anterior", fontSize = 11.sp)
                     }
 
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Text(
+                        text = "Página $mgebPage de $mgebTotalPages",
+                        color = Color.LightGray,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    OutlinedButton(
+                        onClick = { adminViewModel.setMgebPage(mgebPage + 1) },
+                        enabled = mgebPage < mgebTotalPages,
+                        shape = RoundedCornerShape(6.dp),
+                        border = BorderStroke(1.dp, CardBorder),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                        modifier = Modifier.height(32.dp)
                     ) {
-                        TextButton(
-                            onClick = { adminViewModel.clearMgebSelection() },
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text("Limpar", color = Color.Gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-
-                        var showConfirmModal by remember { mutableStateOf(false) }
-                        var selectionSummary by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) } // total, novos, existentes
-
-                        Button(
-                            onClick = {
-                                adminViewModel.getMgebSelectionSummary { total, novos, existentes ->
-                                    selectionSummary = Triple(total, novos, existentes)
-                                    showConfirmModal = true
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                            shape = RoundedCornerShape(6.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = "IMPORTAR ${mgebSelectedIds.size}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-
-                        // Confirmation Modal
-                        if (showConfirmModal && selectionSummary != null) {
-                            val (total, novos, existentes) = selectionSummary!!
-                            AlertDialog(
-                                onDismissRequest = { showConfirmModal = false },
-                                containerColor = DarkSurface,
-                                titleContentColor = Color.White,
-                                textContentColor = Color.LightGray,
-                                title = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Icon(Icons.Default.CloudSync, contentDescription = null, tint = BrandRed)
-                                        Text("CONFIRMAR IMPORTAÇÃO", fontSize = 15.sp, fontWeight = FontWeight.Black)
-                                    }
-                                },
-                                text = {
-                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        Text("Origem dos dados: MGEB API", fontSize = 11.sp, color = Color.Gray)
-                                        HorizontalDivider(color = CardBorder, thickness = 1.dp)
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text("Total selecionados:", fontSize = 12.sp)
-                                            Text("$total", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 12.sp)
-                                        }
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text("Novos conteúdos:", fontSize = 12.sp)
-                                            Text("$novos", fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50), fontSize = 12.sp)
-                                        }
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text("Já no catálogo (serão ignorados):", fontSize = 12.sp)
-                                            Text("$existentes", fontWeight = FontWeight.Bold, color = Color.Gray, fontSize = 12.sp)
-                                        }
-                                    }
-                                },
-                                confirmButton = {
-                                    Button(
-                                        onClick = {
-                                            adminViewModel.startMgebSelectedImport {
-                                                showConfirmModal = false
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                                        shape = RoundedCornerShape(4.dp),
-                                        enabled = novos > 0
-                                    ) {
-                                        Text("IMPORTAR $novos", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = { showConfirmModal = false }) {
-                                        Text("CANCELAR", color = Color.Gray, fontSize = 11.sp)
-                                    }
-                                }
-                            )
-                        }
+                        Text("Próxima", fontSize = 11.sp)
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Icon(Icons.Default.ChevronRight, contentDescription = "Próxima", modifier = Modifier.size(16.dp))
                     }
                 }
             }
         }
+    }
+}
 
-        // --- TOP SELECT ALL CONTROL HEADER ---
+@Composable
+fun MgeStatChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: String,
+    accentColor: Color
+) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(8.dp),
+        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.35f))
+    ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                TriStateCheckbox(
-                    state = mainCheckboxState,
-                    onClick = onMainCheckboxClick,
-                    colors = CheckboxDefaults.colors(
-                        checkedColor = BrandRed,
-                        uncheckedColor = Color.Gray,
-                        checkmarkColor = Color.White
-                    )
-                )
-                Text(
-                    text = "SELECIONAR TUDO",
-                    color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable { onMainCheckboxClick() }
-                )
-                
-                Text(
-                    text = "• ${visiblePairs.size} itens nesta página",
-                    color = Color.Gray,
-                    fontSize = 10.sp
-                )
+            Icon(icon, contentDescription = null, tint = accentColor, modifier = Modifier.size(14.dp))
+            Column {
+                Text(text = label, color = Color.Gray, fontSize = 9.sp, fontWeight = FontWeight.Medium)
+                Text(text = value, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Black)
             }
-            
+        }
+    }
+}
+
+@Composable
+fun MgeTabButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        color = if (selected) BrandRed else Color.Black.copy(alpha = 0.4f),
+        shape = RoundedCornerShape(6.dp),
+        border = BorderStroke(1.dp, if (selected) BrandRed else CardBorder),
+        modifier = modifier.height(34.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (selected) Color.White else Color.Gray,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
             Text(
-                text = "$mgebTotalCount resultados",
-                color = Color.Gray,
+                text = label,
+                color = if (selected) Color.White else Color.LightGray,
                 fontSize = 11.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = if (selected) FontWeight.Black else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
+    }
+}
 
-        // --- GLOBAL SELECT ALL BANNER ---
-        if (mainCheckboxState == ToggleableState.On && mgebSelectedIds.size < mgebTotalCount) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(BrandRed.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Todos os ${visiblePairs.size} itens desta página estão selecionados.",
-                    color = Color.LightGray,
-                    fontSize = 11.sp
-                )
-                Text(
-                    text = "Selecionar todos os $mgebTotalCount resultados",
-                    color = BrandRed,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black,
-                    modifier = Modifier
-                        .clickable { adminViewModel.selectAllMgebResults() }
-                        .padding(vertical = 2.dp)
-                )
-            }
+@Composable
+fun MgebCandidateGrid(
+    items: List<TmdbSearchResultItem>,
+    selectedIds: Set<Pair<Int, String>>,
+    onToggle: (Int, String) -> Unit,
+    onImportSingle: (TmdbSearchResultItem) -> Unit,
+    onShowDetail: (TmdbSearchResultItem) -> Unit
+) {
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val screenWidth = maxWidth
+        val columns = when {
+            screenWidth >= 1200.dp -> 6
+            screenWidth >= 900.dp -> 5
+            screenWidth >= 600.dp -> 4
+            else -> 3
         }
 
-        // --- DATA VISUALIZATION GRID ---
-        if (isMgebLoading && candidates.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    RonycineSmileLoader(
-                        color = BrandRed,
-                        size = 32.dp
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("Carregando catálogo da API...", color = Color.Gray)
-                }
-            }
-        } else {
-            if (candidates.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Nenhum conteúdo encontrado na Mgeb para este filtro.", color = Color.Gray)
-                }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 100.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    items(candidates, key = { "${it.entity.tmdbId}_${it.entity.mediaType}" }) { item ->
-                        val isSelected = mgebSelectedIds.contains(Pair(item.entity.tmdbId, item.entity.mediaType))
-                        
-                        MgebCandidateCard(
-                            item = item,
-                            isSelected = isSelected,
-                            onToggle = {
-                                adminViewModel.toggleMgebSelection(item.entity.tmdbId, item.entity.mediaType)
-                            }
-                        )
-                    }
-                }
-
-                // --- PAGINATION FOOTER ROW ---
-                if (mgebTotalPages > 1) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = { adminViewModel.setMgebPage(mgebPage - 1) },
-                            enabled = mgebPage > 1
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ChevronLeft,
-                                contentDescription = "Página Anterior",
-                                tint = if (mgebPage > 1) Color.White else Color.DarkGray
-                            )
-                        }
-
-                        Text(
-                            text = "Página $mgebPage de $mgebTotalPages",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-
-                        IconButton(
-                            onClick = { adminViewModel.setMgebPage(mgebPage + 1) },
-                            enabled = mgebPage < mgebTotalPages
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ChevronRight,
-                                contentDescription = "Próxima Página",
-                                tint = if (mgebPage < mgebTotalPages) Color.White else Color.DarkGray
-                            )
-                        }
-                    }
-                }
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(max = 2000.dp) // Bound height for verticalScroll parent
+        ) {
+            items(items, key = { "${it.entity.tmdbId}_${it.entity.mediaType}" }) { item ->
+                val isSelected = selectedIds.contains(Pair(item.entity.tmdbId, item.entity.mediaType))
+                MgebCandidateCard(
+                    item = item,
+                    isSelected = isSelected,
+                    onToggle = { onToggle(item.entity.tmdbId, item.entity.mediaType) },
+                    onImportSingle = { onImportSingle(item) },
+                    onShowDetail = { onShowDetail(item) }
+                )
             }
         }
     }
@@ -1451,108 +2397,142 @@ fun MgebImportSection(
 fun MgebCandidateCard(
     item: TmdbSearchResultItem,
     isSelected: Boolean,
-    onToggle: () -> Unit
+    onToggle: () -> Unit,
+    onImportSingle: () -> Unit,
+    onShowDetail: () -> Unit
 ) {
+    val isMovie = item.entity.mediaType == "movie"
+    val isInCatalog = item.isAlreadyInCatalog
+
     Card(
         onClick = onToggle,
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) Color(0xFF1E1012) else DarkSurface
+            containerColor = when {
+                isSelected -> Color(0xFF2A1014)
+                isInCatalog -> Color(0xFF141518)
+                else -> DarkSurface
+            }
         ),
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(
             width = if (isSelected) 1.5.dp else 1.dp,
-            color = if (isSelected) BrandRed else if (item.isAlreadyInCatalog) Color.Gray.copy(alpha = 0.3f) else CardBorder
+            color = when {
+                isSelected -> BrandRed
+                isInCatalog -> Color(0xFF2E3440)
+                else -> CardBorder
+            }
         ),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(2.dp)
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(6.dp),
+            modifier = Modifier.padding(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            val poster = item.entity.posterPath
+            val releaseYear = item.entity.releaseYear
+
             Box(modifier = Modifier.fillMaxWidth()) {
-                AsyncImage(
-                    model = if (item.entity.posterPath?.isNotBlank() == true) item.entity.posterPath else null,
-                    contentDescription = item.entity.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(2f / 3f)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color.Black)
-                )
-                
-                if (item.entity.posterPath.isNullOrBlank()) {
-                    Box(modifier = Modifier.matchParentSize(), contentAlignment = Alignment.Center) {
+                if (!poster.isNullOrBlank()) {
+                    AsyncImage(
+                        model = if (poster.startsWith("http")) poster else "https://image.tmdb.org/t/p/w342$poster",
+                        contentDescription = item.entity.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(2f / 3f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.Black)
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(2f / 3f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF181820)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.ImageNotSupported, contentDescription = null, tint = Color.DarkGray)
-                            Text(text = "ID #${item.entity.tmdbId}", color = Color.Gray, fontSize = 9.sp)
+                            Icon(
+                                imageVector = if (isMovie) Icons.Default.Movie else Icons.Default.Tv,
+                                contentDescription = null,
+                                tint = Color.DarkGray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "ID #${item.entity.tmdbId}",
+                                color = Color.Gray,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
 
-                // Checkbox inside card, top-right
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .background(Color.Black.copy(alpha = 0.7f), CircleShape)
-                        .size(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Checkbox(
-                        checked = isSelected,
-                        onCheckedChange = { onToggle() },
-                        colors = CheckboxDefaults.colors(
-                            checkedColor = BrandRed,
-                            uncheckedColor = Color.LightGray.copy(alpha = 0.8f),
-                            checkmarkColor = Color.White
-                        ),
-                        modifier = Modifier.scale(0.7f)
-                    )
-                }
-                
-                if (item.isAlreadyInCatalog) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth()
-                            .background(Color.Black.copy(alpha = 0.8f))
-                            .padding(vertical = 3.dp),
-                        contentAlignment = Alignment.Center
+                // Status Badge Overlay (Top Left)
+                if (isInCatalog) {
+                    Surface(
+                        color = Color(0xFF1B5E20).copy(alpha = 0.9f),
+                        shape = RoundedCornerShape(bottomEnd = 4.dp),
+                        modifier = Modifier.align(Alignment.TopStart)
                     ) {
-                        Text("JÁ EXISTE", color = Color(0xFF4CAF50), fontSize = 8.sp, fontWeight = FontWeight.Black)
+                        Text(
+                            text = "✓",
+                            color = Color.White,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
                     }
+                }
+
+                // Type Badge (Top Right)
+                Surface(
+                    color = (if (isMovie) Color(0xFFE53935) else Color(0xFF1E88E5)).copy(alpha = 0.8f),
+                    shape = RoundedCornerShape(bottomStart = 4.dp),
+                    modifier = Modifier.align(Alignment.TopEnd)
+                ) {
+                    Text(
+                        text = if (isMovie) "FILME" else "SÉRIE",
+                        color = Color.White,
+                        fontSize = 7.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = item.entity.title,
-                color = Color.White,
-                fontSize = 11.sp,
+                color = if (isInCatalog) Color.Gray else Color.White,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
             )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = item.entity.mediaType.uppercase(),
-                    color = if (item.entity.mediaType == "movie") BrandRed else Color(0xFF1976D2),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Black
+                    text = if (!releaseYear.isNullOrBlank()) releaseYear else "S/A",
+                    color = Color.Gray,
+                    fontSize = 8.sp
                 )
-                if (item.entity.releaseYear.isNotBlank()) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "• ${item.entity.releaseYear}", color = Color.Gray, fontSize = 9.sp)
+                if (item.entity.rating > 0.0) {
+                    Text(
+                        text = "⭐ ${String.format(Locale.US, "%.1f", item.entity.rating)}",
+                        color = Color(0xFFFFB300),
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -1560,7 +2540,7 @@ fun MgebCandidateCard(
 }
 
 // ============================================================================
-// 4. IMPORTAÇÃO AUTOMÁTICA TMDB
+// 4. IMPORTAÇÃO AUTOMÁTICA
 // ============================================================================
 
 @Composable
@@ -1575,7 +2555,6 @@ fun AutoImportSection(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Card Principal de Status e Configuração Automática
         Card(
             colors = CardDefaults.cardColors(containerColor = DarkSurface),
             shape = RoundedCornerShape(12.dp),
@@ -1592,16 +2571,14 @@ fun AutoImportSection(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = if (autoSyncConfig.enabled) "🟢 AUTOMAÇÃO TMDB: ATIVADA" else "⚪ AUTOMAÇÃO TMDB: DESATIVADA",
-                                color = if (autoSyncConfig.enabled) Color.Green else Color.Gray,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
                         Text(
-                            text = "Importação e verificação em segundo plano (Sincronização persistente)",
+                            text = if (autoSyncConfig.enabled) "🟢 AUTOMAÇÃO TMDB: ATIVADA" else "⚪ AUTOMAÇÃO TMDB: DESATIVADA",
+                            color = if (autoSyncConfig.enabled) Color.Green else Color.Gray,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                        Text(
+                            text = "Importação e verificação automática em segundo plano",
                             color = Color.Gray,
                             fontSize = 11.sp
                         )
@@ -1617,200 +2594,23 @@ fun AutoImportSection(
                     )
                 }
 
-                Divider(color = CardBorder)
+                HorizontalDivider(color = CardBorder)
 
-                // Frequência de Execução
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Frequência da Automação:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(0 to "Desativado", 1 to "1h", 6 to "6h", 12 to "12h", 24 to "24h").forEach { (hours, label) ->
-                            FilterBadge(
-                                label = label,
-                                selected = autoSyncConfig.frequencyHours == hours,
-                                onClick = { adminViewModel.updateTmdbAutoSyncFrequency(hours) }
-                            )
-                        }
-                    }
-                }
-
-                // Limite por Execução
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Limite de Conteúdos por Sessão:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(5, 10, 20, 50).forEach { limit ->
-                            FilterBadge(
-                                label = "$limit itens",
-                                selected = autoSyncConfig.maxItemsPerSync == limit,
-                                onClick = { adminViewModel.updateTmdbAutoSyncMaxItems(limit) }
-                            )
-                        }
-                    }
-                }
-
-                // Critério de Seleção
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Critério de Seleção no TMDB:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(
-                            "trending" to "Tendências",
-                            "releases" to "Lançamentos",
-                            "popular" to "Populares",
-                            "today" to "Hoje",
-                            "this_week" to "Esta Semana"
-                        ).forEach { (crit, label) ->
-                            FilterBadge(
-                                label = label,
-                                selected = autoSyncConfig.criterion == crit,
-                                onClick = { adminViewModel.updateTmdbAutoSyncCriterion(crit) }
-                            )
-                        }
-                    }
-                }
-
-                // Tipo de Conteúdo
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Tipo:", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FilterBadge(
-                            label = "Filmes e Séries",
-                            selected = autoSyncConfig.contentType == "both" || autoSyncConfig.contentType == "all",
-                            onClick = { adminViewModel.updateTmdbAutoSyncContentType("both") }
-                        )
-                        FilterBadge(
-                            label = "Filmes",
-                            selected = autoSyncConfig.contentType == "movie",
-                            onClick = { adminViewModel.updateTmdbAutoSyncContentType("movie") }
-                        )
-                        FilterBadge(
-                            label = "Séries",
-                            selected = autoSyncConfig.contentType == "tv",
-                            onClick = { adminViewModel.updateTmdbAutoSyncContentType("tv") }
-                        )
-                    }
-                }
-
-                // Disparo Manual e Cancelamento
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Button(
+                    onClick = { adminViewModel.startTmdbAutoSyncNow() },
+                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                    enabled = !autoSyncProgress.isRunning,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     if (autoSyncProgress.isRunning) {
-                        OutlinedButton(
-                            onClick = { adminViewModel.cancelTmdbAutoSync() },
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
-                            border = BorderStroke(1.dp, Color.Red),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(36.dp)
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(14.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("CANCELAR", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
+                        RonycineSmileLoader(color = Color.White, size = 16.dp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Sincronizando...", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     } else {
-                        Spacer(modifier = Modifier.width(1.dp))
-                    }
-
-                    Button(
-                        onClick = { adminViewModel.startTmdbAutoSyncNow() },
-                        colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                        enabled = !autoSyncProgress.isRunning,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(38.dp)
-                    ) {
-                        if (autoSyncProgress.isRunning) {
-                            RonycineSmileLoader(
-                                color = Color.White,
-                                size = 16.dp
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Sincronizando...", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        } else {
-                            Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("EXECUTAR IMPORTAÇÃO AUTOMÁTICA AGORA", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                        }
-                    }
-                }
-            }
-        }
-
-        // Live Dashboard / Progress Card during sync
-        if (autoSyncProgress.isRunning || autoSyncProgress.totalFound > 0) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF181824)),
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, if (autoSyncProgress.isRunning) BrandRed else CardBorder),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (autoSyncProgress.isRunning) {
-                                RonycineSmileLoader(
-                                    color = BrandRed,
-                                    size = 16.dp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("PROCESSANDO...", color = Color.Yellow, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            } else {
-                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.Green, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("ÚLTIMA EXECUÇÃO FINALIZADA", color = Color.Green, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-
-                        if (autoSyncProgress.totalFound > 0) {
-                            val pct = ((autoSyncProgress.processedCount.toFloat() / autoSyncProgress.totalFound.toFloat()) * 100).toInt().coerceIn(0, 100)
-                            Text("$pct%", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black)
-                        }
-                    }
-
-                    if (autoSyncProgress.totalFound > 0) {
-                        val progressFraction = (autoSyncProgress.processedCount.toFloat() / autoSyncProgress.totalFound.toFloat()).coerceIn(0f, 1f)
-                        LinearProgressIndicator(
-                            progress = progressFraction,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(3.dp)),
-                            color = BrandRed,
-                            trackColor = Color.DarkGray
-                        )
-                    }
-
-                    // Status Message
-                    Text(
-                        text = autoSyncProgress.stepMessage,
-                        color = Color.LightGray,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-
-                    // Metrics Dashboard Chips
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        MetricBadge("Encontrados", autoSyncProgress.totalFound.toString(), Color.White)
-                        MetricBadge("Importados", autoSyncProgress.importedCount.toString(), Color.Green)
-                        MetricBadge("Já Existe", autoSyncProgress.existingCount.toString(), Color.Cyan)
-                        MetricBadge("Ignorados", autoSyncProgress.ignoredCount.toString(), Color.Gray)
-                        MetricBadge("Erros", autoSyncProgress.errorCount.toString(), if (autoSyncProgress.errorCount > 0) Color.Red else Color.Gray)
+                        Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("EXECUTAR AGORA", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
             }
@@ -1818,7 +2618,7 @@ fun AutoImportSection(
 
         // Auto Sync History Logs Table
         Text(
-            text = "HISTÓRICO DE EXECUÇÕES AUTOMÁTICAS TMDB:",
+            text = "HISTÓRICO DE EXECUÇÕES AUTOMÁTICAS:",
             color = Color.White,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold
@@ -1848,16 +2648,8 @@ fun AutoImportSection(
     }
 }
 
-@Composable
-fun MetricBadge(label: String, value: String, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = value, color = color, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-        Text(text = label, color = Color.Gray, fontSize = 10.sp)
-    }
-}
-
 // ============================================================================
-// 4. RECENTES PARA IMPORTAR
+// 5. RECENTES PARA IMPORTAR
 // ============================================================================
 
 @Composable
@@ -1869,91 +2661,71 @@ fun RecentToImportSection(
     val recentCandidates by adminViewModel.recentCandidates.collectAsState()
     val isLoading by adminViewModel.isLoadingRecentCandidates.collectAsState()
 
-    val filteredCandidates = recentCandidates.filter {
-        if (typeFilter == "ALL") true
-        else it.mediaType == typeFilter
+    val displayList = remember(recentCandidates, typeFilter) {
+        if (typeFilter == "ALL") recentCandidates
+        else recentCandidates.filter { it.mediaType == typeFilter }
     }
 
     Column(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column {
-                Text(
-                    text = "🔥 TMDB RECENTES & EM ALTA (FORA DO CATÁLOGO)",
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Conteúdos novos que ainda não estão no banco de dados do RONYCINE",
-                    color = Color.Gray,
-                    fontSize = 11.sp
-                )
-            }
-
+            Text(
+                text = "🔥 TENDÊNCIAS E RECENTES TMDB",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Black
+            )
             Button(
-                onClick = { adminViewModel.loadRecentCandidatesFromTmdb() },
-                colors = ButtonDefaults.buttonColors(containerColor = DarkSurface),
+                onClick = onSwitchToMass,
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Black),
                 border = BorderStroke(1.dp, CardBorder),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
             ) {
-                if (isLoading) {
-                    RonycineSmileLoader(
-                        color = Color.White,
-                        size = 14.dp
-                    )
-                } else {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Atualizar Lista", fontSize = 12.sp)
-                }
+                Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Ir para Lote", fontSize = 11.sp)
             }
         }
 
-        if (isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                RonycineSmileLoader(
-                    color = BrandRed,
-                    size = 32.dp
-                )
-            }
-        } else if (filteredCandidates.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(DarkSurface),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("Nenhum lançamento pendente no TMDB no momento.", color = Color.Gray, fontSize = 13.sp)
+        if (isLoading && displayList.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                RonycineSmileLoader(color = BrandRed)
             }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 280.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.weight(1f)
-            ) {
-                items(filteredCandidates) { candidate ->
-                    RecentCandidateCompactCard(
-                        candidate = candidate,
-                        onImportDirect = {
-                            adminViewModel.selectTmdbIdForPreview(candidate.tmdbId.toString(), candidate.mediaType)
-                        },
-                        onSelectForMass = {
-                            adminViewModel.addMassCandidate(candidate.copy(selected = true))
-                            onSwitchToMass()
-                        }
-                    )
+            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                val screenWidth = maxWidth
+                val columns = when {
+                    screenWidth >= 1200.dp -> 6
+                    screenWidth >= 900.dp -> 5
+                    screenWidth >= 600.dp -> 4
+                    else -> 3
+                }
+
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(columns),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(displayList) { candidate ->
+                        RecentCandidateGridCard(
+                            candidate = candidate,
+                            onImportDirect = {
+                                adminViewModel.importSingleDirect(candidate.tmdbId, candidate.mediaType)
+                            },
+                            onSelectForMass = {
+                                adminViewModel.addMassCandidates(listOf(candidate.copy(selected = true)))
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1961,7 +2733,7 @@ fun RecentToImportSection(
 }
 
 // ============================================================================
-// 5. HISTÓRICO DE IMPORTAÇÕES
+// 6. HISTÓRICO DE IMPORTAÇÕES
 // ============================================================================
 
 @Composable
@@ -1975,7 +2747,7 @@ fun HistoryImportSection(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            text = "📋 HISTÓRICO GERAL DE IMPORTAÇÕES REGISTRADAS",
+            text = "📋 HISTÓRICO DE IMPORTAÇÕES REGISTRADAS",
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold
@@ -1989,7 +2761,7 @@ fun HistoryImportSection(
                     .background(DarkSurface),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Nenhum registro de importação recente.", color = Color.Gray, fontSize = 13.sp)
+                Text("Nenhum registro recente de importação.", color = Color.Gray, fontSize = 13.sp)
             }
         } else {
             LazyColumn(
@@ -2005,15 +2777,11 @@ fun HistoryImportSection(
 }
 
 // ============================================================================
-// SUB-COMPOSABLES & UTILS
+// SUB-COMPOSABLES SECUNDÁRIOS
 // ============================================================================
 
 @Composable
-fun FilterBadge(
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
+fun FilterBadge(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         color = if (selected) BrandRed else Color.Black.copy(alpha = 0.6f),
@@ -2065,8 +2833,7 @@ fun ModeTabButton(
                 fontSize = 11.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Clip
+                softWrap = false
             )
         }
     }
@@ -2089,76 +2856,6 @@ fun BadgeBox(text: String, color: Color) {
 }
 
 @Composable
-fun TypeChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        color = if (selected) BrandRed else Color.Transparent,
-        shape = RoundedCornerShape(6.dp)
-    ) {
-        Text(
-            text = label,
-            color = if (selected) Color.White else Color.Gray,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
-    }
-}
-
-@Composable
-fun SearchResultCompactCard(
-    result: TmdbSearchResultItem,
-    onSelect: () -> Unit
-) {
-    Card(
-        onClick = onSelect,
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        shape = RoundedCornerShape(8.dp),
-        border = BorderStroke(1.dp, CardBorder),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            AsyncImage(
-                model = result.entity.posterPath,
-                contentDescription = result.entity.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .width(34.dp)
-                    .height(51.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.Black)
-            )
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(result.entity.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    BadgeBox(text = result.entity.mediaType.uppercase(), color = if (result.entity.mediaType == "movie") BrandRed else Color(0xFF1976D2))
-                    Text("★ ${String.format(Locale.US, "%.1f", result.entity.rating)}", color = Color(0xFFFFA000), fontSize = 11.sp)
-                    Text(result.entity.releaseYear, color = Color.Gray, fontSize = 11.sp)
-                }
-            }
-
-            if (result.isAlreadyInCatalog) {
-                BadgeBox(text = "NO CATÁLOGO", color = Color(0xFFE65100))
-            } else {
-                Button(
-                    onClick = onSelect,
-                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                    shape = RoundedCornerShape(6.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                ) {
-                    Text("Selecionar", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun MassCandidateCompactCard(
     candidate: AdminViewModel.MassCandidateItem,
     onToggleSelect: () -> Unit
@@ -2173,13 +2870,13 @@ fun MassCandidateCompactCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
-            modifier = Modifier.padding(2.dp),
+            modifier = Modifier.padding(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(2f/3f)
+                    .aspectRatio(2f / 3f)
                     .clip(RoundedCornerShape(4.dp))
                     .background(Color.Black),
                 contentAlignment = Alignment.Center
@@ -2197,12 +2894,12 @@ fun MassCandidateCompactCard(
                             .background(Color.Black.copy(alpha = 0.5f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BrandRed, modifier = Modifier.size(32.dp))
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = BrandRed, modifier = Modifier.size(28.dp))
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             Text(
                 text = candidate.title,
@@ -2213,83 +2910,76 @@ fun MassCandidateCompactCard(
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
             )
-            
-            Spacer(modifier = Modifier.height(4.dp))
-            
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = if (candidate.mediaType == "movie") "FILME" else "SÉRIE",
-                    color = if (candidate.mediaType == "movie") BrandRed else Color(0xFF1976D2),
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                if (candidate.year.isNotBlank()) Text(candidate.year, color = Color.Gray, fontSize = 8.sp)
-                if (candidate.rating > 0) {
-                    Text("★${String.format(Locale.US, "%.1f", candidate.rating)}", color = Color(0xFFFFA000), fontSize = 8.sp)
-                }
-            }
-            if (candidate.isAlreadyInCatalog) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text("JÁ EXISTE", color = Color.Gray, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-            }
         }
     }
 }
 
 @Composable
-fun RecentCandidateCompactCard(
+fun RecentCandidateGridCard(
     candidate: AdminViewModel.MassCandidateItem,
     onImportDirect: () -> Unit,
     onSelectForMass: () -> Unit
 ) {
     Card(
         colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(6.dp),
         border = BorderStroke(1.dp, CardBorder),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        Column(
+            modifier = Modifier.padding(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             AsyncImage(
                 model = candidate.posterPath,
                 contentDescription = candidate.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .width(38.dp)
-                    .height(57.dp)
-                    .clip(RoundedCornerShape(6.dp))
+                    .fillMaxWidth()
+                    .aspectRatio(2f / 3f)
+                    .clip(RoundedCornerShape(4.dp))
                     .background(Color.Black)
             )
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(candidate.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    BadgeBox(text = candidate.mediaType.uppercase(), color = if (candidate.mediaType == "movie") BrandRed else Color(0xFF1976D2))
-                    Text("★ ${String.format(Locale.US, "%.1f", candidate.rating)}", color = Color(0xFFFFA000), fontSize = 11.sp)
-                    if (candidate.year.isNotBlank()) Text(candidate.year, color = Color.Gray, fontSize = 11.sp)
-                }
-            }
+            Spacer(modifier = Modifier.height(4.dp))
 
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                candidate.title,
+                color = Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 Button(
                     onClick = onImportDirect,
                     colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
-                    shape = RoundedCornerShape(6.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    shape = RoundedCornerShape(4.dp),
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(26.dp)
                 ) {
-                    Text("Importar", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("Imp.", fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 }
 
                 OutlinedButton(
                     onClick = onSelectForMass,
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(4.dp),
                     border = BorderStroke(1.dp, CardBorder),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(26.dp)
                 ) {
-                    Text("+ Lote", color = Color.White, fontSize = 10.sp)
+                    Text("+ Lote", color = Color.White, fontSize = 9.sp)
                 }
             }
         }
@@ -2315,7 +3005,7 @@ fun AutoSyncHistoryRow(log: TmdbAutoSyncHistoryEntity) {
             Column {
                 Text(text = "$dateStr - Auto Sync (${log.type.uppercase()})", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    text = "Encontrados: ${log.totalFound} | Importados: ${log.importedCount} | Existentes: ${log.existingCount} | Erros: ${log.errorCount}",
+                    text = "Encontrados: ${log.totalFound} | Importados: ${log.importedCount} | Existentes: ${log.existingCount}",
                     color = Color.Gray,
                     fontSize = 11.sp
                 )

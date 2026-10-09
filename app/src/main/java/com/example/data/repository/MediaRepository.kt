@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.BuildConfig
 import com.example.config.AppShareConfig
 import com.example.data.local.*
+import com.example.data.remote.AutoNotificationConfig
 import com.example.data.remote.ImportConfig
 import com.example.data.remote.ImportItem
 import com.example.data.remote.ImportJob
@@ -16,6 +17,7 @@ import com.example.data.remote.TmdbApiService
 import com.example.data.remote.TmdbMediaDto
 import com.example.data.remote.TmdbNetwork
 import com.example.data.remote.TmdbPageResponse
+import retrofit2.HttpException
 import com.example.util.MediaClassifier
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -110,8 +112,18 @@ data class TmdbSearchResultItem(
 
 class MediaRepository(
     private val dao: PlayFilmeDao,
-    private val firebaseService: com.example.data.remote.FirebaseService? = null
+    private val firebaseService: com.example.data.remote.FirebaseService? = null,
+    private val centralRepository: com.example.data.repository.CentralRepository? = null,
+    private val notificationRepository: com.example.data.repository.NotificationRepository? = null
 ) {
+
+    suspend fun isCentralApiEnabled(): Boolean = withContext(Dispatchers.IO) {
+        dao.getSetting("central_api_enabled")?.toBooleanStrictOrNull() ?: false
+    }
+
+    suspend fun setCentralApiEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        dao.saveSetting(AppSettingsEntity("central_api_enabled", enabled.toString()))
+    }
 
     private val api: TmdbApiService = TmdbNetwork.apiService
 
@@ -502,14 +514,18 @@ class MediaRepository(
                             _tmdbAutoSyncProgress.value = currentProgress
                             emit(currentProgress)
 
-                            val dto = api.getMovieDetails(movieId = tmdbId, apiKey = apiKey)
-                            val finalVideos = fetchVideosWithEnglishFallback(tmdbId, type, dto.videos?.results)
-                            val dtoWithMerged = dto.copy(videos = com.example.data.remote.TmdbVideosResponse(results = finalVideos))
-                            val updatedEntity = mapDtoToEntity(dtoWithMerged, type, isHero = existing.isHeroFeatured)
-                            dao.insertMedia(updatedEntity)
-                            firebaseService?.upsertMediaInCloud(updatedEntity)
-                            importedCount++
-                            importedTitles.add(updatedEntity.title)
+                            val fetched = fetchTmdbDetailsWithFallback(tmdbId, type)
+                            if (fetched != null) {
+                                val dto = fetched.first
+                                val resolvedType = fetched.second
+                                val finalVideos = fetchVideosWithEnglishFallback(tmdbId, resolvedType, dto.videos?.results)
+                                val dtoWithMerged = dto.copy(videos = com.example.data.remote.TmdbVideosResponse(results = finalVideos))
+                                val updatedEntity = mapDtoToEntity(dtoWithMerged, resolvedType, isHero = existing.isHeroFeatured)
+                                dao.insertMedia(updatedEntity)
+                                firebaseService?.upsertMediaInCloud(updatedEntity)
+                                importedCount++
+                                importedTitles.add(updatedEntity.title)
+                            }
                         } catch (e: Exception) {
                             errorCount++
                         }
@@ -526,22 +542,25 @@ class MediaRepository(
             while (attempts < 3 && !importSuccess && isAutoSyncRunning.get()) {
                 attempts++
                 try {
-                    val dto = try {
-                        if (type == "movie") {
-                            api.getMovieDetails(movieId = tmdbId, apiKey = apiKey)
-                        } else {
-                            api.getSeriesDetails(seriesId = tmdbId, apiKey = apiKey)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("MediaRepository", "Error fetching metadata for TMDB #$tmdbId: ${e.message}")
-                        null
+                    val fetched = fetchTmdbDetailsWithFallback(tmdbId, type)
+
+                    if (fetched == null) {
+                        // Se não encontrou no TMDB (404 em filmes e séries), ignorar sem re-tentar
+                        ignoredCount++
+                        importSuccess = true
+                        currentProgress = currentProgress.copy(
+                            processedCount = processedCount,
+                            ignoredCount = ignoredCount,
+                            inProgressCount = 0,
+                            stepMessage = "Conteúdo TMDB #$tmdbId ignorado (não localizado no catálogo TMDB)."
+                        )
+                        _tmdbAutoSyncProgress.value = currentProgress
+                        emit(currentProgress)
+                        break
                     }
 
-                    if (dto == null) {
-                        lastErr = "Falha ao comunicar com TMDB"
-                        delay(500L)
-                        continue
-                    }
+                    val dto = fetched.first
+                    val resolvedType = fetched.second
 
                     val title = dto.title ?: dto.name
                     if (title.isNullOrBlank() || dto.id <= 0) {
@@ -558,14 +577,14 @@ class MediaRepository(
                         break
                     }
 
-                    val finalVideos = fetchVideosWithEnglishFallback(tmdbId, type, dto.videos?.results)
+                    val finalVideos = fetchVideosWithEnglishFallback(tmdbId, resolvedType, dto.videos?.results)
                     val dtoWithMerged = dto.copy(videos = com.example.data.remote.TmdbVideosResponse(results = finalVideos))
-                    val entity = mapDtoToEntity(dtoWithMerged, type)
+                    val entity = mapDtoToEntity(dtoWithMerged, resolvedType)
 
                     dao.insertMedia(entity)
                     firebaseService?.upsertMediaInCloud(entity)
 
-                    if (type == "tv") {
+                    if (resolvedType == "tv") {
                         currentProgress = currentProgress.copy(
                             stepMessage = "Importando episódios e temporadas de '${entity.title}'..."
                         )
@@ -597,7 +616,7 @@ class MediaRepository(
 
             if (!importSuccess && lastErr != null) {
                 errorCount++
-                Log.e("MediaRepository", "[TMDB AUTO-SYNC] Erro ao importar TMDB #$tmdbId: $lastErr")
+                Log.w("MediaRepository", "[TMDB AUTO-SYNC] Aviso ao importar TMDB #$tmdbId: $lastErr")
                 currentProgress = currentProgress.copy(
                     processedCount = processedCount,
                     errorCount = errorCount,
@@ -1064,21 +1083,15 @@ class MediaRepository(
             
             // 2. Fetch from TMDB
             db.collection("import_items").document(item.id).update("stage", "METADADOS").await()
-            val dto = try {
-                if (item.mediaType == "movie") {
-                    api.getMovieDetails(item.tmdbId, apiKey)
-                } else {
-                    api.getSeriesDetails(item.tmdbId, apiKey)
-                }
-            } catch (e: Exception) {
-                Log.e("MediaRepository", "Error fetching metadata for TMDB #${item.tmdbId}: ${e.message}")
-                null
-            }
+            val fetched = fetchTmdbDetailsWithFallback(item.tmdbId, item.mediaType)
             
-            if (dto == null) {
-                updateItemStatus(jobId, item.id, "failed", error = "Falha ao obter resposta do TMDB", stage = "ERRO")
+            if (fetched == null) {
+                updateItemStatus(jobId, item.id, "failed", error = "Conteúdo não localizado no TMDB (#${item.tmdbId})", stage = "NÃO ENCONTRADO")
                 return
             }
+            
+            val dto = fetched.first
+            val resolvedType = fetched.second
             
             val title = dto.title ?: dto.name ?: "Sem título"
             if (title == "Sem título" || dto.id <= 0) {
@@ -1088,15 +1101,15 @@ class MediaRepository(
             
             // 3. Map and Save to Room & Firestore
             db.collection("import_items").document(item.id).update("stage", "FIRESTORE").await()
-            val finalVideos = fetchVideosWithEnglishFallback(item.tmdbId, item.mediaType, dto.videos?.results)
+            val finalVideos = fetchVideosWithEnglishFallback(item.tmdbId, resolvedType, dto.videos?.results)
             val dtoWithMerged = dto.copy(videos = com.example.data.remote.TmdbVideosResponse(results = finalVideos))
-            val entity = mapDtoToEntity(dtoWithMerged, item.mediaType)
+            val entity = mapDtoToEntity(dtoWithMerged, resolvedType)
             
             dao.insertMedia(entity)
             firebaseService?.upsertMediaInCloud(entity)
             
             // Remove da lista de excluídos (se estiver lá) já que está sendo re-importado manualmente
-            firebaseService?.removeFromDeletedCatalog(item.tmdbId, item.mediaType)
+            firebaseService?.removeFromDeletedCatalog(item.tmdbId, resolvedType)
             
             if (entity.mediaType == "tv") {
                 db.collection("import_items").document(item.id).update("stage", "EPISÓDIOS").await()
@@ -1450,12 +1463,11 @@ class MediaRepository(
 
         try {
             kotlinx.coroutines.withTimeout(5000L) {
-                val entity = if (normType == "movie") {
-                    val dto = api.getMovieDetails(tmdbId, apiKey)
-                    mapDtoToEntity(dto, "movie")
+                val fetched = fetchTmdbDetailsWithFallback(tmdbId, normType)
+                val entity = if (fetched != null) {
+                    mapDtoToEntity(fetched.first, fetched.second)
                 } else {
-                    val dto = api.getSeriesDetails(tmdbId, apiKey)
-                    mapDtoToEntity(dto, "tv")
+                    null
                 }
                 if (entity != null) {
                     detailsMemoryCache[cacheKey] = entity
@@ -1520,6 +1532,54 @@ class MediaRepository(
     }
 
     // --- Import Content By TMDB ID ---
+    suspend fun fetchTmdbDetailsWithFallback(
+        tmdbId: Int,
+        preferredType: String
+    ): Pair<TmdbMediaDto, String>? {
+        if (tmdbId <= 0) return null
+        val normType = if (preferredType.equals("tv", ignoreCase = true) || 
+                           preferredType.equals("serie", ignoreCase = true) || 
+                           preferredType.equals("series", ignoreCase = true)) "tv" else "movie"
+        val altType = if (normType == "movie") "tv" else "movie"
+
+        // 1. Tentar primeiro o tipo preferido
+        try {
+            val dto = if (normType == "movie") {
+                api.getMovieDetails(movieId = tmdbId, apiKey = apiKey)
+            } else {
+                api.getSeriesDetails(seriesId = tmdbId, apiKey = apiKey)
+            }
+            return Pair(dto, normType)
+        } catch (e: Exception) {
+            val isNotFound = (e is HttpException && e.code() == 404) || 
+                    (e.message?.contains("404") == true)
+            if (isNotFound) {
+                // 2. Se deu 404 no tipo preferido, tenta o tipo alternativo (ex: filme classificado como série ou vice-versa)
+                try {
+                    val altDto = if (altType == "movie") {
+                        api.getMovieDetails(movieId = tmdbId, apiKey = apiKey)
+                    } else {
+                        api.getSeriesDetails(seriesId = tmdbId, apiKey = apiKey)
+                    }
+                    Log.d("MediaRepository", "TMDB #$tmdbId resolvido com sucesso via fallback de tipo ($normType -> $altType)")
+                    return Pair(altDto, altType)
+                } catch (altEx: Exception) {
+                    val altIsNotFound = (altEx is HttpException && altEx.code() == 404) ||
+                            (altEx.message?.contains("404") == true)
+                    if (altIsNotFound) {
+                        Log.w("MediaRepository", "TMDB #$tmdbId não encontrado no catálogo TMDB (HTTP 404). Ignorando.")
+                    } else {
+                        Log.w("MediaRepository", "Falha de rede ao consultar TMDB #$tmdbId: ${altEx.message}")
+                    }
+                    return null
+                }
+            } else {
+                Log.w("MediaRepository", "Aviso ao buscar metadados para TMDB #$tmdbId ($normType): ${e.message}")
+                return null
+            }
+        }
+    }
+
     private suspend fun fetchVideosWithEnglishFallback(tmdbId: Int, type: String, ptVideos: List<com.example.data.remote.TmdbVideoDto>?): List<com.example.data.remote.TmdbVideoDto> {
         // [AUDIT RONYCINE] Trailers are definitively disabled for all catalog cards and background fetching 
         // to ensure maximum performance and zero unwanted YouTube/TMDB background calls.
@@ -1536,20 +1596,21 @@ class MediaRepository(
 
         try {
             Log.d("MediaRepository", "[IMPORT] buscando dados do TMDB...")
-            val dto = kotlinx.coroutines.withTimeout(15000L) {
-                if (type == "movie") {
-                    api.getMovieDetails(movieId = tmdbId, apiKey = apiKey)
-                } else {
-                    api.getSeriesDetails(seriesId = tmdbId, apiKey = apiKey)
-                }
+            val fetched = kotlinx.coroutines.withTimeout(15000L) {
+                fetchTmdbDetailsWithFallback(tmdbId, type)
             }
+            if (fetched == null) {
+                return@withContext Pair(false, "Conteúdo não localizado no TMDB (#$tmdbId).")
+            }
+            val dto = fetched.first
+            val resolvedType = fetched.second
             Log.d("MediaRepository", "[IMPORT] dados recebidos do TMDB.")
 
-            val finalVideos = fetchVideosWithEnglishFallback(tmdbId, type, dto.videos?.results)
+            val finalVideos = fetchVideosWithEnglishFallback(tmdbId, resolvedType, dto.videos?.results)
             val dtoWithMerged = dto.copy(videos = com.example.data.remote.TmdbVideosResponse(results = finalVideos))
 
             Log.d("MediaRepository", "[IMPORT] preparando documento...")
-            val entity = mapDtoToEntity(dtoWithMerged, if (type.isNotBlank()) type else (dto.mediaType ?: "movie"))
+            val entity = mapDtoToEntity(dtoWithMerged, resolvedType)
             
             Log.d("MediaRepository", "[IMPORT] salvando no Firestore...")
             kotlinx.coroutines.withTimeout(15000L) {
@@ -1705,17 +1766,19 @@ class MediaRepository(
     }
 
     suspend fun fetchTmdbPreview(tmdbId: Int, type: String): Pair<MediaEntity?, Boolean> = withContext(Dispatchers.IO) {
-        val existing = dao.getMediaByTmdbIdAndType(tmdbId, type)
+        val existing = dao.getMediaByTmdbIdAndType(tmdbId, type) ?: dao.getMediaByTmdbId(tmdbId)
         try {
-            val dto = if (type == "movie") {
-                api.getMovieDetails(movieId = tmdbId, apiKey = apiKey)
+            val fetched = fetchTmdbDetailsWithFallback(tmdbId, type)
+            if (fetched != null) {
+                val dto = fetched.first
+                val resolvedType = fetched.second
+                val finalVideos = fetchVideosWithEnglishFallback(tmdbId, resolvedType, dto.videos?.results)
+                val dtoWithMerged = dto.copy(videos = com.example.data.remote.TmdbVideosResponse(results = finalVideos))
+                val entity = mapDtoToEntity(dtoWithMerged, resolvedType)
+                Pair(entity, existing != null)
             } else {
-                api.getSeriesDetails(seriesId = tmdbId, apiKey = apiKey)
+                Pair(existing, existing != null)
             }
-            val finalVideos = fetchVideosWithEnglishFallback(tmdbId, type, dto.videos?.results)
-            val dtoWithMerged = dto.copy(videos = com.example.data.remote.TmdbVideosResponse(results = finalVideos))
-            val entity = mapDtoToEntity(dtoWithMerged, if (type.isNotBlank()) type else (dto.mediaType ?: "movie"))
-            Pair(entity, existing != null)
         } catch (e: Exception) {
             Pair(existing, existing != null)
         }
@@ -1760,6 +1823,55 @@ class MediaRepository(
             }
             
             Log.d("MediaRepository", "[IMPORT] Firestore confirmado e concluído.")
+            
+            // --- GATILHO DE NOTIFICAÇÃO AUTOMÁTICA ---
+            if (!isUpdate && notificationRepository != null) {
+                repoScope.launch {
+                    try {
+                        val config = notificationRepository.getAutoNotificationConfig()
+                        if (config.enabled) {
+                            val shouldNotify = when (entityToSave.mediaType) {
+                                "movie" -> config.notifyNewMovies
+                                "tv", "serie" -> config.notifyNewSeries
+                                else -> true
+                            }
+
+                            if (shouldNotify) {
+                                val type = if (entityToSave.mediaType == "movie") "MOVIE" else "SERIE"
+                                val icon = if (entityToSave.mediaType == "movie") "🎬" else "📺"
+                                val prefix = if (entityToSave.mediaType == "movie") "Novo Filme:" else "Nova Série:"
+                                
+                                val notification = com.example.data.remote.AppNotification(
+                                    id = java.util.UUID.randomUUID().toString(),
+                                    type = type,
+                                    title = "$icon $prefix ${entityToSave.title}",
+                                    message = "Acabamos de adicionar \"${entityToSave.title}\" ao nosso catálogo. Confira agora!",
+                                    poster = entityToSave.posterPath,
+                                    tmdbId = entityToSave.tmdbId,
+                                    mediaType = entityToSave.mediaType,
+                                    actionUrl = "${entityToSave.mediaType}/${entityToSave.tmdbId}",
+                                    timestamp = System.currentTimeMillis()
+                                )
+                                
+                                notificationRepository.createGlobalNotification(notification)
+                                
+                                // Também dispara evento FCM via FirebaseService se disponível
+                                firebaseService?.sendNotificationEventToCloud(
+                                    id = "fcm_${notification.id}",
+                                    title = notification.title,
+                                    message = notification.message,
+                                    imageUrl = notification.poster,
+                                    type = notification.type,
+                                    actionUrl = notification.actionUrl,
+                                    targetSegment = "ALL"
+                                )
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("MediaRepository", "Erro ao disparar notificação automática: ${e.message}")
+                    }
+                }
+            }
             
             val message = if (isUpdate) {
                 "Conteúdo '${entity.title}' foi atualizado com sucesso no catálogo!"
@@ -1880,15 +1992,16 @@ class MediaRepository(
 
     suspend fun refreshMediaFromTmdb(tmdbId: Int, type: String): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         try {
-            val dto = if (type == "movie") {
-                api.getMovieDetails(movieId = tmdbId, apiKey = apiKey)
-            } else {
-                api.getSeriesDetails(seriesId = tmdbId, apiKey = apiKey)
+            val fetched = fetchTmdbDetailsWithFallback(tmdbId, type)
+            if (fetched == null) {
+                return@withContext Pair(false, "Conteúdo não localizado no TMDB (#$tmdbId).")
             }
-            val finalVideos = fetchVideosWithEnglishFallback(tmdbId, type, dto.videos?.results)
+            val dto = fetched.first
+            val resolvedType = fetched.second
+            val finalVideos = fetchVideosWithEnglishFallback(tmdbId, resolvedType, dto.videos?.results)
             val dtoWithMerged = dto.copy(videos = com.example.data.remote.TmdbVideosResponse(results = finalVideos))
             val existing = dao.getMediaByTmdbId(tmdbId)
-            val entity = mapDtoToEntity(dtoWithMerged, if (type.isNotBlank()) type else (dto.mediaType ?: "movie"), isHero = existing?.isHeroFeatured ?: false)
+            val entity = mapDtoToEntity(dtoWithMerged, resolvedType, isHero = existing?.isHeroFeatured ?: false)
             dao.insertMedia(entity)
             firebaseService?.upsertMediaInCloud(entity)
 
@@ -1925,12 +2038,18 @@ class MediaRepository(
             }
 
             try {
-                val dto = if (item.second == "movie") {
-                    api.getMovieDetails(item.first, apiKey)
-                } else {
-                    api.getSeriesDetails(item.first, apiKey)
+                val fetched = fetchTmdbDetailsWithFallback(item.first, item.second)
+                if (fetched == null) {
+                    progress = progress.copy(
+                        processed = progress.processed + 1,
+                        failed = progress.failed + 1
+                    )
+                    emit(progress)
+                    continue
                 }
-                val entity = mapDtoToEntity(dto, item.second)
+                val dto = fetched.first
+                val resolvedType = fetched.second
+                val entity = mapDtoToEntity(dto, resolvedType)
                 dao.insertMedia(entity)
                 firebaseService?.upsertMediaInCloud(entity)
                 if (entity.mediaType == "tv") {
@@ -2197,6 +2316,17 @@ class MediaRepository(
     suspend fun searchLocalAndTmdb(query: String): List<MediaEntity> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
 
+        // If Central API is enabled, prioritize it
+        if (isCentralApiEnabled() && centralRepository != null) {
+            val movies = centralRepository.getMovies(1, query).getOrNull() ?: emptyList()
+            val series = centralRepository.getSeries(1, query).getOrNull() ?: emptyList()
+            val animes = centralRepository.getAnimes(1, query).getOrNull() ?: emptyList()
+            val doramas = centralRepository.getDoramas(1, query).getOrNull() ?: emptyList()
+            
+            val combined = (movies + series + animes + doramas).distinctBy { it.tmdbId }
+            if (combined.isNotEmpty()) return@withContext combined
+        }
+
         // 1st stage: Check local DB catalog
         val localResults = dao.searchLocalMedia(query).first()
         if (localResults.size >= 4) {
@@ -2460,14 +2590,16 @@ class MediaRepository(
                 val tmdbId = item.tmdbId ?: continue
                 try {
                     val existing = dao.getMediaByTmdbId(tmdbId)
-                    val dto = api.getMovieDetails(tmdbId, apiKey)
-                    val entity = mapDtoToEntity(dto, "movie")
-                    if (existing != null) {
-                        dao.insertMedia(entity)
-                        updatedCount++
-                    } else {
-                        dao.insertMedia(entity)
-                        newMovies++
+                    val fetched = fetchTmdbDetailsWithFallback(tmdbId, "movie")
+                    if (fetched != null) {
+                        val entity = mapDtoToEntity(fetched.first, fetched.second)
+                        if (existing != null) {
+                            dao.insertMedia(entity)
+                            updatedCount++
+                        } else {
+                            dao.insertMedia(entity)
+                            newMovies++
+                        }
                     }
                 } catch (e: Exception) {
                     errorCount++
@@ -2479,15 +2611,19 @@ class MediaRepository(
                 val tmdbId = item.tmdbId ?: continue
                 try {
                     val existing = dao.getMediaByTmdbId(tmdbId)
-                    val dto = api.getSeriesDetails(tmdbId, apiKey)
-                    val entity = mapDtoToEntity(dto, "tv")
-                    if (existing != null) {
-                        dao.insertMedia(entity)
-                        updatedCount++
-                    } else {
-                        dao.insertMedia(entity)
-                        fetchAndStoreEpisodes(entity.tmdbId, 1)
-                        newSeries++
+                    val fetched = fetchTmdbDetailsWithFallback(tmdbId, "tv")
+                    if (fetched != null) {
+                        val entity = mapDtoToEntity(fetched.first, fetched.second)
+                        if (existing != null) {
+                            dao.insertMedia(entity)
+                            updatedCount++
+                        } else {
+                            dao.insertMedia(entity)
+                            if (entity.mediaType == "tv") {
+                                fetchAndStoreEpisodes(entity.tmdbId, 1)
+                            }
+                            newSeries++
+                        }
                     }
                 } catch (e: Exception) {
                     errorCount++
@@ -2769,6 +2905,16 @@ class MediaRepository(
 
     suspend fun sendMediaRequest(request: MediaRequest): Pair<Boolean, String> = withContext(Dispatchers.IO) {
         android.util.Log.d("MediaRepository", "[REQUEST] Iniciando envio: ${request.title}")
+        
+        if (isCentralApiEnabled() && centralRepository != null) {
+            val result = centralRepository.createRequest(request)
+            if (result.isSuccess) {
+                return@withContext true to "Pedido enviado com sucesso para a API Central!"
+            } else {
+                return@withContext false to (result.exceptionOrNull()?.message ?: "Erro ao enviar pedido para a API Central.")
+            }
+        }
+
         android.util.Log.d("MediaRepository", "[REQUEST] tmdbId: ${request.tmdbId}")
         android.util.Log.d("MediaRepository", "[REQUEST] mediaType: ${request.mediaType}")
 

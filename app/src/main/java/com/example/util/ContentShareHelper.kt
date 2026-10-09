@@ -56,10 +56,13 @@ object ContentShareHelper {
                 if (count == 1) "1 temporada" else "$count temporadas"
             }
         } else {
-            val mins = if (media.durationMinutes > 0) media.durationMinutes else 118
-            val hours = mins / 60
-            val remMins = mins % 60
-            if (hours > 0) "${hours}h ${remMins}min" else "${mins}min"
+            if (media.durationMinutes > 0) {
+                val hours = media.durationMinutes / 60
+                val remMins = media.durationMinutes % 60
+                if (hours > 0) "${hours}h ${remMins}min" else "${media.durationMinutes}min"
+            } else {
+                ""
+            }
         }
 
         val cleanGenres = media.genres.split(",")

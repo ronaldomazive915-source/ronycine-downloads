@@ -41,10 +41,12 @@ import java.util.*
 @Composable
 fun NotificationScreen(
     viewModel: MainViewModel,
+    notificationViewModel: com.example.ui.viewmodel.NotificationViewModel? = null,
     onNavigateBack: () -> Unit,
     onNavigateToDetail: (Int, String) -> Unit,
     onNavigateToLiveTv: () -> Unit,
     onNavigateToUpdateScreen: () -> Unit = {},
+    onNavigateToWhatsNew: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val notifications by viewModel.allNotifications.collectAsState()

@@ -75,8 +75,11 @@ fun SettingsScreen(
     val appLanguage by viewModel.appLanguage.collectAsState()
     val preferredPlayerLanguage by viewModel.preferredPlayerLanguage.collectAsState()
     val dataSaverEnabled by viewModel.dataSaverEnabled.collectAsState()
+    val centralApiEnabled by viewModel.centralApiEnabled.collectAsState()
+    val centralConnectionState by viewModel.centralConnectionState.collectAsState()
 
     // Dialog States
+    var showCentralConnectionDialog by remember { mutableStateOf(false) }
     var showQualityDialog by remember { mutableStateOf(false) }
     var showAppLanguageDialog by remember { mutableStateOf(false) }
     var showPlayerLanguageDialog by remember { mutableStateOf(false) }
@@ -402,6 +405,16 @@ fun SettingsScreen(
                     Text("OK", color = BrandRed, fontWeight = FontWeight.Bold)
                 }
             }
+        )
+    }
+
+    // Central Connection Dialog
+    if (showCentralConnectionDialog) {
+        com.example.ui.components.CentralConnectionDialog(
+            connectionState = centralConnectionState,
+            onDismissRequest = { showCentralConnectionDialog = false },
+            onPair = { code -> viewModel.pairWithCentral(code) },
+            onDisconnect = { viewModel.disconnectFromCentral() }
         )
     }
 
@@ -1048,6 +1061,65 @@ fun SettingsScreen(
                     },
                     testTag = "row_about"
                 )
+            }
+
+            // Section 4: API CENTRAL
+            SettingsSectionHeader("API CENTRAL")
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, CardBorder)
+            ) {
+                Column {
+                    // RONYCINE CENTRAL Connection Row
+                    val isConnected = centralConnectionState is com.example.data.remote.CentralConnectionState.Connected
+                    val accountName = (centralConnectionState as? com.example.data.remote.CentralConnectionState.Connected)?.accountName
+
+                    SettingsClickableRow(
+                        icon = Icons.Default.CloudSync,
+                        iconTint = if (isConnected) Color(0xFF10B981) else Color(0xFFFACC15),
+                        title = "RONYCINE CENTRAL",
+                        description = if (isConnected) "Conectado a: ${accountName ?: "Minha Conta"}" else "Conecte seu app para sincronizar dados.",
+                        actionContent = {
+                            if (isConnected) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0xFF10B981).copy(alpha = 0.15f))
+                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("CONECTADO", color = Color(0xFF10B981), fontSize = 9.sp, fontWeight = FontWeight.Black)
+                                }
+                            } else {
+                                Button(
+                                    onClick = { showCentralConnectionDialog = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = BrandRed),
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Text("CONECTAR", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
+                        },
+                        onClick = { showCentralConnectionDialog = true },
+                        testTag = "row_central_connection"
+                    )
+
+                    HorizontalDivider(color = CardBorder, thickness = 0.5.dp)
+
+                    SettingsSwitchRow(
+                        icon = Icons.Default.CloudSync,
+                        iconTint = Color(0xFFFACC15),
+                        title = "Integração API Central",
+                        description = "Utilizar a nova API Central para sincronizar conteúdo em tempo real.",
+                        checked = centralApiEnabled,
+                        onCheckedChange = { viewModel.setCentralApiEnabled(it) },
+                        testTag = "switch_central_api"
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))

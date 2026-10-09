@@ -15,8 +15,9 @@ class MyApplication : Application(), ImageLoaderFactory {
         return ImageLoader.Builder(this)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.25)
-                    .strongReferencesEnabled(true)
+                    .maxSizePercent(0.18)
+                    .strongReferencesEnabled(false)
+                    .weakReferencesEnabled(true)
                     .build()
             }
             .diskCache {

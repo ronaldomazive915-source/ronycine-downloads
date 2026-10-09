@@ -1,0 +1,89 @@
+{
+  "collections": [
+    {
+      "name": "catalog",
+      "description": "Main media catalog (movies, series, etc.)",
+      "fields": {
+        "tmdbId": "number",
+        "title": "string",
+        "mediaType": "string",
+        "mediaCategory": "string",
+        "addedAt": "number",
+        "updatedAt": "number"
+      }
+    },
+    {
+      "name": "catalog_metadata",
+      "description": "Catalog versioning and metadata",
+      "documents": [
+        {
+          "id": "version",
+          "fields": {
+            "version": "number",
+            "lastUpdatedFormatted": "string"
+          }
+        }
+      ]
+    },
+    {
+      "name": "usernames",
+      "description": "Public index mapping usernames to emails/uids for login resolution",
+      "fields": {
+        "uid": "string",
+        "username": "string",
+        "email": "string"
+      }
+    },
+    {
+      "name": "devices",
+      "description": "Registered devices for FCM and synchronization",
+      "fields": {
+        "deviceId": "string",
+        "uid": "string",
+        "fcmToken": "string",
+        "lastSeen": "number"
+      }
+    },
+    {
+      "name": "users",
+      "description": "Protected user data and subcollections",
+      "fields": {
+        "uid": "string",
+        "email": "string",
+        "role": "string",
+        "isVerified": "boolean"
+      },
+      "subcollections": [
+        {
+          "name": "profiles",
+          "description": "User profiles (e.g. Adult, Kids)",
+          "fields": {
+            "id": "string",
+            "name": "string",
+            "avatarUrl": "string"
+          },
+          "subcollections": [
+            {
+              "name": "watch_history",
+              "description": "Playback progress tracking",
+              "fields": {
+                "tmdbId": "number",
+                "progress": "number",
+                "updatedAt": "number"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "adminAuditLogs",
+      "description": "Audit logs for administrative actions",
+      "fields": {
+        "adminUid": "string",
+        "action": "string",
+        "timestamp": "number"
+      }
+    }
+  ]
+}

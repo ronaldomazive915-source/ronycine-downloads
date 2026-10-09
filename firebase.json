@@ -1,0 +1,8 @@
+{
+  "firestore": [
+    {
+      "database": "ai-studio-android-playfilm-fd211338-c0ab-44f4-88c7-7f2eecd10e12",
+      "rules": "firestore.rules"
+    }
+  ]
+}

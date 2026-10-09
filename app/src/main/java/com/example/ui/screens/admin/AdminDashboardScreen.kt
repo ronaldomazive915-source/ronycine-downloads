@@ -374,6 +374,19 @@ fun AdminDashboardScreen(
                         onClick = { onNavigateSection(AdminSection.TV_AO_VIVO) }
                     )
                     QuickActionButton(
+                        title = "TESTAR PLAYERS",
+                        icon = Icons.Default.PlayCircleOutline,
+                        modifier = Modifier.weight(1f),
+                        hasPermission = currentUser?.hasPermission("players") == true,
+                        onClick = { onNavigateSection(AdminSection.PLAYERS) }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    QuickActionButton(
                         title = if (isManualSyncing || isSyncing) "SINCRONIZANDO..." else "SINCRONIZAR AGORA",
                         icon = Icons.Default.Sync,
                         modifier = Modifier.weight(1f),

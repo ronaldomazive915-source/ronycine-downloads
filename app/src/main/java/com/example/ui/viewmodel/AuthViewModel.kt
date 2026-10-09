@@ -45,6 +45,10 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private val firebaseService = FirebaseService.getInstance(application)
     private val database = AppDatabase.getInstance(application)
     
+    // Central API Components
+    private val centralApiService = com.example.data.remote.CentralNetwork.apiService
+    val centralAuthManager = com.example.data.remote.CentralAuthManager(centralApiService, database.playFilmeDao(), application)
+    
     val currentUser = firebaseService.currentUser
     val activeProfile = firebaseService.activeProfile
     val userProfiles = firebaseService.userProfiles
@@ -622,26 +626,32 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     private fun mapAuthError(error: Throwable): String {
         val message = error.message ?: ""
         return when {
+            // Erros de Provedor Desativado
+            message.contains("operation-not-allowed") || message.contains("sign-in provider is disabled") -> 
+                "O método de login por e-mail e senha não está habilitado no Console do Firebase. Por favor, ative-o em Authentication > Sign-in method."
+
             // Erros de Recuperação de Senha
-            message.contains("Nenhuma conta encontrada", true) -> "Nenhuma conta foi encontrada com este e-mail/usuário no RONYCINE."
-            message.contains("TOO_MANY_ATTEMPTS", true) || message.contains("too-many-requests") -> "Muitas tentativas seguidas. Por favor, aguarde alguns minutos antes de tentar novamente."
+            message.contains("Nenhuma conta encontrada", true) || message.contains("user-not-found") -> 
+                "Não existe uma conta com esses dados."
+            
+            message.contains("TOO_MANY_ATTEMPTS", true) || message.contains("too-many-requests") -> 
+                "Muitas tentativas seguidas. Por favor, aguarde alguns minutos antes de tentar novamente."
             
             // Erros de Login e Credenciais
-            message.contains("user-not-found") || 
             message.contains("wrong-password") || 
             message.contains("INVALID_LOGIN_CREDENTIALS") ||
             message.contains("invalid-credential") ||
-            message.contains("incorrect, malformed or has expired") -> "E-mail/usuário ou senha incorretos."
+            message.contains("incorrect, malformed or has expired") -> "E-mail ou senha incorretos."
             
             // Erros de Cadastro e E-mail
-            message.contains("email-already-in-use") -> "Este e-mail já possui uma conta cadastrada."
+            message.contains("email-already-in-use") -> "Este e-mail já possui uma conta."
             message.contains("invalid-email") || message.contains("badly formatted") -> "E-mail com formato inválido."
             message.contains("network-request-failed") -> "Sem conexão com a internet."
-            message.contains("weak-password") -> "A senha é muito fraca (mínimo 6 caracteres)."
+            message.contains("weak-password") -> "A senha é muito fraca."
             message.contains("user-disabled") -> "Esta conta foi desativada."
-            message.contains("operation-not-allowed") -> "Operação não permitida. Contate o suporte."
+            
             message.contains("reservado") || message.contains("já está em uso") || message.contains("caracteres") -> message
-            else -> error.localizedMessage ?: "Não foi possível completar a operação."
+            else -> "Não foi possível completar a operação. Detalhes: ${error.localizedMessage ?: "Erro desconhecido"}"
         }
     }
 }

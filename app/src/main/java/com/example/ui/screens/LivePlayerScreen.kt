@@ -99,6 +99,15 @@ fun LivePlayerScreen(
     var activeWebView by remember { mutableStateOf<WebView?>(null) }
     var currentWebViewUrl by remember { mutableStateOf("") }
 
+    DisposableEffect(activeWebView) {
+        onDispose {
+            activeWebView?.let { wv ->
+                com.example.util.WebViewUtils.safeDestroy(wv)
+            }
+            activeWebView = null
+        }
+    }
+
     val handleBackNavigation = {
         val webView = activeWebView
         if (webView != null) {
@@ -155,6 +164,8 @@ fun LivePlayerScreen(
                     insetsController.show(WindowInsetsCompat.Type.systemBars())
                 } catch (_: Exception) {}
             }
+            // STOP LIVE STREAM IMMEDIATELY
+            android.util.Log.i("RONYCINE_MEM", "LIVE_PLAYER_EXIT: Explicit cleanup triggered.")
         }
     }
 
@@ -392,6 +403,45 @@ fun LivePlayerScreen(
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                         )
                                     }
+                                }
+                            }
+                        }
+                    }
+                } else if (!isEvent) {
+                    // Servidores de TV Ao Vivo (Servidor Principal)
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "SERVIDOR ATIVO:",
+                                color = Color.Gray,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 6.dp)
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                val srvTitle = matchedChannel?.sourceProvider?.replace("_", " ")?.uppercase()?.takeIf { it.isNotBlank() } ?: "SERVIDOR PRINCIPAL"
+                                Button(
+                                    onClick = { },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = BrandRed
+                                    ),
+                                    border = BorderStroke(1.dp, BrandRed),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = srvTitle,
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
                                 }
                             }
                         }
