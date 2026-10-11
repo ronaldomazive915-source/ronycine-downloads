@@ -91,15 +91,6 @@ object AdminRegistry {
             icon = Icons.Default.Star,
             testTag = "admin_menu_destaques"
         ),
-        AdminModule(
-            id = "tv_ao_vivo",
-            section = AdminSection.TV_AO_VIVO,
-            title = "TV ao Vivo",
-            subtitle = "Gerenciar canais e transmissões ao vivo",
-            category = AdminCategory.CONTEUDO,
-            icon = Icons.Default.LiveTv,
-            testTag = "admin_menu_tv"
-        ),
 
         // 2. USUÁRIOS E DISPOSITIVOS
         AdminModule(

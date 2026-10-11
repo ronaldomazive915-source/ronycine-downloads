@@ -217,14 +217,6 @@ class MainActivity : ComponentActivity() {
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route ?: ScreenRoute.HOME.route
 
-                var isTvFullscreen by remember { mutableStateOf(false) }
-
-                LaunchedEffect(currentRoute) {
-                    if (currentRoute != ScreenRoute.TV_LIVE.route && !currentRoute.startsWith("tv/")) {
-                        isTvFullscreen = false
-                    }
-                }
-
                 val handleNavigateToWatch: (Int, String, Int?, Int?) -> Unit = remember {
                     { tmdbId, type, season, episode ->
                         val route = if (season != null && episode != null) {
@@ -257,8 +249,6 @@ class MainActivity : ComponentActivity() {
                             val isApkUrl = url.endsWith(".apk") || url.contains("/updates/") || url.contains("appVersions") || url.contains(".apk?") || url == "update" || url == "update_screen"
                             if (isApkUrl) {
                                 navController.navigate(ScreenRoute.UPDATE_SCREEN.route)
-                            } else if (url == "livetv" || url == "tv") {
-                                navController.navigate(ScreenRoute.TV_LIVE.route)
                             } else {
                                 val parsed = com.example.util.ContentShareHelper.handleSharedContentLink(url)
                                 if (parsed != null) {
@@ -498,8 +488,7 @@ class MainActivity : ComponentActivity() {
                         currentRoute.startsWith("streaming") ||
                         currentRoute == "admin" ||
                         currentRoute == "notifications" ||
-                        currentRoute == "settings" ||
-                        isTvFullscreen
+                        currentRoute == "settings"
 
                     val hideTopBar = hideBottomBar ||
                         currentRoute == ScreenRoute.SEARCH.route ||
@@ -640,12 +629,6 @@ class MainActivity : ComponentActivity() {
                                         navController.navigate("detail/$tmdbId/$type")
                                     },
                                     onNavigateToWatch = handleNavigateToWatch,
-                                    onNavigateToLiveTv = {
-                                        navController.navigate(ScreenRoute.TV_LIVE.route)
-                                    },
-                                    onNavigateToLiveChannel = { channelId ->
-                                        navController.navigate("tv/$channelId")
-                                    },
                                     onNavigate = { route ->
                                         navController.navigate(route) {
                                             popUpTo(ScreenRoute.HOME.route) { saveState = true }
@@ -672,31 +655,6 @@ class MainActivity : ComponentActivity() {
                                     onNavigateToDetail = { tmdbId, type ->
                                         navController.navigate("detail/$tmdbId/$type")
                                     }
-                                )
-                            }
-
-                            composable(ScreenRoute.TV_LIVE.route) {
-                                LiveTvScreen(
-                                    onNavigateToChannel = { channelId ->
-                                        navController.navigate("tv/$channelId")
-                                    },
-                                    onFullscreenChanged = { isTvFullscreen = it }
-                                )
-                            }
-
-                            composable(
-                                route = "tv/{channelId}",
-                                arguments = listOf(navArgument("channelId") { type = NavType.StringType })
-                            ) { backStackEntry ->
-                                val channelId = backStackEntry.arguments?.getString("channelId") ?: "globo"
-                                LiveTvScreen(
-                                    initialChannelId = channelId,
-                                    onNavigateToChannel = { newChannelId ->
-                                        navController.navigate("tv/$newChannelId") {
-                                            popUpTo("tv/{channelId}") { inclusive = true }
-                                        }
-                                    },
-                                    onFullscreenChanged = { isTvFullscreen = it }
                                 )
                             }
 
@@ -998,9 +956,6 @@ class MainActivity : ComponentActivity() {
                                     onNavigateToDetail = { tmdbId, type ->
                                         navController.navigate("detail/$tmdbId/$type")
                                     },
-                                    onNavigateToLiveTv = {
-                                        navController.navigate(ScreenRoute.TV_LIVE.route)
-                                    },
                                     onNavigateToUpdateScreen = {
                                         navController.navigate(ScreenRoute.UPDATE_SCREEN.route)
                                     },
@@ -1139,11 +1094,7 @@ class MainActivity : ComponentActivity() {
                                     val tmdbId = url.substringAfter("tv/").toIntOrNull()
                                     if (tmdbId != null) {
                                         navController.navigate("detail/$tmdbId/tv")
-                                    } else {
-                                        navController.navigate(ScreenRoute.TV_LIVE.route)
                                     }
-                                } else if (url == "livetv" || url == "tv") {
-                                    navController.navigate(ScreenRoute.TV_LIVE.route)
                                 } else {
                                     val id = url.toIntOrNull()
                                     if (id != null) {

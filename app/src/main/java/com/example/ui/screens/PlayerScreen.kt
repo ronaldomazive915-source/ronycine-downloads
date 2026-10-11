@@ -178,19 +178,17 @@ fun PlayerScreen(
     val currentUser by authViewModel.currentUser.collectAsState()
     val pendingDownloadIntent by viewModel.pendingDownloadIntent.collectAsState()
 
-    LaunchedEffect(pendingDownloadIntent, media, currentUser) {
+    LaunchedEffect(pendingDownloadIntent, media) {
         val intent = pendingDownloadIntent
         if (intent != null && media != null && intent.tmdbId == tmdbId && intent.isPlayer) {
-            if (currentUser != null) {
-                viewModel.resolveDownload(
-                    type = mediaType,
-                    tmdbId = tmdbId,
-                    season = intent.season,
-                    episode = intent.episode,
-                    mediaTitle = intent.mediaTitle
-                )
-                viewModel.clearPendingDownloadIntent()
-            }
+            viewModel.resolveDownload(
+                type = mediaType,
+                tmdbId = tmdbId,
+                season = intent.season,
+                episode = intent.episode,
+                mediaTitle = intent.mediaTitle
+            )
+            viewModel.clearPendingDownloadIntent()
         }
     }
 
@@ -1013,16 +1011,15 @@ fun PlayerScreen(
                                     selectedPlayerSourceId = nextUnattempted.id
                                     android.util.Log.i("RONYCINE_DIAG", "PLAYER_SWITCH: Mudando para provedor ${nextUnattempted.name} (${nextUnattempted.id})")
                                     android.widget.Toast.makeText(context, "Alternando para ${nextUnattempted.name}...", android.widget.Toast.LENGTH_SHORT).show()
+                                    playerLoadId++
                                 } else {
-                                    // NO AUTOMATIC SWITCH TO LEGENDADO
                                     // If we are here, all sources for the SELECTED language failed.
                                     android.util.Log.e("RONYCINE_DIAG", "PLAYER_FAILURE: Todas as fontes para $audioLabel foram esgotadas.")
-                                    android.widget.Toast.makeText(context, "Não foi possível carregar fontes ${audioLabel.lowercase()}s. Tente novamente ou escolha legendado manualmente.", android.widget.Toast.LENGTH_LONG).show()
+                                    android.widget.Toast.makeText(context, "Fontes $audioLabel esgotadas. Tente novamente ou assista Legendado.", android.widget.Toast.LENGTH_LONG).show()
                                     
-                                    // Optional: We can reset attemptedPlayerIds to allow the user to try again with the same sources
+                                    // Reset attemptedPlayerIds to allow subsequent manual retries without looping
                                     attemptedPlayerIds = emptySet()
                                 }
-                                playerLoadId++
                             },
                             onWebViewCreated = { webView ->
                                 activeWebView = webView
@@ -1275,29 +1272,15 @@ fun PlayerScreen(
                                     } else {
                                         media?.title
                                     }
-                                    viewModel.requireAuthenticationForDownload(
-                                        isAuthenticated = currentUser != null,
-                                        pendingIntent = PendingDownloadIntent(
+                                    if (media != null) {
+                                        viewModel.resolveDownload(
                                             type = mediaType,
                                             tmdbId = tmdbId,
                                             season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
                                             episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
-                                            mediaTitle = calculatedTitle,
-                                            isPlayer = true
-                                        ),
-                                        onNavigateToLogin = onNavigateToLogin,
-                                        onAlreadyAuthenticated = {
-                                            if (media != null) {
-                                                viewModel.resolveDownload(
-                                                    type = mediaType,
-                                                    tmdbId = tmdbId,
-                                                    season = if (mediaType == "tv" || mediaType == "serie") currentSeasonNum else null,
-                                                    episode = if (mediaType == "tv" || mediaType == "serie") currentEpisodeNum else null,
-                                                    mediaTitle = calculatedTitle
-                                                )
-                                            }
-                                        }
-                                    )
+                                            mediaTitle = calculatedTitle
+                                        )
+                                    }
                                 },
                                 modifier = Modifier
                                     .size(32.dp)

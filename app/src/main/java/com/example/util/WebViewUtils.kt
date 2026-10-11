@@ -52,22 +52,25 @@ object WebViewUtils {
 
     /**
      * Determines whether the environment requires software layer rendering.
-     * Real devices should always use standard hardware acceleration to avoid memory crashes.
+     * Prevents Mesa "Failed to open rendernode" and Chromium "aw_browser_terminator.cc Renderer process crash detected (code -1)".
      */
     val isSoftwareRendererNeeded: Boolean by lazy {
-        false
+        isEmulator() || !File("/dev/dri/renderD128").exists()
     }
 
     /**
      * Applies safe rendering layer type to a WebView.
+     * Note: LAYER_TYPE_SOFTWARE causes video frames and canvas elements in WebViews to render
+     * as black screens while audio continues playing. Keeping LAYER_TYPE_NONE allows Chromium's
+     * compositor to render HTML5 video surfaces and iFrames properly.
      */
     fun applySafeLayerType(webView: WebView, forceSoftware: Boolean = false) {
         try {
             if (forceSoftware) {
                 webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
-                android.util.Log.i("WebViewUtils", "Applied LAYER_TYPE_SOFTWARE to WebView")
+                android.util.Log.i("WebViewUtils", "Applied LAYER_TYPE_SOFTWARE to WebView on explicit request")
             } else {
-                // LAYER_TYPE_NONE allows normal hardware-accelerated surface compositing
+                // LAYER_TYPE_NONE allows standard hardware compositing necessary for HTML5 video
                 webView.setLayerType(View.LAYER_TYPE_NONE, null)
             }
         } catch (_: Exception) {}

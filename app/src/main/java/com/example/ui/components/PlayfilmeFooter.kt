@@ -101,7 +101,6 @@ fun PlayfilmeFooter(
                             FooterNavLink("Explorar") { onNavigate(ScreenRoute.SEARCH.route) }
                             FooterNavLink("Filmes") { onNavigate(ScreenRoute.MOVIES.route) }
                             FooterNavLink("Séries") { onNavigate(ScreenRoute.SERIES.route) }
-                            FooterNavLink("TV ao Vivo") { onNavigate(ScreenRoute.TV_LIVE.route) }
                             FooterNavLink("Em Alta") { onNavigate(ScreenRoute.TRENDING.route) }
                             FooterNavLink("Minha Lista") { onNavigate(ScreenRoute.MY_LIST.route) }
                         }

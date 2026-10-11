@@ -159,13 +159,7 @@ fun SeriesEpisodeDownloadBottomSheet(
     }
 
     // Resolve source whenever selected episode changes
-    LaunchedEffect(selectedEpisode?.seasonNumber, selectedEpisode?.episodeNumber, currentUserState) {
-        if (currentUserState == null) {
-            isResolvingSource = false
-            resolvedUrl = null
-            sourceError = null
-            return@LaunchedEffect
-        }
+    LaunchedEffect(selectedEpisode?.seasonNumber, selectedEpisode?.episodeNumber) {
         val ep = selectedEpisode
         if (ep == null) {
             resolvedUrl = null
@@ -745,22 +739,16 @@ fun SeriesEpisodeDownloadBottomSheet(
                     description = "Download Manager",
                     isInstalled = idmInstalled,
                     onClick = {
-                        viewModel.requireAuthentication(
-                            isAuthenticated = currentUserState != null,
-                            onNavigateToLogin = onNavigateToLogin,
-                            onAlreadyAuthenticated = {
-                                if (!hasResolvedSource) {
-                                    Toast.makeText(context, "Aguarde a resolução da fonte do episódio...", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    if (idmInstalled) {
-                                        ExternalDownloadManager.downloadWith1DM(context, finalDownloadUrl, finalFileName)
-                                        onDismiss()
-                                    } else {
-                                        ExternalDownloadManager.openPlayStore(context, ExternalDownloadManager.PKG_1DM)
-                                    }
-                                }
+                        if (!hasResolvedSource) {
+                            Toast.makeText(context, "Aguarde a resolução da fonte do episódio...", Toast.LENGTH_SHORT).show()
+                        } else {
+                            if (idmInstalled) {
+                                ExternalDownloadManager.downloadWith1DM(context, finalDownloadUrl, finalFileName)
+                                onDismiss()
+                            } else {
+                                ExternalDownloadManager.openPlayStore(context, ExternalDownloadManager.PKG_1DM)
                             }
-                        )
+                        }
                     }
                 )
 
@@ -773,22 +761,16 @@ fun SeriesEpisodeDownloadBottomSheet(
                     description = "Advanced Download Manager",
                     isInstalled = admInstalled,
                     onClick = {
-                        viewModel.requireAuthentication(
-                            isAuthenticated = currentUserState != null,
-                            onNavigateToLogin = onNavigateToLogin,
-                            onAlreadyAuthenticated = {
-                                if (!hasResolvedSource) {
-                                    Toast.makeText(context, "Aguarde a resolução da fonte do episódio...", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    if (admInstalled) {
-                                        ExternalDownloadManager.downloadWithADM(context, finalDownloadUrl, finalFileName)
-                                        onDismiss()
-                                    } else {
-                                        ExternalDownloadManager.openPlayStore(context, ExternalDownloadManager.PKG_ADM)
-                                    }
-                                }
+                        if (!hasResolvedSource) {
+                            Toast.makeText(context, "Aguarde a resolução da fonte do episódio...", Toast.LENGTH_SHORT).show()
+                        } else {
+                            if (admInstalled) {
+                                ExternalDownloadManager.downloadWithADM(context, finalDownloadUrl, finalFileName)
+                                onDismiss()
+                            } else {
+                                ExternalDownloadManager.openPlayStore(context, ExternalDownloadManager.PKG_ADM)
                             }
-                        )
+                        }
                     }
                 )
 
@@ -801,18 +783,12 @@ fun SeriesEpisodeDownloadBottomSheet(
                     description = "Escolher aplicativo compatível",
                     isInstalled = null,
                     onClick = {
-                        viewModel.requireAuthentication(
-                            isAuthenticated = currentUserState != null,
-                            onNavigateToLogin = onNavigateToLogin,
-                            onAlreadyAuthenticated = {
-                                if (!hasResolvedSource) {
-                                    Toast.makeText(context, "Aguarde a resolução da fonte do episódio...", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    ExternalDownloadManager.downloadWithSystemChooser(context, finalDownloadUrl, finalFileName)
-                                    onDismiss()
-                                }
-                            }
-                        )
+                        if (!hasResolvedSource) {
+                            Toast.makeText(context, "Aguarde a resolução da fonte do episódio...", Toast.LENGTH_SHORT).show()
+                        } else {
+                            ExternalDownloadManager.downloadWithSystemChooser(context, finalDownloadUrl, finalFileName)
+                            onDismiss()
+                        }
                     }
                 )
 
@@ -830,43 +806,38 @@ fun SeriesEpisodeDownloadBottomSheet(
                                    else if (existingEpisodeTask?.status == DownloadStatus.COMPLETED) "Concluído"
                                    else null,
                     onClick = {
-                        viewModel.requireAuthentication(
-                            isAuthenticated = currentUserState != null,
-                            onNavigateToLogin = onNavigateToLogin,
-                            onAlreadyAuthenticated = {
-                                val ep = selectedEpisode
-                                if (ep == null) {
-                                    Toast.makeText(context, "Selecione uma temporada e um episódio antes de baixar.", Toast.LENGTH_SHORT).show()
-                                } else if (!hasResolvedSource || finalDownloadUrl.isBlank()) {
-                                    Toast.makeText(context, "Aguarde a resolução da fonte do episódio...", Toast.LENGTH_SHORT).show()
-                                } else if (existingEpisodeTask?.status == DownloadStatus.COMPLETED) {
-                                    Toast.makeText(context, "Este conteúdo já está disponível offline.", Toast.LENGTH_SHORT).show()
-                                    onNavigateToDownloads?.invoke() ?: onDismiss()
-                                } else if (existingEpisodeTask?.status == DownloadStatus.DOWNLOADING || existingEpisodeTask?.status == DownloadStatus.QUEUED) {
-                                    Toast.makeText(context, "Este conteúdo já está sendo baixado.", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    val taskId = currentTaskId ?: AppDownloadManager.generateTaskId("tv", media.tmdbId.toString(), selectedSeason, ep.episodeNumber)
-                                    val task = DownloadTask(
-                                        id = taskId,
-                                        title = media.title,
-                                        subTitle = "T$selectedSeason • E${ep.episodeNumber} - ${ep.title}",
-                                        posterPath = ep.stillPath ?: media.posterPath,
-                                        url = finalDownloadUrl,
-                                        fileName = finalFileName,
-                                        mediaType = "tv",
-                                        tmdbId = media.tmdbId.toString(),
-                                        seasonNumber = selectedSeason,
-                                        episodeNumber = ep.episodeNumber,
-                                        status = DownloadStatus.QUEUED,
-                                        totalSize = detectedSize.coerceAtLeast(0L),
-                                        mimeType = (validationResult as? SourceValidationResult.Success)?.contentType ?: if (finalDownloadUrl.contains(".m3u8")) "application/x-mpegURL" else "video/mp4"
-                                    )
+                        val ep = selectedEpisode
+                        if (ep == null) {
+                            Toast.makeText(context, "Selecione uma temporada e um episódio antes de baixar.", Toast.LENGTH_SHORT).show()
+                        } else if (!hasResolvedSource || finalDownloadUrl.isBlank()) {
+                            Toast.makeText(context, "Aguarde a resolução da fonte do episódio...", Toast.LENGTH_SHORT).show()
+                        } else if (existingEpisodeTask?.status == DownloadStatus.COMPLETED) {
+                            Toast.makeText(context, "Este conteúdo já está disponível offline.", Toast.LENGTH_SHORT).show()
+                            onNavigateToDownloads?.invoke() ?: onDismiss()
+                        } else if (existingEpisodeTask?.status == DownloadStatus.DOWNLOADING || existingEpisodeTask?.status == DownloadStatus.QUEUED) {
+                            Toast.makeText(context, "Este conteúdo já está sendo baixado.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val taskId = currentTaskId ?: AppDownloadManager.generateTaskId("tv", media.tmdbId.toString(), selectedSeason, ep.episodeNumber)
+                            val task = DownloadTask(
+                                id = taskId,
+                                title = media.title,
+                                subTitle = "T$selectedSeason • E${ep.episodeNumber} - ${ep.title}",
+                                posterPath = ep.stillPath ?: media.posterPath,
+                                url = finalDownloadUrl,
+                                fileName = finalFileName,
+                                mediaType = "tv",
+                                tmdbId = media.tmdbId.toString(),
+                                seasonNumber = selectedSeason,
+                                episodeNumber = ep.episodeNumber,
+                                status = DownloadStatus.QUEUED,
+                                totalSize = detectedSize.coerceAtLeast(0L),
+                                mimeType = (validationResult as? SourceValidationResult.Success)?.contentType ?: if (finalDownloadUrl.contains(".m3u8")) "application/x-mpegURL" else "video/mp4"
+                            )
 
-                                    downloadManager.startDownload(task)
-                                    Toast.makeText(context, "Download iniciado: T$selectedSeason E${ep.episodeNumber}", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        )
+                            downloadManager.startDownload(task)
+                            Toast.makeText(context, "Download iniciado: T$selectedSeason E${ep.episodeNumber}", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        }
                     }
                 )
             }

@@ -77,8 +77,6 @@ fun HomeScreen(
     viewModel: MainViewModel,
     onNavigateToDetail: (Int, String) -> Unit,
     onNavigateToWatch: (Int, String, Int?, Int?) -> Unit,
-    onNavigateToLiveTv: () -> Unit,
-    onNavigateToLiveChannel: (String) -> Unit,
     onNavigate: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -251,7 +249,6 @@ fun HomeScreen(
                             selectedCategory = cat
                         }
                     },
-                    onNavigateToLiveTv = onNavigateToLiveTv,
                     onNavigateToDetail = onNavigateToDetail,
                     onNavigateToWatch = onNavigateToWatch,
                     onNavigate = onNavigate,
@@ -432,21 +429,18 @@ fun HomeScreen(
 @Composable
 private fun HomeCategoriesBar(
     selectedCategory: String,
-    onSelectCategory: (String) -> Unit,
-    onNavigateToLiveTv: () -> Unit
+    onSelectCategory: (String) -> Unit
 ) {
     val labelAll = com.example.util.stringI18n("home.all")
     val labelMovies = com.example.util.stringI18n("home.movies")
     val labelSeries = com.example.util.stringI18n("home.series")
-    val labelLiveTv = com.example.util.stringI18n("nav.liveTV")
 
-    val categories = remember(labelAll, labelMovies, labelSeries, labelLiveTv) {
+    val categories = remember(labelAll, labelMovies, labelSeries) {
         listOf(
             "todos" to labelAll,
             "filmes" to labelMovies,
             "series" to labelSeries,
-            "animes_doramas" to "ANIMES & DORAMAS",
-            "tv" to labelLiveTv
+            "animes_doramas" to "ANIMES & DORAMAS"
         )
     }
 
@@ -461,53 +455,23 @@ private fun HomeCategoriesBar(
         items(categories) { (id, label) ->
             val isSelected = selectedCategory == id
 
-            if (id == "tv") {
-                // TV ao Vivo shortcut
-                Surface(
-                    onClick = onNavigateToLiveTv,
-                    shape = RoundedCornerShape(16.dp),
-                    color = BrandRed.copy(alpha = 0.15f),
-                    border = BorderStroke(1.dp, BrandRed.copy(alpha = 0.5f)),
-                    modifier = Modifier.height(30.dp)
+            Surface(
+                onClick = { onSelectCategory(id) },
+                shape = RoundedCornerShape(16.dp),
+                color = if (isSelected) BrandRed else DarkSurface,
+                border = if (!isSelected) BorderStroke(0.8.dp, CardBorder.copy(alpha = 0.6f)) else null,
+                modifier = Modifier.height(30.dp)
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(BrandRed)
-                        )
-                        Text(
-                            text = labelLiveTv,
-                            color = Color.White,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            } else {
-                Surface(
-                    onClick = { onSelectCategory(id) },
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isSelected) BrandRed else DarkSurface,
-                    border = if (!isSelected) BorderStroke(0.8.dp, CardBorder.copy(alpha = 0.6f)) else null,
-                    modifier = Modifier.height(30.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.padding(horizontal = 14.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            color = if (isSelected) Color.White else Color(0xFFD4D4D8),
-                            fontSize = 11.5.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                        )
-                    }
+                    Text(
+                        text = label,
+                        color = if (isSelected) Color.White else Color(0xFFD4D4D8),
+                        fontSize = 11.5.sp,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                    )
                 }
             }
         }
@@ -1097,7 +1061,6 @@ private fun androidx.compose.foundation.lazy.LazyListScope.homeStandardLayer(
     sectionsBatch: Int,
     selectedCategory: String,
     onSelectCategory: (String) -> Unit,
-    onNavigateToLiveTv: () -> Unit,
     onNavigateToDetail: (Int, String) -> Unit,
     onNavigateToWatch: (Int, String, Int?, Int?) -> Unit,
     onNavigate: ((String) -> Unit)?,
@@ -1119,8 +1082,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.homeStandardLayer(
     item(key = "categories_bar") {
         HomeCategoriesBar(
             selectedCategory = selectedCategory,
-            onSelectCategory = onSelectCategory,
-            onNavigateToLiveTv = onNavigateToLiveTv
+            onSelectCategory = onSelectCategory
         )
     }
 

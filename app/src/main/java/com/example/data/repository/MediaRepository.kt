@@ -1446,7 +1446,11 @@ class MediaRepository(
         }
     }
 
-    private val detailsMemoryCache = java.util.concurrent.ConcurrentHashMap<String, MediaEntity>()
+    private val detailsMemoryCache = object : java.util.LinkedHashMap<String, MediaEntity>(50, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MediaEntity>?): Boolean {
+            return size > 50
+        }
+    }.let { java.util.Collections.synchronizedMap(it) }
 
     suspend fun getOrFetchMediaByTmdbId(tmdbId: Int, type: String? = null): MediaEntity? = withContext(Dispatchers.IO) {
         if (tmdbId <= 0) return@withContext null
@@ -1736,7 +1740,11 @@ class MediaRepository(
     }
 
     // In-memory cache for admin TMDB search
-    private val adminSearchCache = java.util.concurrent.ConcurrentHashMap<String, List<TmdbSearchResultItem>>()
+    private val adminSearchCache = object : java.util.LinkedHashMap<String, List<TmdbSearchResultItem>>(20, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<TmdbSearchResultItem>>?): Boolean {
+            return size > 20
+        }
+    }.let { java.util.Collections.synchronizedMap(it) }
 
     suspend fun searchTmdbForAdmin(query: String, filter: String = "all"): List<TmdbSearchResultItem> = withContext(Dispatchers.IO) {
         val cleanQuery = query.trim().lowercase().replace(Regex("\\s+"), " ")
@@ -3089,7 +3097,11 @@ class MediaRepository(
     }
 
     // --- TMDB Cast Cache & Fetching ---
-    private val castCache = java.util.concurrent.ConcurrentHashMap<Int, List<DetailedCastMember>>()
+    private val castCache = object : java.util.LinkedHashMap<Int, List<DetailedCastMember>>(50, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, List<DetailedCastMember>>?): Boolean {
+            return size > 50
+        }
+    }.let { java.util.Collections.synchronizedMap(it) }
 
     suspend fun fetchCastForMedia(tmdbId: Int, mediaType: String, rawCastStr: String? = null): List<DetailedCastMember> = withContext(Dispatchers.IO) {
         if (tmdbId <= 0) return@withContext emptyList()

@@ -191,12 +191,12 @@ object PlayerUtils {
                 source.movieTmdbUrl.contains("mgeb.top") ||
                 source.tvTmdbUrl.contains("mgeb.top")
 
-        val effectivePlayer = if (isMegaEmbed && megaEmbedConfig != null && megaEmbedConfig.player.isNotBlank()) {
+        val effectivePlayer = if (source.internalPlayer.isNotBlank() && source.id != "mgeb") {
+            source.internalPlayer
+        } else if (isMegaEmbed && megaEmbedConfig != null && megaEmbedConfig.player.isNotBlank()) {
             megaEmbedConfig.player
         } else if (source.internalPlayer.isNotBlank()) {
             source.internalPlayer
-        } else if (megaEmbedConfig != null && megaEmbedConfig.player.isNotBlank()) {
-            megaEmbedConfig.player
         } else {
             "megaplay"
         }
@@ -250,12 +250,12 @@ object PlayerUtils {
                 source.movieTmdbUrl.contains("mgeb.top") ||
                 source.tvTmdbUrl.contains("mgeb.top")
 
-        val effectivePlayer = if (isMegaEmbed && megaEmbedConfig != null && megaEmbedConfig.player.isNotBlank()) {
+        val effectivePlayer = if (source.internalPlayer.isNotBlank() && source.id != "mgeb") {
+            source.internalPlayer
+        } else if (isMegaEmbed && megaEmbedConfig != null && megaEmbedConfig.player.isNotBlank()) {
             megaEmbedConfig.player
         } else if (source.internalPlayer.isNotBlank()) {
             source.internalPlayer
-        } else if (megaEmbedConfig != null && megaEmbedConfig.player.isNotBlank()) {
-            megaEmbedConfig.player
         } else {
             "megaplay"
         }

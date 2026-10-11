@@ -236,10 +236,10 @@ class FirebaseService private constructor(private val appContext: Context) {
         ),
         PlayerSource(
             id = "mgeb",
-            name = "Mgeb Embed",
-            description = "Player oficial Mgeb Embed via TMDB",
+            name = "Mgeb Embed (MegaPlay)",
+            description = "Player oficial Mgeb Embed (MegaPlay)",
             type = "Embed",
-            priority = 2,
+            priority = 1,
             language = "Dublado",
             isSystem = true,
             supportedContent = listOf("movie", "tv"),
@@ -248,6 +248,40 @@ class FirebaseService private constructor(private val appContext: Context) {
             internalPlayer = "megaplay",
             playerColor = "#fb542b",
             isDefault = true,
+            enabled = true,
+            providerOrigin = "MegaEmbed"
+        ),
+        PlayerSource(
+            id = "mgeb_tube",
+            name = "MegaEmbed (MegaTube)",
+            description = "Player alternativo Dublado de alta compatibilidade",
+            type = "Embed",
+            priority = 2,
+            language = "Dublado",
+            isSystem = true,
+            supportedContent = listOf("movie", "tv"),
+            movieTmdbUrl = "https://mgeb.top/embed/{tmdb_id}",
+            tvTmdbUrl = "https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}",
+            internalPlayer = "megatube",
+            playerColor = "#fb542b",
+            isDefault = false,
+            enabled = true,
+            providerOrigin = "MegaEmbed"
+        ),
+        PlayerSource(
+            id = "mgeb_vidstack",
+            name = "MegaEmbed (Vidstack)",
+            description = "Player alternativo Dublado com interface moderna",
+            type = "Embed",
+            priority = 3,
+            language = "Dublado",
+            isSystem = true,
+            supportedContent = listOf("movie", "tv"),
+            movieTmdbUrl = "https://mgeb.top/embed/{tmdb_id}",
+            tvTmdbUrl = "https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}",
+            internalPlayer = "vidstack",
+            playerColor = "#fb542b",
+            isDefault = false,
             enabled = true,
             providerOrigin = "MegaEmbed"
         )
@@ -6706,17 +6740,21 @@ class FirebaseService private constructor(private val appContext: Context) {
 
             val db = obtainFirestore() ?: return@withContext Result.failure(Exception("Serviço de banco de dados indisponível."))
 
-            // 1. Pré-verificação de disponibilidade no Firestore
-            Log.d(TAG, "[AUTH_DIAGNOSTIC] USERNAME_CHECK_START: doc=$norm")
+            // 1. Pré-verificação de disponibilidade no Firestore com resolução automática de colisão
+            var finalNorm = norm
+            var finalDisplayUsername = displayUsername
+            Log.d(TAG, "[AUTH_DIAGNOSTIC] USERNAME_CHECK_START: doc=$finalNorm")
             val existingUsernameDoc = try {
-                db.collection("usernames").document(norm).get().await()
+                db.collection("usernames").document(finalNorm).get().await()
             } catch (e: Exception) {
                 Log.e(TAG, "[AUTH_DIAGNOSTIC] USERNAME_CHECK_ERROR: ${e.message}")
                 throw e
             }
             if (existingUsernameDoc.exists()) {
-                Log.d(TAG, "[AUTH_DIAGNOSTIC] USERNAME_CHECK_CONFLICT: $norm")
-                return@withContext Result.failure(Exception("O nome de usuário $displayUsername já está em uso."))
+                val uniqueCandidate = "${norm}_${(1000..9999).random()}"
+                finalNorm = com.example.util.UsernameUtils.normalize(uniqueCandidate)
+                finalDisplayUsername = com.example.util.UsernameUtils.formatDisplay(uniqueCandidate)
+                Log.d(TAG, "[AUTH_DIAGNOSTIC] USERNAME_AUTO_RESOLVED_COLLISION: new=$finalNorm")
             }
             Log.d(TAG, "[AUTH_DIAGNOSTIC] USERNAME_CHECK_SUCCESS")
 
@@ -6736,8 +6774,8 @@ class FirebaseService private constructor(private val appContext: Context) {
                 uid = fbUser.uid,
                 email = trimmedEmail,
                 displayName = trimmedName,
-                username = displayUsername,
-                usernameNormalized = norm,
+                username = finalDisplayUsername,
+                usernameNormalized = finalNorm,
                 role = "USER",
                 deviceId = getOrGeneratePersistentDeviceId()
             )
@@ -6751,11 +6789,11 @@ class FirebaseService private constructor(private val appContext: Context) {
             batch.set(userRef, newUser)
 
             // Documento de reserva do username
-            val usernameRef = db.collection("usernames").document(norm)
+            val usernameRef = db.collection("usernames").document(finalNorm)
             val usernameRecord = UsernameRecord(
                 uid = fbUser.uid,
-                username = displayUsername,
-                usernameNormalized = norm,
+                username = finalDisplayUsername,
+                usernameNormalized = finalNorm,
                 email = trimmedEmail,
                 createdAt = System.currentTimeMillis()
             )

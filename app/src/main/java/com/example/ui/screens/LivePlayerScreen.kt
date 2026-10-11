@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.remote.ApiChannel
@@ -59,8 +60,8 @@ fun LivePlayerScreen(
     val activity = context as? Activity
     val repository = remember { LiveTvRepository.getInstance() }
 
-    val allChannels by repository.cachedChannels.collectAsState()
-    val allEvents by repository.cachedEvents.collectAsState()
+    val allChannels by repository.cachedChannels.collectAsStateWithLifecycle()
+    val allEvents by repository.cachedEvents.collectAsStateWithLifecycle()
 
     // Check if channelId is a Channel or an Event
     val matchedChannel = remember(channelId, allChannels) {

@@ -81,15 +81,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         onNavigateToLogin: () -> Unit,
         onAlreadyAuthenticated: () -> Unit
     ): AuthGuardResult {
-        val fbUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-        if (isAuthenticated && fbUser != null) {
-            onAlreadyAuthenticated()
-            return AuthGuardResult.AUTHENTICATED
-        } else {
-            setPendingDownloadIntent(pendingIntent)
-            onNavigateToLogin()
-            return AuthGuardResult.FAILED
-        }
+        // Downloads in RONYCINE are public and do not require user login
+        onAlreadyAuthenticated()
+        return AuthGuardResult.AUTHENTICATED
     }
 
     fun clearPendingDownloadIntent() {
@@ -128,11 +122,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         episode: Int? = null,
         mediaTitle: String? = null
     ) {
-        val fbUser = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser
-        if (fbUser == null) {
-            _downloadState.value = DownloadState.Idle
-            return
-        }
         viewModelScope.launch {
             _downloadState.value = DownloadState.Resolving(tmdbId, season, episode)
             

@@ -418,9 +418,9 @@ fun EmbedPlayer(
                                 ViewGroup.LayoutParams.MATCH_PARENT
                             )
 
-                            // Mitigation for MESA / RenderNode errors: 
-                            // Software layer on emulators or after crash, avoiding forced LAYER_TYPE_HARDWARE.
-                            WebViewUtils.applySafeLayerType(this, forceSoftware = WebViewUtils.isSoftwareRendererNeeded || retryCount > 0)
+                            // Safe layer configuration: allow default hardware compositing (LAYER_TYPE_NONE)
+                            // so HTML5 video decoders and iFrame surfaces render with image and sound simultaneously
+                            WebViewUtils.applySafeLayerType(this, forceSoftware = false)
                             setBackgroundColor(android.graphics.Color.BLACK)
                             try { resumeTimers() } catch (_: Exception) {}
 
@@ -451,8 +451,8 @@ fun EmbedPlayer(
                                 }
                                 setGeolocationEnabled(false)
                                 
-                                // Modern mobile browser User-Agent to avoid Cloudflare/bot detection
-                                userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
+                                // Modern mobile browser User-Agent to avoid Cloudflare bot-detection / outdated browser blocks
+                                userAgentString = "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
                             }
 
                             addJavascriptInterface(object {
@@ -1001,14 +1001,18 @@ fun EmbedPlayer(
                                     val isMainFrame = request?.isForMainFrame == true
                                     
                                     if (isMainFrame) {
-                                        android.util.Log.e("RONYCINE_DIAG", "[LIVE_STREAM_STATUS] Erro HTTP detectado no frame principal: $statusCode. URL=${request?.url}")
+                                        android.util.Log.i("RONYCINE_DIAG", "[LIVE_STREAM_STATUS] Status HTTP no frame principal: $statusCode. URL=${request?.url}")
                                     } else {
                                         android.util.Log.d("RONYCINE_DIAG", "[LIVE_STREAM_STATUS] Sub-recurso HTTP: $statusCode. URL=${request?.url}")
                                     }
 
                                     super.onReceivedHttpError(view, request, errorResponse)
                                     
-                                    if (isMainFrame && (statusCode >= 400)) {
+                                    // Cloudflare Managed Challenges and Turnstile bot protections return HTTP 403 or 503 for the challenge page.
+                                    // We MUST NOT abort on 403 or 503 during challenge verification; the WebView must be allowed
+                                    // to execute JavaScript so Cloudflare can verify and redirect to the video player.
+                                    val isChallengeStatus = (statusCode == 403 || statusCode == 503)
+                                    if (isMainFrame && (statusCode >= 400) && !isChallengeStatus) {
                                         android.util.Log.e("RONYCINE_DIAG", "HTTP_STATUS_ERROR: contentType=$mediaType, tmdbId=$tmdbId, playerUrl=$embedUrl, finalUrl=${request?.url}, status=$statusCode")
                                         handlePlayerFailure("Erro do servidor ($statusCode)")
                                     }
@@ -1124,12 +1128,24 @@ fun EmbedPlayer(
                                 """.trimIndent()
                                 loadDataWithBaseURL("https://ronycine.app", iframeHtml, "text/html", "UTF-8", null)
                             } else {
-                                // Inject Referer header to avoid 403 Forbidden errors from providers
+                                // Inject accurate Referer header matching target host to avoid 403 Forbidden errors
                                 val referer = when {
                                     cleanUrl.contains("rdembed") || cleanUrl.contains("reidosembeds") -> "https://reidosembeds.online"
-                                    else -> "https://ronycine.app"
+                                    cleanUrl.contains("mgeb") -> "https://mgeb.site/"
+                                    else -> {
+                                        try {
+                                            val u = android.net.Uri.parse(cleanUrl)
+                                            "${u.scheme}://${u.host}/"
+                                        } catch (_: Exception) {
+                                            "https://mgeb.site/"
+                                        }
+                                    }
                                 }
-                                val extraHeaders = mapOf("Referer" to referer)
+                                val extraHeaders = mapOf(
+                                    "Referer" to referer,
+                                    "Sec-Fetch-Mode" to "navigate",
+                                    "Sec-Fetch-Site" to "same-origin"
+                                )
                                 loadUrl(cleanUrl, extraHeaders)
                             }
                         }

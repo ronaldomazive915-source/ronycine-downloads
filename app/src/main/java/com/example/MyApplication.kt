@@ -61,9 +61,11 @@ class MyApplication : Application(), ImageLoaderFactory {
                 "WebView/Default/HTTP Cache",
                 "webview/Default/HTTP Cache",
                 "webview_playfilme_webview/Default/HTTP Cache/Code Cache",
-                "app_webview/Default/HTTP Cache/Code Cache"
+                "app_webview/Default/HTTP Cache/Code Cache",
+                "app_webview/Default/HTTP Cache",
+                "app_webview/Default/Code Cache"
             )
-            listOf(cacheDir, filesDir).forEach { root ->
+            listOf(cacheDir, filesDir, codeCacheDir).forEach { root ->
                 basePaths.forEach { basePath ->
                     try {
                         val baseDir = File(root, basePath)

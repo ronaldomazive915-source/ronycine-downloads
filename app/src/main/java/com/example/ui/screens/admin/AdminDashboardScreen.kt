@@ -367,18 +367,18 @@ fun AdminDashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     QuickActionButton(
-                        title = "TV AO VIVO",
-                        icon = Icons.Default.LiveTv,
-                        modifier = Modifier.weight(1f),
-                        hasPermission = currentUser?.hasPermission("tvAoVivo") == true,
-                        onClick = { onNavigateSection(AdminSection.TV_AO_VIVO) }
-                    )
-                    QuickActionButton(
                         title = "TESTAR PLAYERS",
                         icon = Icons.Default.PlayCircleOutline,
                         modifier = Modifier.weight(1f),
                         hasPermission = currentUser?.hasPermission("players") == true,
                         onClick = { onNavigateSection(AdminSection.PLAYERS) }
+                    )
+                    QuickActionButton(
+                        title = "CONFIGURAÇÕES",
+                        icon = Icons.Default.Settings,
+                        modifier = Modifier.weight(1f),
+                        hasPermission = currentUser?.hasPermission("configuracoes") == true,
+                        onClick = { onNavigateSection(AdminSection.CONFIGURACOES) }
                     )
                 }
 

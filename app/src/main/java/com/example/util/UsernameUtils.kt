@@ -76,4 +76,20 @@ object UsernameUtils {
         if (trimmed.startsWith("@")) return false
         return android.util.Patterns.EMAIL_ADDRESS.matcher(trimmed).matches()
     }
+
+    /**
+     * Gera automaticamente um identificador de usuário limpo e único a partir do e-mail e nome,
+     * sem exigir que o usuário digite um @username público no cadastro.
+     */
+    fun generateAutoUsername(name: String, email: String): String {
+        val baseFromEmail = email.substringBefore("@").lowercase().filter { it.isLetterOrDigit() || it == '_' }
+        val baseFromName = name.lowercase().filter { it.isLetterOrDigit() || it == '_' }
+        val chosenBase = when {
+            baseFromEmail.isNotBlank() -> baseFromEmail
+            baseFromName.isNotBlank() -> baseFromName
+            else -> "user"
+        }.take(12).ifBlank { "user" }
+        val randomSuffix = (1000..9999).random()
+        return "${chosenBase}_$randomSuffix"
+    }
 }

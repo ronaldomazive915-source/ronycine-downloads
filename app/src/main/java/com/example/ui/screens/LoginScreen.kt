@@ -87,11 +87,6 @@ private val FALLBACK_CINEMATIC_POSTERS = listOf(
     "https://image.tmdb.org/t/p/w500/1E5baAaEse26fej7uHcjOgEE2t2.jpg"  // Fast X
 )
 
-private enum class LoginStep {
-    IDENTIFIER,
-    PASSWORD
-}
-
 @Composable
 fun LoginScreen(
     viewModel: AuthViewModel,
@@ -99,20 +94,14 @@ fun LoginScreen(
     onLoginSuccess: () -> Unit
 ) {
     var isSignUpMode by remember { mutableStateOf(false) }
-    var loginStep by remember { mutableStateOf(LoginStep.IDENTIFIER) }
 
-    // State for Login
-    var userIdentifier by remember { mutableStateOf("") }
-    var resolvedEmail by remember { mutableStateOf("") }
-    var displayIdentifier by remember { mutableStateOf("") }
-    var isUsernameDetected by remember { mutableStateOf(false) }
-    var password by remember { mutableStateOf("") }
+    // State for Login (Simple E-mail and Password)
+    var loginEmail by remember { mutableStateOf("") }
+    var loginPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
-    var isResolvingIdentifier by remember { mutableStateOf(false) }
 
-    // State for Sign Up
+    // State for Sign Up (Simple Name, E-mail, Password, Confirm Password)
     var signUpName by remember { mutableStateOf("") }
-    var signUpUsername by remember { mutableStateOf("") }
     var signUpEmail by remember { mutableStateOf("") }
     var signUpPassword by remember { mutableStateOf("") }
     var signUpConfirmPassword by remember { mutableStateOf("") }
@@ -124,7 +113,6 @@ fun LoginScreen(
     var forgotPasswordInput by remember { mutableStateOf("") }
 
     val authState by viewModel.authState.collectAsState()
-    val usernameCheckState by viewModel.usernameCheckState.collectAsState()
     val catalogPosters by viewModel.catalogPosters.collectAsState()
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -297,28 +285,19 @@ fun LoginScreen(
         )
     }
 
-    // Handle continuing from Identifier to Password step
-    val onContinueIdentifier: () -> Unit = {
-        val input = userIdentifier.trim()
-        if (input.isBlank()) {
-            Toast.makeText(context, "Digite seu e-mail ou @nome de usuário.", Toast.LENGTH_SHORT).show()
+    val onPerformLogin: () -> Unit = {
+        val email = loginEmail.trim()
+        val pass = loginPassword
+        if (email.isBlank() || pass.isBlank()) {
+            Toast.makeText(context, "Preencha o e-mail e a senha.", Toast.LENGTH_SHORT).show()
         } else {
-            isResolvingIdentifier = true
-            viewModel.clearError()
-            viewModel.resolveIdentifier(
-                identifier = input,
-                onSuccess = { email, display, isUsername ->
-                    isResolvingIdentifier = false
-                    resolvedEmail = email
-                    displayIdentifier = display
-                    isUsernameDetected = isUsername
-                    loginStep = LoginStep.PASSWORD
-                },
-                onError = { err ->
-                    isResolvingIdentifier = false
-                }
-            )
+            viewModel.signIn(email, pass)
         }
+    }
+
+    val onPerformSignUp: () -> Unit = {
+        focusManager.clearFocus()
+        viewModel.signUp(signUpName, signUpEmail, signUpPassword, signUpConfirmPassword)
     }
 
     Box(
@@ -463,9 +442,7 @@ fun LoginScreen(
                         onTabSelected = { signUp ->
                             if (isSignUpMode != signUp) {
                                 isSignUpMode = signUp
-                                loginStep = LoginStep.IDENTIFIER
                                 viewModel.clearError()
-                                viewModel.clearUsernameCheckState()
                             }
                         }
                     )
@@ -474,7 +451,7 @@ fun LoginScreen(
 
                     if (isSignUpMode) {
                         // =========================================================
-                        // SIGN UP MODE (CADASTRO COM @NOME DE USUÁRIO)
+                        // SIGN UP MODE (CADASTRO SIMPLES COM E-MAIL E SENHA)
                         // =========================================================
                         Text(
                             text = "CRIAR CONTA NO RONYCINE",
@@ -485,7 +462,7 @@ fun LoginScreen(
                         )
 
                         Text(
-                            text = "Escolha seu @nome de usuário e acesse seus conteúdos.",
+                            text = "Preencha seus dados para começar a assistir.",
                             color = TextSecondary,
                             fontSize = 12.sp,
                             textAlign = TextAlign.Center,
@@ -508,90 +485,7 @@ fun LoginScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 2. @Nome de Usuário (Com validação e debounce em tempo real)
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            LoginTextField(
-                                value = signUpUsername,
-                                onValueChange = { raw ->
-                                    val cleaned = raw.trim()
-                                    signUpUsername = cleaned
-                                    viewModel.clearError()
-                                    viewModel.checkUsernameAvailability(cleaned)
-                                },
-                                label = "@Nome de usuário",
-                                leadingIcon = Icons.Default.AlternateEmail,
-                                keyboardType = KeyboardType.Text,
-                                imeAction = ImeAction.Next,
-                                testTag = "signup_username_input"
-                            )
-
-                            // Status em tempo real do username
-                            when (val state = usernameCheckState) {
-                                is UsernameCheckState.Checking -> {
-                                    Row(
-                                        modifier = Modifier.padding(start = 4.dp, top = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(12.dp),
-                                            color = BrandRed,
-                                            strokeWidth = 1.5.dp
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "Verificando disponibilidade...",
-                                            color = TextSecondary,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-                                }
-                                is UsernameCheckState.Available -> {
-                                    Row(
-                                        modifier = Modifier.padding(start = 4.dp, top = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.CheckCircle,
-                                            contentDescription = null,
-                                            tint = Color(0xFF10B981),
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(5.dp))
-                                        Text(
-                                            text = "${state.formattedUsername} disponível",
-                                            color = Color(0xFF10B981),
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                                is UsernameCheckState.Unavailable -> {
-                                    Row(
-                                        modifier = Modifier.padding(start = 4.dp, top = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Cancel,
-                                            contentDescription = null,
-                                            tint = Color(0xFFEF4444),
-                                            modifier = Modifier.size(13.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(5.dp))
-                                        Text(
-                                            text = state.reason,
-                                            color = Color(0xFFEF4444),
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                    }
-                                }
-                                else -> {}
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // 3. E-mail
+                        // 2. E-mail
                         LoginTextField(
                             value = signUpEmail,
                             onValueChange = {
@@ -607,7 +501,7 @@ fun LoginScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 4. Senha
+                        // 3. Senha
                         LoginTextField(
                             value = signUpPassword,
                             onValueChange = {
@@ -626,7 +520,7 @@ fun LoginScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 5. Confirmar Senha
+                        // 4. Confirmar Senha
                         LoginTextField(
                             value = signUpConfirmPassword,
                             onValueChange = {
@@ -643,7 +537,7 @@ fun LoginScreen(
                             testTag = "signup_confirm_password_input",
                             onDone = {
                                 focusManager.clearFocus()
-                                viewModel.signUp(signUpName, signUpUsername, signUpEmail, signUpPassword, signUpConfirmPassword)
+                                onPerformSignUp()
                             }
                         )
 
@@ -665,268 +559,114 @@ fun LoginScreen(
                             isSuccess = authState is AuthState.Success,
                             onClick = {
                                 focusManager.clearFocus()
-                                viewModel.signUp(signUpName, signUpUsername, signUpEmail, signUpPassword, signUpConfirmPassword)
+                                onPerformSignUp()
                             },
                             testTag = "create_account_button"
                         )
 
                     } else {
                         // =========================================================
-                        // 2-STEP LOGIN FLOW (ENTRAR NO RONYCINE -> CONFIRME SUA SENHA)
+                        // LOGIN SIMPLES (E-MAIL E PALAVRA-PASSE DIRETO)
                         // =========================================================
-                        AnimatedContent(
-                            targetState = loginStep,
-                            transitionSpec = {
-                                if (targetState == LoginStep.PASSWORD) {
-                                    (slideInHorizontally { width -> width / 2 } + fadeIn(tween(250)))
-                                        .togetherWith(slideOutHorizontally { width -> -width / 2 } + fadeOut(tween(200)))
-                                } else {
-                                    (slideInHorizontally { width -> -width / 2 } + fadeIn(tween(250)))
-                                        .togetherWith(slideOutHorizontally { width -> width / 2 } + fadeOut(tween(200)))
-                                }
+                        Text(
+                            text = "ENTRAR NO RONYCINE",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.4.sp
+                        )
+
+                        Text(
+                            text = "Digite seu e-mail e sua senha para acessar sua conta.",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 3.dp, bottom = 16.dp)
+                        )
+
+                        // 1. Campo de E-mail
+                        LoginTextField(
+                            value = loginEmail,
+                            onValueChange = {
+                                loginEmail = it
+                                viewModel.clearError()
                             },
-                            label = "login_steps_anim"
-                        ) { step ->
-                            Column(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                when (step) {
-                                    LoginStep.IDENTIFIER -> {
-                                        // -----------------------------------------
-                                        // STEP 1: ENTRAR NO RONYCINE (E-mail ou nome de usuário)
-                                        // -----------------------------------------
-                                        Text(
-                                            text = "ENTRAR NO RONYCINE",
-                                            color = Color.White,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 0.4.sp
-                                        )
+                            label = "E-mail",
+                            leadingIcon = Icons.Default.Email,
+                            keyboardType = KeyboardType.Email,
+                            imeAction = ImeAction.Next,
+                            testTag = "login_email_input"
+                        )
 
-                                        Text(
-                                            text = "Digite seu e-mail ou @nome de usuário.",
-                                            color = TextSecondary,
-                                            fontSize = 12.sp,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.padding(top = 3.dp, bottom = 16.dp)
-                                        )
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                                        LoginTextField(
-                                            value = userIdentifier,
-                                            onValueChange = {
-                                                userIdentifier = it
-                                                viewModel.clearError()
-                                            },
-                                            label = "E-mail ou @nome de usuário",
-                                            leadingIcon = Icons.Default.AlternateEmail,
-                                            keyboardType = KeyboardType.Email,
-                                            imeAction = ImeAction.Done,
-                                            testTag = "login_identifier_input",
-                                            onDone = {
-                                                focusManager.clearFocus()
-                                                onContinueIdentifier()
-                                            }
-                                        )
-
-                                        // Auth Error Banner
-                                        if (authState is AuthState.Error) {
-                                            val errorMsg = (authState as AuthState.Error).message
-                                            Spacer(modifier = Modifier.height(12.dp))
-                                            AuthErrorBanner(errorMsg)
-                                        }
-
-                                        Spacer(modifier = Modifier.height(18.dp))
-
-                                        // CONTINUAR Button
-                                        MainAuthActionButton(
-                                            buttonText = "CONTINUAR",
-                                            loadingText = "VERIFICANDO...",
-                                            successText = "CONTINUANDO...",
-                                            leadingIcon = Icons.Default.ArrowForward,
-                                            isLoading = isResolvingIdentifier || (authState is AuthState.Loading && loginStep == LoginStep.IDENTIFIER),
-                                            isSuccess = false,
-                                            onClick = {
-                                                focusManager.clearFocus()
-                                                onContinueIdentifier()
-                                            },
-                                            testTag = "login_continue_button"
-                                        )
-                                    }
-
-                                    LoginStep.PASSWORD -> {
-                                        // -----------------------------------------
-                                        // STEP 2: CONFIRME SUA SENHA
-                                        // -----------------------------------------
-                                        Text(
-                                            text = "CONFIRME SUA SENHA",
-                                            color = Color.White,
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            letterSpacing = 0.4.sp
-                                        )
-
-                                        Text(
-                                            text = "Digite sua senha para continuar.",
-                                            color = TextSecondary,
-                                            fontSize = 12.sp,
-                                            textAlign = TextAlign.Center,
-                                            modifier = Modifier.padding(top = 3.dp, bottom = 12.dp)
-                                        )
-
-                                        // Elegant Identifier Card Badge
-                                        Surface(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable {
-                                                    viewModel.clearError()
-                                                    loginStep = LoginStep.IDENTIFIER
-                                                },
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = DarkBackground.copy(alpha = 0.85f),
-                                            border = BorderStroke(1.dp, CardBorder)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = if (isUsernameDetected) Icons.Default.AccountCircle else Icons.Default.Email,
-                                                    contentDescription = null,
-                                                    tint = BrandRed,
-                                                    modifier = Modifier.size(18.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = if (isUsernameDetected) displayIdentifier else resolvedEmail,
-                                                        color = Color.White,
-                                                        fontSize = 13.5.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    if (isUsernameDetected && resolvedEmail.isNotBlank()) {
-                                                        Text(
-                                                            text = resolvedEmail,
-                                                            color = TextSecondary,
-                                                            fontSize = 11.sp,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    }
-                                                }
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = "Alterar",
-                                                    color = BrandRed,
-                                                    fontSize = 11.5.sp,
-                                                    fontWeight = FontWeight.Medium
-                                                )
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.height(14.dp))
-
-                                        // Password Field
-                                        LoginTextField(
-                                            value = password,
-                                            onValueChange = {
-                                                password = it
-                                                viewModel.clearError()
-                                            },
-                                            label = "Senha",
-                                            leadingIcon = Icons.Default.Lock,
-                                            keyboardType = KeyboardType.Password,
-                                            imeAction = ImeAction.Done,
-                                            isPassword = true,
-                                            passwordVisible = passwordVisible,
-                                            onTogglePassword = { passwordVisible = !passwordVisible },
-                                            testTag = "login_password_input",
-                                            onDone = {
-                                                focusManager.clearFocus()
-                                                viewModel.signIn(resolvedEmail, password)
-                                            }
-                                        )
-
-                                        // Forgot password link
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(top = 6.dp, bottom = 2.dp),
-                                            contentAlignment = Alignment.CenterEnd
-                                        ) {
-                                            Text(
-                                                text = "Esqueci minha senha",
-                                                color = BrandRed.copy(alpha = 0.95f),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .clickable {
-                                                        forgotPasswordInput = if (isUsernameDetected) displayIdentifier else resolvedEmail
-                                                        showForgotPasswordDialog = true
-                                                    }
-                                                    .padding(vertical = 4.dp, horizontal = 4.dp)
-                                                    .testTag("forgot_password_button")
-                                            )
-                                        }
-
-                                        // Auth Error Banner
-                                        if (authState is AuthState.Error) {
-                                            val errorMsg = (authState as AuthState.Error).message
-                                            Spacer(modifier = Modifier.height(10.dp))
-                                            AuthErrorBanner(errorMsg)
-                                        }
-
-                                        Spacer(modifier = Modifier.height(16.dp))
-
-                                        // ENTRAR Button
-                                        MainAuthActionButton(
-                                            buttonText = "ENTRAR",
-                                            loadingText = "ENTRANDO...",
-                                            successText = "LOGIN REALIZADO",
-                                            leadingIcon = Icons.Default.Login,
-                                            isLoading = authState is AuthState.Loading,
-                                            isSuccess = authState is AuthState.Success,
-                                            onClick = {
-                                                focusManager.clearFocus()
-                                                viewModel.signIn(resolvedEmail, password)
-                                            },
-                                            testTag = "login_button"
-                                        )
-
-                                        Spacer(modifier = Modifier.height(10.dp))
-
-                                        // Back to identifier step
-                                        TextButton(
-                                            onClick = {
-                                                viewModel.clearError()
-                                                loginStep = LoginStep.IDENTIFIER
-                                            },
-                                            modifier = Modifier.testTag("back_to_identifier_button")
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                                contentDescription = null,
-                                                tint = TextSecondary,
-                                                modifier = Modifier.size(14.dp)
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "Voltar",
-                                                color = TextSecondary,
-                                                fontSize = 12.5.sp,
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        }
-                                    }
-                                }
+                        // 2. Campo de Senha
+                        LoginTextField(
+                            value = loginPassword,
+                            onValueChange = {
+                                loginPassword = it
+                                viewModel.clearError()
+                            },
+                            label = "Senha",
+                            leadingIcon = Icons.Default.Lock,
+                            keyboardType = KeyboardType.Password,
+                            imeAction = ImeAction.Done,
+                            isPassword = true,
+                            passwordVisible = passwordVisible,
+                            onTogglePassword = { passwordVisible = !passwordVisible },
+                            testTag = "login_password_input",
+                            onDone = {
+                                focusManager.clearFocus()
+                                onPerformLogin()
                             }
+                        )
+
+                        // Link Esqueci minha senha
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 6.dp, bottom = 2.dp),
+                            contentAlignment = Alignment.CenterEnd
+                        ) {
+                            Text(
+                                text = "Esqueci minha senha",
+                                color = BrandRed.copy(alpha = 0.95f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        forgotPasswordInput = loginEmail.trim()
+                                        showForgotPasswordDialog = true
+                                    }
+                                    .padding(vertical = 4.dp, horizontal = 4.dp)
+                                    .testTag("forgot_password_button")
+                            )
                         }
+
+                        // Auth Error Banner
+                        if (authState is AuthState.Error) {
+                            val errorMsg = (authState as AuthState.Error).message
+                            Spacer(modifier = Modifier.height(10.dp))
+                            AuthErrorBanner(errorMsg)
+                        }
+
+                        Spacer(modifier = Modifier.height(18.dp))
+
+                        // Botão ENTRAR
+                        MainAuthActionButton(
+                            buttonText = "ENTRAR",
+                            loadingText = "ENTRANDO...",
+                            successText = "LOGIN REALIZADO",
+                            leadingIcon = Icons.Default.Login,
+                            isLoading = authState is AuthState.Loading,
+                            isSuccess = authState is AuthState.Success,
+                            onClick = {
+                                focusManager.clearFocus()
+                                onPerformLogin()
+                            },
+                            testTag = "login_button"
+                        )
                     }
                 }
             }
@@ -975,7 +715,7 @@ fun LoginScreen(
     }
 
     // =========================================================================
-    // 4. PASSWORD RECOVERY DIALOG (SUPPORTS EMAIL OR @USERNAME)
+    // 4. PASSWORD RECOVERY DIALOG (E-MAIL)
     // =========================================================================
     if (showForgotPasswordDialog) {
         AlertDialog(
@@ -1003,7 +743,7 @@ fun LoginScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Digite seu e-mail ou @nome de usuário cadastrado para receber o link seguro de redefinição de senha.",
+                        text = "Digite seu endereço de e-mail cadastrado para receber o link seguro de redefinição de senha.",
                         color = TextSecondary,
                         fontSize = 12.5.sp,
                         lineHeight = 17.sp
@@ -1011,8 +751,8 @@ fun LoginScreen(
                     LoginTextField(
                         value = forgotPasswordInput,
                         onValueChange = { forgotPasswordInput = it },
-                        label = "E-mail ou @nome de usuário",
-                        leadingIcon = Icons.Default.AlternateEmail,
+                        label = "E-mail cadastrado",
+                        leadingIcon = Icons.Default.Email,
                         keyboardType = KeyboardType.Email,
                         imeAction = ImeAction.Done,
                         testTag = "forgot_password_input"

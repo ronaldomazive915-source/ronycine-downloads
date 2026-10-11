@@ -44,7 +44,6 @@ fun NotificationScreen(
     notificationViewModel: com.example.ui.viewmodel.NotificationViewModel? = null,
     onNavigateBack: () -> Unit,
     onNavigateToDetail: (Int, String) -> Unit,
-    onNavigateToLiveTv: () -> Unit,
     onNavigateToUpdateScreen: () -> Unit = {},
     onNavigateToWhatsNew: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -231,7 +230,7 @@ fun NotificationScreen(
                             if (isUpdateType || isApkUrl) {
                                 onNavigateToUpdateScreen()
                             } else {
-                                handleNotificationAction(actionUrl, onNavigateToDetail, onNavigateToLiveTv)
+                                handleNotificationAction(actionUrl, onNavigateToDetail)
                             }
                         }
                     )
@@ -422,8 +421,7 @@ private fun String?.isNull_or_blank(): Boolean {
 
 private fun handleNotificationAction(
     actionUrl: String?,
-    onNavigateToDetail: (Int, String) -> Unit,
-    onNavigateToLiveTv: () -> Unit
+    onNavigateToDetail: (Int, String) -> Unit
 ) {
     if (actionUrl == null) return
     try {
@@ -434,11 +432,7 @@ private fun handleNotificationAction(
             val tmdbId = actionUrl.substringAfter("tv/").toIntOrNull()
             if (tmdbId != null) {
                 onNavigateToDetail(tmdbId, "tv")
-            } else {
-                onNavigateToLiveTv()
             }
-        } else if (actionUrl == "livetv" || actionUrl == "tv") {
-            onNavigateToLiveTv()
         } else {
             val id = actionUrl.toIntOrNull()
             if (id != null) {

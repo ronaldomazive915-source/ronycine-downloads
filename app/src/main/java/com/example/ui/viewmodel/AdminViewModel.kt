@@ -54,7 +54,6 @@ enum class AdminSection(val title: String, val iconName: String, val permissionK
     IMPORTACAO_MASSA("Importação em Massa", "CloudSync", "importacaoMassa"),
     TOP_10("TOP 10", "Whatshot", "top10"),
     DESTAQUES("Conteúdo em Destaque", "Star", "destaques"),
-    TV_AO_VIVO("TV ao Vivo", "LiveTv", "tvAoVivo"),
     SINCRONIZACAO_AUTOMATICA("Sincronização Automática", "AutoMode", "sincronizarCatalogo"),
     USUARIOS("Usuários", "Group", "users"),
     PERFIS("Perfis", "AccountCircle", "users"),
@@ -596,7 +595,7 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
             if (!mgebExists) {
                 val mgeb = com.example.data.remote.PlayerSource(
                     id = "mgeb",
-                    name = "Mgeb Embed",
+                    name = "Mgeb Embed (MegaPlay)",
                     type = "Embed",
                     priority = 1,
                     language = "Dublado",
@@ -609,6 +608,44 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                     providerOrigin = "MegaEmbed"
                 )
                 firebaseService.upsertPlayerSourceInCloud(mgeb)
+            }
+
+            val mgebTubeExists = currentSources.any { it.id == "mgeb_tube" || it.name.contains("MegaTube", ignoreCase = true) }
+            if (!mgebTubeExists) {
+                val mgebTube = com.example.data.remote.PlayerSource(
+                    id = "mgeb_tube",
+                    name = "MegaEmbed (MegaTube)",
+                    type = "Embed",
+                    priority = 2,
+                    language = "Dublado",
+                    movieTmdbUrl = "https://mgeb.top/embed/{tmdb_id}",
+                    tvTmdbUrl = "https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}",
+                    internalPlayer = "megatube",
+                    playerColor = "#fb542b",
+                    isDefault = false,
+                    enabled = true,
+                    providerOrigin = "MegaEmbed"
+                )
+                firebaseService.upsertPlayerSourceInCloud(mgebTube)
+            }
+
+            val mgebVidstackExists = currentSources.any { it.id == "mgeb_vidstack" || it.name.contains("Vidstack", ignoreCase = true) }
+            if (!mgebVidstackExists) {
+                val mgebVidstack = com.example.data.remote.PlayerSource(
+                    id = "mgeb_vidstack",
+                    name = "MegaEmbed (Vidstack)",
+                    type = "Embed",
+                    priority = 3,
+                    language = "Dublado",
+                    movieTmdbUrl = "https://mgeb.top/embed/{tmdb_id}",
+                    tvTmdbUrl = "https://mgeb.top/embed/{tmdb_id}/{season_number}/{episode_number}",
+                    internalPlayer = "vidstack",
+                    playerColor = "#fb542b",
+                    isDefault = false,
+                    enabled = true,
+                    providerOrigin = "MegaEmbed"
+                )
+                firebaseService.upsertPlayerSourceInCloud(mgebVidstack)
             }
 
             if (!vidsrcExists) {
@@ -1556,7 +1593,6 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
     val seriesCount: Flow<Int> = mediaRepository.seriesCount
     val animeCount: Flow<Int> = mediaRepository.animeCount
     val doramaCount: Flow<Int> = mediaRepository.doramaCount
-    val allChannels: Flow<List<com.example.data.local.ChannelEntity>> = mediaRepository.allLiveChannels
 
     // --- Catalog Management States ---
     val allCatalogMedia: StateFlow<List<MediaEntity>> = mediaRepository.allMedia

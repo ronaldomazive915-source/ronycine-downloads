@@ -159,14 +159,12 @@ fun DetailScreen(
     var currentDownloadSeason by remember { mutableStateOf<Int?>(null) }
     var currentDownloadEpisode by remember { mutableStateOf<Int?>(null) }
 
-    LaunchedEffect(pendingDownloadIntent, media, currentUser) {
+    LaunchedEffect(pendingDownloadIntent, media) {
         val intent = pendingDownloadIntent
         if (intent != null && media != null && intent.tmdbId == media?.tmdbId && !intent.isPlayer) {
-            if (currentUser != null) {
-                // Real auth verified: proceed with download resolution
-                if (intent.isSeriesDownloadSheet) {
-                    showSeriesDownloadSheet = true
-                } else if (intent.season != null && intent.episode != null) {
+            if (intent.isSeriesDownloadSheet) {
+                showSeriesDownloadSheet = true
+            } else if (intent.season != null && intent.episode != null) {
                     currentDownloadMediaType = "tv"
                     currentDownloadTmdbId = media!!.tmdbId.toString()
                     currentDownloadTitle = media!!.title
@@ -196,15 +194,7 @@ fun DetailScreen(
                 viewModel.clearPendingDownloadIntent()
             }
         }
-    }
 
-    LaunchedEffect(currentUser) {
-        if (currentUser == null) {
-            showSeriesDownloadSheet = false
-            showDownloadSheet = false
-            viewModel.resetDownloadState()
-        }
-    }
     var showShareSheet by remember { mutableStateOf(false) }
     var shareEpisodeTarget by remember { mutableStateOf<EpisodeEntity?>(null) }
 
@@ -840,26 +830,15 @@ fun DetailScreen(
                             CompactDownloadButton(
                                 isResolving = isResolvingThis,
                                 onClick = { 
-                                    viewModel.requireAuthenticationForDownload(
-                                        isAuthenticated = currentUser != null,
-                                        pendingIntent = PendingDownloadIntent(
-                                            type = "movie",
-                                            tmdbId = item.tmdbId,
-                                            mediaTitle = item.title
-                                        ),
-                                        onNavigateToLogin = onNavigateToLogin,
-                                        onAlreadyAuthenticated = {
-                                            currentDownloadMediaType = "movie"
-                                            currentDownloadTmdbId = item.tmdbId.toString()
-                                            currentDownloadTitle = item.title
-                                            currentDownloadSubtitle = (item as? MediaEntity)?.releaseYear
-                                            currentDownloadPoster = item.posterPath
-                                            currentDownloadSeason = null
-                                            currentDownloadEpisode = null
+                                    currentDownloadMediaType = "movie"
+                                    currentDownloadTmdbId = item.tmdbId.toString()
+                                    currentDownloadTitle = item.title
+                                    currentDownloadSubtitle = (item as? MediaEntity)?.releaseYear
+                                    currentDownloadPoster = item.posterPath
+                                    currentDownloadSeason = null
+                                    currentDownloadEpisode = null
 
-                                            viewModel.resolveDownload("movie", item.tmdbId, mediaTitle = item.title) 
-                                        }
-                                    )
+                                    viewModel.resolveDownload("movie", item.tmdbId, mediaTitle = item.title) 
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -870,18 +849,7 @@ fun DetailScreen(
                             CompactDownloadButton(
                                 isResolving = false,
                                 onClick = { 
-                                    viewModel.requireAuthenticationForDownload(
-                                        isAuthenticated = currentUser != null,
-                                        pendingIntent = PendingDownloadIntent(
-                                            type = "tv",
-                                            tmdbId = item.tmdbId,
-                                            isSeriesDownloadSheet = true
-                                        ),
-                                        onNavigateToLogin = onNavigateToLogin,
-                                        onAlreadyAuthenticated = {
-                                            showSeriesDownloadSheet = true
-                                        }
-                                    )
+                                    showSeriesDownloadSheet = true
                                 },
                                 modifier = Modifier
                                     .weight(1f)
@@ -1749,35 +1717,22 @@ fun ModernEpisodeCard(
                         .clip(RoundedCornerShape(6.dp))
                         .background(Color.White.copy(alpha = 0.08f))
                         .clickable { 
-                            viewModel.requireAuthenticationForDownload(
-                                isAuthenticated = isAuthenticated,
-                                pendingIntent = PendingDownloadIntent(
-                                    type = "tv",
-                                    tmdbId = media.tmdbId,
-                                    season = episode.seasonNumber,
-                                    episode = episode.episodeNumber,
-                                    mediaTitle = "${media.title} S${episode.seasonNumber}E${episode.episodeNumber}"
-                                ),
-                                onNavigateToLogin = onNavigateToLogin,
-                                onAlreadyAuthenticated = {
-                                    onSetDownloadMetadata(
-                                        "tv",
-                                        media.tmdbId.toString(),
-                                        media.title,
-                                        "S${episode.seasonNumber}E${episode.episodeNumber}",
-                                        media.posterPath,
-                                        episode.seasonNumber,
-                                        episode.episodeNumber
-                                    )
+                            onSetDownloadMetadata(
+                                "tv",
+                                media.tmdbId.toString(),
+                                media.title,
+                                "S${episode.seasonNumber}E${episode.episodeNumber}",
+                                media.posterPath,
+                                episode.seasonNumber,
+                                episode.episodeNumber
+                            )
 
-                                    viewModel.resolveDownload(
-                                        type = "tv",
-                                        tmdbId = media.tmdbId,
-                                        season = episode.seasonNumber,
-                                        episode = episode.episodeNumber,
-                                        mediaTitle = "${media.title} S${episode.seasonNumber}E${episode.episodeNumber}"
-                                    )
-                                }
+                            viewModel.resolveDownload(
+                                type = "tv",
+                                tmdbId = media.tmdbId,
+                                season = episode.seasonNumber,
+                                episode = episode.episodeNumber,
+                                mediaTitle = "${media.title} S${episode.seasonNumber}E${episode.episodeNumber}"
                             )
                         },
                     contentAlignment = Alignment.Center

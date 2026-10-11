@@ -276,18 +276,12 @@ fun DownloadOptionsBottomSheet(
                     description = "Download Manager",
                     isInstalled = idmInstalled,
                     onClick = {
-                        viewModel.requireAuthentication(
-                            isAuthenticated = currentUserState != null,
-                            onNavigateToLogin = onNavigateToLogin,
-                            onAlreadyAuthenticated = {
-                                if (idmInstalled) {
-                                    ExternalDownloadManager.downloadWith1DM(context, finalDownloadUrl, fileName)
-                                    onDismiss()
-                                } else {
-                                    ExternalDownloadManager.openPlayStore(context, ExternalDownloadManager.PKG_1DM)
-                                }
-                            }
-                        )
+                        if (idmInstalled) {
+                            ExternalDownloadManager.downloadWith1DM(context, finalDownloadUrl, fileName)
+                            onDismiss()
+                        } else {
+                            ExternalDownloadManager.openPlayStore(context, ExternalDownloadManager.PKG_1DM)
+                        }
                     }
                 )
 
@@ -300,18 +294,12 @@ fun DownloadOptionsBottomSheet(
                     description = "Advanced Download Manager",
                     isInstalled = admInstalled,
                     onClick = {
-                        viewModel.requireAuthentication(
-                            isAuthenticated = currentUserState != null,
-                            onNavigateToLogin = onNavigateToLogin,
-                            onAlreadyAuthenticated = {
-                                if (admInstalled) {
-                                    ExternalDownloadManager.downloadWithADM(context, finalDownloadUrl, fileName)
-                                    onDismiss()
-                                } else {
-                                    ExternalDownloadManager.openPlayStore(context, ExternalDownloadManager.PKG_ADM)
-                                }
-                            }
-                        )
+                        if (admInstalled) {
+                            ExternalDownloadManager.downloadWithADM(context, finalDownloadUrl, fileName)
+                            onDismiss()
+                        } else {
+                            ExternalDownloadManager.openPlayStore(context, ExternalDownloadManager.PKG_ADM)
+                        }
                     }
                 )
 
@@ -324,14 +312,8 @@ fun DownloadOptionsBottomSheet(
                     description = "Escolher aplicativo compatível",
                     isInstalled = null,
                     onClick = {
-                        viewModel.requireAuthentication(
-                            isAuthenticated = currentUserState != null,
-                            onNavigateToLogin = onNavigateToLogin,
-                            onAlreadyAuthenticated = {
-                                ExternalDownloadManager.downloadWithSystemChooser(context, finalDownloadUrl, fileName)
-                                onDismiss()
-                            }
-                        )
+                        ExternalDownloadManager.downloadWithSystemChooser(context, finalDownloadUrl, fileName)
+                        onDismiss()
                     }
                 )
 
@@ -349,38 +331,33 @@ fun DownloadOptionsBottomSheet(
                                    else if (existingTask?.status == DownloadStatus.COMPLETED) "Concluído" 
                                    else null,
                     onClick = {
-                        viewModel.requireAuthentication(
-                            isAuthenticated = currentUserState != null,
-                            onNavigateToLogin = onNavigateToLogin,
-                            onAlreadyAuthenticated = {
-                                if (existingTask?.status == DownloadStatus.COMPLETED) {
-                                    Toast.makeText(context, "Este conteúdo já está disponível offline.", Toast.LENGTH_SHORT).show()
-                                    onNavigateToDownloads?.invoke() ?: onDismiss()
-                                } else if (existingTask?.status == DownloadStatus.DOWNLOADING || existingTask?.status == DownloadStatus.QUEUED) {
-                                    Toast.makeText(context, "Este conteúdo já está sendo baixado.", Toast.LENGTH_SHORT).show()
-                                } else if (finalDownloadUrl.isBlank()) {
-                                    Toast.makeText(context, "Aguarde a validação da fonte do vídeo...", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    val task = DownloadTask(
-                            id = taskId,
-                            title = title,
-                            subTitle = subTitle,
-                            posterPath = posterPath,
-                            url = finalDownloadUrl,
-                            fileName = fileName,
-                            mediaType = mediaType,
-                            tmdbId = tmdbId,
-                            seasonNumber = seasonNumber,
-                            episodeNumber = episodeNumber,
-                            totalSize = if (detectedSize > 0) detectedSize else 0L,
-                            status = DownloadStatus.QUEUED,
-                            mimeType = (validationResult as? SourceValidationResult.Success)?.contentType ?: if (finalDownloadUrl.contains(".m3u8")) "application/x-mpegURL" else "video/mp4"
-                        )
-                        downloadManager.startDownload(task)
-                        Toast.makeText(context, "Download iniciado no RONYCINE", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        )
+                        if (existingTask?.status == DownloadStatus.COMPLETED) {
+                            Toast.makeText(context, "Este conteúdo já está disponível offline.", Toast.LENGTH_SHORT).show()
+                            onNavigateToDownloads?.invoke() ?: onDismiss()
+                        } else if (existingTask?.status == DownloadStatus.DOWNLOADING || existingTask?.status == DownloadStatus.QUEUED) {
+                            Toast.makeText(context, "Este conteúdo já está sendo baixado.", Toast.LENGTH_SHORT).show()
+                        } else if (finalDownloadUrl.isBlank()) {
+                            Toast.makeText(context, "Aguarde a validação da fonte do vídeo...", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val task = DownloadTask(
+                                id = taskId,
+                                title = title,
+                                subTitle = subTitle,
+                                posterPath = posterPath,
+                                url = finalDownloadUrl,
+                                fileName = fileName,
+                                mediaType = mediaType,
+                                tmdbId = tmdbId,
+                                seasonNumber = seasonNumber,
+                                episodeNumber = episodeNumber,
+                                totalSize = if (detectedSize > 0) detectedSize else 0L,
+                                status = DownloadStatus.QUEUED,
+                                mimeType = (validationResult as? SourceValidationResult.Success)?.contentType ?: if (finalDownloadUrl.contains(".m3u8")) "application/x-mpegURL" else "video/mp4"
+                            )
+                            downloadManager.startDownload(task)
+                            Toast.makeText(context, "Download iniciado no RONYCINE", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        }
                     }
                 )
             }

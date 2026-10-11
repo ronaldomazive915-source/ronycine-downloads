@@ -43,7 +43,6 @@ enum class ScreenRoute(val route: String, val title: String) {
     SEARCH("search", "Explorar"),
     CALENDAR("calendar", "Calendário"),
     AI_SUPPORT("ai_support", "Suporte AI"),
-    TV_LIVE("tv", "TV ao Vivo"),
     PROFILE("profile", "Perfil"),
     TRENDING("trending", "Em Alta"),
     MOVIES("movies", "Filmes"),
@@ -78,10 +77,9 @@ fun BottomNav(
     val titleHome = com.example.util.stringI18n("nav.home")
     val titleExplore = com.example.util.stringI18n("nav.explore")
     val titleCalendar = com.example.util.stringI18n("nav.calendar")
-    val titleLiveTv = com.example.util.stringI18n("nav.liveTV")
     val titleProfile = com.example.util.stringI18n("nav.profile")
 
-    val navItems = remember(titleHome, titleExplore, titleCalendar, titleLiveTv, titleProfile) {
+    val navItems = remember(titleHome, titleExplore, titleCalendar, titleProfile) {
         listOf(
             NavItemData(
                 route = ScreenRoute.HOME.route,
@@ -102,15 +100,8 @@ fun BottomNav(
                 title = titleCalendar,
                 selectedIcon = Icons.Filled.CalendarMonth,
                 unselectedIcon = Icons.Outlined.CalendarMonth,
-                isCenterButton = true,
+                isCenterButton = false,
                 testTag = "nav_item_calendar"
-            ),
-            NavItemData(
-                route = ScreenRoute.TV_LIVE.route,
-                title = titleLiveTv,
-                selectedIcon = Icons.Filled.LiveTv,
-                unselectedIcon = Icons.Outlined.LiveTv,
-                testTag = "nav_item_tv"
             ),
             NavItemData(
                 route = ScreenRoute.PROFILE.route,
@@ -159,7 +150,6 @@ fun BottomNav(
                 val isSelected = currentRoute == item.route ||
                         (item.route == ScreenRoute.SEARCH.route && currentRoute == "search") ||
                         (item.route == ScreenRoute.CALENDAR.route && (currentRoute == "calendar" || currentRoute == ScreenRoute.CALENDAR.route)) ||
-                        (item.route == ScreenRoute.TV_LIVE.route && (currentRoute == "tv" || currentRoute.startsWith("tv/"))) ||
                         (item.route == ScreenRoute.PROFILE.route && (currentRoute == "profile" || currentRoute == ScreenRoute.PROFILE.route))
 
                 if (item.isCenterButton) {

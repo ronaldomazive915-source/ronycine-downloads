@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
@@ -107,6 +108,38 @@ fun SearchScreen(
     val filterMinRating by viewModel.exploreMinRatingFilter.collectAsState()
     val sortOption by viewModel.exploreSortOption.collectAsState()
 
+    val context = LocalContext.current
+    val searchHistoryPrefs = remember { context.getSharedPreferences("ronycine_search_history", android.content.Context.MODE_PRIVATE) }
+    var searchHistoryList by remember {
+        val raw = searchHistoryPrefs.getString("recent_queries", null)
+        val initial = if (!raw.isNullOrBlank()) {
+            try {
+                org.json.JSONArray(raw).let { array ->
+                    (0 until array.length()).map { array.getString(it) }
+                }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        } else emptyList()
+        mutableStateOf(initial)
+    }
+
+    val saveSearchTerm: (String) -> Unit = remember(searchHistoryPrefs) {
+        { term ->
+            val trimmed = term.trim()
+            if (trimmed.isNotBlank()) {
+                val current = searchHistoryList.toMutableList()
+                current.removeAll { it.equals(trimmed, ignoreCase = true) }
+                current.add(0, trimmed)
+                val updated = current.take(5)
+                searchHistoryList = updated
+                val jsonArray = org.json.JSONArray()
+                updated.forEach { jsonArray.put(it) }
+                searchHistoryPrefs.edit().putString("recent_queries", jsonArray.toString()).apply()
+            }
+        }
+    }
+
     var showFilterSheet by rememberSaveable { mutableStateOf(false) }
 
     // Count of active non-default filters
@@ -169,10 +202,31 @@ fun SearchScreen(
                 ExploreHeaderSection(
                     searchQuery = searchQuery,
                     activeFiltersCount = activeFiltersCount,
-                    onQueryChanged = { viewModel.onExploreSearchQueryChanged(it) },
+                    searchHistory = searchHistoryList,
+                    onQueryChanged = { newQuery ->
+                        viewModel.onExploreSearchQueryChanged(newQuery)
+                    },
                     onClearQuery = {
                         viewModel.clearExploreSearch()
                         focusManager.clearFocus()
+                    },
+                    onSelectHistoryTerm = { selectedTerm ->
+                        viewModel.onExploreSearchQueryChanged(selectedTerm)
+                        saveSearchTerm(selectedTerm)
+                    },
+                    onRemoveHistoryTerm = { termToRemove ->
+                        val updated = searchHistoryList.filter { it != termToRemove }
+                        searchHistoryList = updated
+                        val jsonArray = org.json.JSONArray()
+                        updated.forEach { jsonArray.put(it) }
+                        searchHistoryPrefs.edit().putString("recent_queries", jsonArray.toString()).apply()
+                    },
+                    onClearAllHistory = {
+                        searchHistoryList = emptyList()
+                        searchHistoryPrefs.edit().remove("recent_queries").apply()
+                    },
+                    onSearchSubmitted = { submittedQuery ->
+                        saveSearchTerm(submittedQuery)
                     },
                     onOpenFilters = { showFilterSheet = true }
                 )
@@ -284,8 +338,13 @@ fun SearchScreen(
 private fun ExploreHeaderSection(
     searchQuery: String,
     activeFiltersCount: Int,
+    searchHistory: List<String> = emptyList(),
     onQueryChanged: (String) -> Unit,
     onClearQuery: () -> Unit,
+    onSelectHistoryTerm: (String) -> Unit = {},
+    onRemoveHistoryTerm: ((String) -> Unit)? = null,
+    onClearAllHistory: (() -> Unit)? = null,
+    onSearchSubmitted: ((String) -> Unit)? = null,
     onOpenFilters: () -> Unit
 ) {
     Column {
@@ -298,7 +357,12 @@ private fun ExploreHeaderSection(
         ExploreSearchBar(
             query = searchQuery,
             onQueryChanged = onQueryChanged,
-            onClearQuery = onClearQuery
+            onClearQuery = onClearQuery,
+            searchHistory = searchHistory,
+            onSelectHistoryTerm = onSelectHistoryTerm,
+            onRemoveHistoryTerm = onRemoveHistoryTerm,
+            onClearAllHistory = onClearAllHistory,
+            onSearchSubmitted = onSearchSubmitted
         )
     }
 }
@@ -472,68 +536,197 @@ private fun ExploreSearchBar(
     query: String,
     onQueryChanged: (String) -> Unit,
     onClearQuery: () -> Unit,
+    searchHistory: List<String> = emptyList(),
+    onSelectHistoryTerm: (String) -> Unit = {},
+    onRemoveHistoryTerm: ((String) -> Unit)? = null,
+    onClearAllHistory: (() -> Unit)? = null,
+    onSearchSubmitted: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        color = DarkSurface,
-        shape = RoundedCornerShape(12.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder.copy(alpha = 0.4f))
-    ) {
-        Row(
+    var isFocused by remember { mutableStateOf(false) }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Search,
-                contentDescription = "Buscar",
-                tint = BrandRed,
-                modifier = Modifier.size(20.dp)
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            color = DarkSurface,
+            shape = RoundedCornerShape(12.dp),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (isFocused) BrandRed.copy(alpha = 0.8f) else CardBorder.copy(alpha = 0.4f)
             )
-
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChanged,
-                textStyle = TextStyle(
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                ),
-                cursorBrush = SolidColor(BrandRed),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = {}),
+        ) {
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .testTag("explore_search_input"),
-                decorationBox = { innerTextField ->
-                    if (query.isEmpty()) {
-                        Text(
-                            text = "Buscar filmes, séries, animes e doramas...",
-                            color = Color.Gray,
-                            fontSize = 13.sp
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Buscar",
+                    tint = BrandRed,
+                    modifier = Modifier.size(20.dp)
+                )
+
+                BasicTextField(
+                    value = query,
+                    onValueChange = {
+                        onQueryChanged(it)
+                    },
+                    textStyle = TextStyle(
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    ),
+                    cursorBrush = SolidColor(BrandRed),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            if (query.isNotBlank()) {
+                                onSearchSubmitted?.invoke(query)
+                            }
+                        }
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { focusState ->
+                            isFocused = focusState.isFocused
+                        }
+                        .testTag("explore_search_input"),
+                    decorationBox = { innerTextField ->
+                        if (query.isEmpty()) {
+                            Text(
+                                text = "Buscar filmes, séries, animes e doramas...",
+                                color = Color.Gray,
+                                fontSize = 13.sp
+                            )
+                        }
+                        innerTextField()
+                    }
+                )
+
+                if (query.isNotEmpty()) {
+                    IconButton(
+                        onClick = onClearQuery,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Limpar",
+                            tint = Color.LightGray,
+                            modifier = Modifier.size(16.dp)
                         )
                     }
-                    innerTextField()
                 }
-            )
+            }
+        }
 
-            if (query.isNotEmpty()) {
-                IconButton(
-                    onClick = onClearQuery,
-                    modifier = Modifier.size(24.dp)
+        // Show search history chips when the search bar is focused
+        AnimatedVisibility(
+            visible = isFocused && searchHistory.isNotEmpty(),
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Limpar",
-                        tint = Color.LightGray,
-                        modifier = Modifier.size(16.dp)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.History,
+                            contentDescription = null,
+                            tint = Color.Gray,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = "Pesquisas recentes",
+                            color = Color.Gray,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    if (onClearAllHistory != null) {
+                        Text(
+                            text = "Limpar tudo",
+                            color = BrandRed,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onClearAllHistory() }
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .testTag("clear_search_history_btn")
+                        )
+                    }
+                }
+
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    contentPadding = PaddingValues(vertical = 2.dp)
+                ) {
+                    items(searchHistory) { term ->
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = DarkSurfaceVariant,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CardBorder.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    onSelectHistoryTerm(term)
+                                }
+                                .testTag("search_history_chip_${term.lowercase().replace(" ", "_")}")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.History,
+                                    contentDescription = null,
+                                    tint = BrandRed,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = term,
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                if (onRemoveHistoryTerm != null) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remover $term",
+                                        tint = Color.Gray,
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .clip(CircleShape)
+                                            .clickable {
+                                                onRemoveHistoryTerm(term)
+                                            }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

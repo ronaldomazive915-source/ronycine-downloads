@@ -286,18 +286,6 @@ fun QuickMenuSheet(
                             )
                         }
 
-                        item {
-                            DrawerMenuItem(
-                                icon = Icons.Default.Tv,
-                                title = "TV ao Vivo",
-                                isSelected = currentRoute == ScreenRoute.TV_LIVE.route,
-                                isAccent = true,
-                                onClick = {
-                                    onDismiss()
-                                    onNavigate(ScreenRoute.TV_LIVE.route)
-                                }
-                            )
-                        }
 
                         item {
                             DrawerMenuItem(
